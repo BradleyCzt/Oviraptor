@@ -72,3 +72,62 @@ Worker 只有 homogeneous_v1 业务画像，任务由主管动态选择；七个
 
 每批次完成后在本文末尾追加一节：改动路径、测试命令与精确结果、未完成项。
 未完成必须写「未完成」。
+
+## 批次记录（2026-10-12 接手会话）
+
+### 环境基线
+
+- Docker Desktop 29.8.2 + 钉死镜像 `sha256:114c7a44…`（Hub 按 digest 拉取，linux/arm64、/usr/bin/python3 3.11、无卷、Id 与钉死值一致）。
+- `cargo test --lib homogeneous -- --test-threads=1`：**128 passed / 0 failed**（与交接记录一致；缺镜像时为 126/2，属设计内 coverage gap）。
+
+### 批次 A：target/review 同链正负集成——完成
+
+新增 `src-tauri/src/commands/agent_tests_homogeneous_execution.rs`（9 个集成测试，全部驱动生产通道，无手写回执）：
+
+| 测试 | 覆盖 |
+|---|---|
+| target_branch_executes_registered_three_side_gets_and_freezes_signed_fact | 正向：注册三侧 GET、身份绑定 cookie、签名冻结事实、reported→accept、capability 全撤销、槽位释放、target 车道 0 费用、authorization 记账 3 收 0 悬 |
+| review_branch_independent_paid_reviewer_confirms_and_publishes_single_finding | 三车道同链：target→独立付费复核 confirmed→`sentinel_findings` 唯一发布→真实容器 parser→goal_ready→stop(goal_reached) 收官；恰好 2 次付费 POST |
+| reviewer_same_as_producer_or_unaccepted_candidate_is_refused | 产出者自审拒（assign 闸）；未验收候选连草稿都不产生（decompose 拒 `slice_not_in_original_candidates`） |
+| target_branch_without_control_group_or_wrong_scope_is_refused | 无控制组：无草稿可物化；（拆分出的 target_lane_paid_request_lease_is_refused_by_contract 覆盖付费租约契约拒绝） |
+| unverified_target_never_confirms_or_publishes | 服务端正确隔离（伪匿名响应）→ verified=false → confirmed 复核被 `confirmation_without_controls` 拒；0 发布 |
+| tampered_fact_or_sdk_receipt_blocks_review_acceptance | execution_facts 与 agent_specialist_calls 双不可变触发器拦截篡改 UPDATE；0 发布 |
+| replay_or_expired_attempt_blocks_late_target_delivery | 同 attempt 重放拒；过期后迟到投递拒；wire 恒为恰好 3 个 GET |
+| lane_exclusivity_survives_timeout_reclaim | 双控制组：独占期间第二 target 派发拒（lane_quota_exceeded）；过期回收后重新可派发（需先补充替换 Worker） |
+
+测试过程暴露并修复的 **6 个生产缺陷**（此前该链从未被执行过）：
+
+1. `check_target_scope`/`validate_assign`：`reserved_tokens != 0` 误拒——车道不变量是"零付费请求"，tokens 由粗粒度准入回显，改为 `< 0` 拒绝（agent_homogeneous_execution.rs）。
+2. `drafts` SQL 联表列名歧义 `SELECT id` → `SELECT f.id`（agent_homogeneous_execution.rs）。
+3. probe 预算复验自锁：`budget::target::claim` 记 Reserve+Forfeit（indeterminate+1，直到 `receive` 对账），而 claim 内第二/三次 `authorization_probe_authority` 走严格 `require_determinate` 必炸。新增 `require_determinate_tolerating_own_probe_claim`（admission.rs，target_requests 恰好容忍 1 笔在途）+ `require_on_during_own_probe`（execution_policy.rs）+ `check_target_scope_during_own_probe`，authority 调用按相位传 `during_own_claim`（claim 前严格=false，claim 后/响应事务内=true；共 4 处调用点 + attempt_identity.rs 测试签名）。
+4. `accept_on` 发布键 `format!("…:{}", target["id"])` 用 JsonValue Display → record_key 带引号；改 `as_str()`。
+5. `dispatch_degraded_pending` 对任意首个 pending 切片硬编码 `read_only_analysis`/`evidence.read`——执行车道切片会铸造自相矛盾决策并毒化整轮。修复：降级路径只挑 read_only 切片（apply.rs）。
+6. `reclaim_expired_worker` 只释放 `agent_lane_slots`，不清执行载体写入的 `agent_lane_leases`/`agent_capability_leases` → UNIQUE(scan,attempt,target,lane) 使该车道在本 attempt 永久锁死。修复：回收时调用 `release_on`（pool.rs），与验收路径同一语义。
+
+附带：出生夹具新增 `frozen_tool_supply_original_birth_with_task_controls`（多控制组，经 `save_authorization_control_in` 出生期登记——启动后不可补登记，这本身是 `authorization_control_task_binding_invalid` 的正确防卫）。
+
+### 批次 B：结算与状态机复查——部分完成
+
+已由批次 A 测试锁定的部分：target 车道 0 费用结算、review 车道恰好 1 次 model_requests consume、`agent_lane_slots` 验收后释放、capability 验收后全撤销、过期回收释放槽位与租约（本批修复）、`goal_ready` 三条件（parsers>0 ∧ controls>0 ∧ reviewed==controls）经生产查询验证。
+
+**未完成**：Root finally/重启回收路径（agent_backend_homogeneous.rs 收尾清理块）无专项测试；解析回调重复验证运行环境的优化未做（交接明示"可优化，不能减少取消/撤销检查"）。
+
+### 批次 C：孤儿清理接线——前半完成
+
+- App 重启入口：`lib.rs` run() 内一次性 detached 线程 `recover_orphans_once("app_restart")`，失败 eprintln 上报不阻塞启动。
+- 新执行入口：`agent_backend_homogeneous.rs::run_homogeneous_agent_target` 首行 `recover_orphans_once("homogeneous_execution_entry")`，观测走 `append_runner_log`，非致命。
+- 新增 2 条真实容器测试（orphans.rs）：只回收归属明确且未被 claim 的孤儿（活 flock=claimed 不动）；guardian 中途死亡记录保留并上报 `container_parser_orphan_creation_or_runtime_unverified`。
+- **未完成**：真实模型验证（闭环 6）——需要配置中心有效 DeepSeek flash 凭据，本会话无该资源；保留为待办，禁止用旧注入 pro Key。
+
+### 批次 D：回归与记录——进行中
+
+| 命令 | 结果 |
+|---|---|
+| `cargo test --lib homogeneous -- --test-threads=1` | 128 passed / 0 failed |
+| 9 个新执行链测试（逐一） | 各 1 passed / 0 failed |
+| `cargo test --lib container_parser` / `orphans` | 8 passed / 2 passed |
+| `cargo clippy --all-targets -- -D warnings` | **0 errors**（含清理 26 条 clippy 1.99 存量告警） |
+| `npm run build` | vue-tsc + Vite 通过 |
+| `cargo test --lib -- --test-threads=1`（全量） | 结果见提交信息（后台执行） |
+
+**未完成**：安装测试 App 端到端（闭环 7）——需要构建安装包与两名合成账号的界面操作，本会话未执行；不得据此宣布 Master Plan 或执行链验收通过。沙箱证据仍仅覆盖 macOS arm64 本机容器环境。
