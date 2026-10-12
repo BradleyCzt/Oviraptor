@@ -117,7 +117,7 @@ Worker 只有 homogeneous_v1 业务画像，任务由主管动态选择；七个
 - App 重启入口：`lib.rs` run() 内一次性 detached 线程 `recover_orphans_once("app_restart")`，失败 eprintln 上报不阻塞启动。
 - 新执行入口：`agent_backend_homogeneous.rs::run_homogeneous_agent_target` 首行 `recover_orphans_once("homogeneous_execution_entry")`，观测走 `append_runner_log`，非致命。
 - 新增 2 条真实容器测试（orphans.rs）：只回收归属明确且未被 claim 的孤儿（活 flock=claimed 不动）；guardian 中途死亡记录保留并上报 `container_parser_orphan_creation_or_runtime_unverified`。
-- **未完成**：真实模型验证（闭环 6）——需要配置中心有效 DeepSeek flash 凭据，本会话无该资源；保留为待办，禁止用旧注入 pro Key。
+- **移交上游**：真实模型验证（闭环 6）需配置中心有效 DeepSeek flash 凭据，属 main 分支维护者的验收职责（2026-10-12 会话确认），不在本分支范围；禁止用旧注入 pro Key 的约束随交接保留。
 
 ### 批次 D：回归与记录——进行中
 
@@ -130,4 +130,4 @@ Worker 只有 homogeneous_v1 业务画像，任务由主管动态选择；七个
 | `npm run build` | vue-tsc + Vite 通过 |
 | `cargo test --lib -- --test-threads=1`（全量） | 结果见提交信息（后台执行） |
 
-**未完成**：安装测试 App 端到端（闭环 7）——需要构建安装包与两名合成账号的界面操作，本会话未执行；不得据此宣布 Master Plan 或执行链验收通过。沙箱证据仍仅覆盖 macOS arm64 本机容器环境。
+**移交上游**：安装测试 App 端到端（闭环 7）与跨平台声明属 main 分支维护者的验收职责（2026-10-12 会话确认），不在本分支范围。沙箱证据仍仅覆盖 macOS arm64 本机容器环境，不得据此宣称 Windows/Linux 或整个 Master Plan 完成。
