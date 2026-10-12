@@ -212,6 +212,21 @@ pub fn run() {
     if let Some(exit_code) = tool_supply::container_parser::guardian_entry() {
         std::process::exit(exit_code);
     }
+    // App restart entry: reclaim parser containers orphaned by a guardian
+    // that died with a previous process. One-shot and detached so a slow or
+    // unavailable Docker daemon cannot block launch; live guardians keep
+    // their owner lock and are skipped, and failures are only reported.
+    if let Err(error) = std::thread::Builder::new()
+        .name("oviraptor-container-orphan-recovery".into())
+        .spawn(|| {
+            let _ = tool_supply::container_parser::recover_orphans_once(
+                "app_restart",
+                &|line| eprintln!("[oviraptor] {line}"),
+            );
+        })
+    {
+        eprintln!("[oviraptor] container_parser_orphan_recovery:app_restart:spawn_failed:{error}");
+    }
     let context = tauri::generate_context!();
     if let Err(error) = startup_profile::preflight(&context.config().identifier) {
         eprintln!("Oviraptor acceptance profile rejected: {error}");

@@ -1,6 +1,14 @@
 /// prepare has activated the frozen homogeneous task and released its legacy owner.
 /// Keep one parent supervisor alive across the original paid Root decisions.
 fn run_homogeneous_agent_target(context: &mut AgentRunContext) -> AgentTargetOutcome {
+    // New-execution entry: reclaim parser containers orphaned by earlier
+    // crashed attempts before this run can create new ones. A guardian still
+    // holding its owner lock is a claimed program and is skipped; failures
+    // are logged into the runner log and never block the run.
+    let _ = crate::tool_supply::container_parser::recover_orphans_once(
+        "homogeneous_execution_entry",
+        &|line| append_runner_log(&context.log_path, line),
+    );
     use crate::agent_runtime::multi_agent::{
         lease, parent_invocation_owner::ParentInvocationOwner, supervisor::WorkerSupervisor,
     };
@@ -131,7 +139,7 @@ fn run_homogeneous_root_loop(
                 ) {
                     let reason = intent::latest_stop_reason(&db, &task.task_id)
                         .map_err(|error| error.reason_code.to_string())?;
-                    return Ok(homogeneous_target_terminal(&db, &task, reason.as_deref())?);
+                    return homogeneous_target_terminal(&db, &task, reason.as_deref());
                 }
                 pool::reclaim_expired_for_task(&db, &task)
                     .map_err(|error| error.reason_code.to_string())?;

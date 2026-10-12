@@ -196,3 +196,200 @@ impl Runtime {
         }
     }
 }
+
+/// Entry wiring shared by the App restart hook and the new homogeneous
+/// execution hook. Only journal-attributed containers whose owner lock is
+/// free are reclaimed: a guardian still holding its flock is a claimed
+/// program and is skipped, never replayed. Every outcome is reported through
+/// `log` and the return value; both wired entries treat failure as
+/// non-fatal so an unavailable runtime cannot block startup or a run.
+pub(crate) fn recover_orphans_once(scope: &str, log: &dyn Fn(&str)) -> Result<Vec<Value>, String> {
+    match Runtime::inspect().and_then(|runtime| runtime.recover_orphans()) {
+        Ok(receipts) => {
+            log(&format!(
+                "container_parser_orphan_recovery:{scope}:recovered={}",
+                serde_json::to_string(&receipts).unwrap_or_else(|_| "[]".into())
+            ));
+            Ok(receipts)
+        }
+        Err(error) => {
+            log(&format!(
+                "container_parser_orphan_recovery:{scope}:failed:{error}"
+            ));
+            Err(error)
+        }
+    }
+}
+
+#[cfg(all(test, target_os = "macos"))]
+mod entry_recovery_tests {
+    use super::*;
+
+    fn write_private_journal(path: &std::path::Path, bytes: &[u8]) {
+        use std::os::unix::fs::OpenOptionsExt;
+        let mut file = fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .mode(0o600)
+            .open(path)
+            .expect("private journal created");
+        file.write_all(bytes).expect("private journal written");
+    }
+
+    fn journal_bytes(nonce: &str, container_id: Option<&str>, digest: &str) -> Vec<u8> {
+        serde_json::to_vec(&json!({
+            "schemaVersion":1,
+            "name":format!("oviraptor-parser-{nonce}"),
+            "nonce":nonce,
+            "containerId":container_id,
+            "runtimeDigest":digest
+        }))
+        .expect("journal encoded")
+    }
+
+    fn create_labelled_container(runtime: &Runtime, scratch: &Scratch, nonce: &str) -> String {
+        let name = format!("oviraptor-parser-{nonce}");
+        let label = format!("{OWN_LABEL}={nonce}");
+        let created = runtime
+            .command(
+                scratch,
+                &["create", "--pull=never", "--name", &name, "--label", &label, IMAGE],
+                None,
+                8192,
+                Duration::from_secs(15),
+                &|| false,
+            )
+            .expect("container created");
+        assert!(
+            created.success && created.stop_reason.is_empty(),
+            "{}",
+            String::from_utf8_lossy(&created.stderr)
+        );
+        String::from_utf8(created.stdout)
+            .expect("container id decoded")
+            .trim()
+            .to_string()
+    }
+
+    #[test]
+    fn entry_recovery_reclaims_only_unclaimed_journal_orphans() {
+        let runtime = Runtime::inspect().unwrap();
+        // A claimed program: the live owner keeps its flock, so recovery must
+        // not touch its container or its journal.
+        let claimed = Scratch::new().unwrap();
+        let claimed_nonce = uuid::Uuid::new_v4().to_string();
+        let claimed_id = create_labelled_container(&runtime, &claimed, &claimed_nonce);
+        write_private_journal(
+            &claimed.path.join("container.json"),
+            &journal_bytes(&claimed_nonce, Some(&claimed_id), runtime.digest()),
+        );
+        // A real orphan: the owning guardian is gone, its lock is free.
+        let orphan = Scratch::new().unwrap();
+        let orphan_nonce = uuid::Uuid::new_v4().to_string();
+        let orphan_id = create_labelled_container(&runtime, &orphan, &orphan_nonce);
+        let orphan_path = orphan.path.clone();
+        write_private_journal(
+            &orphan.path.join("container.json"),
+            &journal_bytes(&orphan_nonce, Some(&orphan_id), runtime.digest()),
+        );
+        drop(orphan);
+        // Unattributed neighbours are ignored, never treated as errors.
+        let stranger = std::env::temp_dir().join("oviraptor-parser-runtime-not-a-uuid");
+        let _ = fs::remove_dir_all(&stranger);
+        let _ = fs::remove_file(&stranger);
+        fs::create_dir(&stranger).unwrap();
+        let logs = std::cell::RefCell::new(Vec::<String>::new());
+        let receipts =
+            recover_orphans_once("entry_test", &|line| logs.borrow_mut().push(line.to_string()))
+                .expect("entry recovery succeeds");
+        assert!(receipts.iter().any(|receipt| {
+            receipt["containerId"] == orphan_id.as_str()
+                && receipt["executionReplayed"] == false
+                && receipt["cleanupVerified"] == true
+                && receipt["reason"] == "orphaned_guardian"
+        }));
+        assert!(!receipts
+            .iter()
+            .any(|receipt| receipt["containerId"] == claimed_id.as_str()));
+        let removed = runtime
+            .command(
+                &claimed,
+                &["container", "inspect", &orphan_id],
+                None,
+                8192,
+                Duration::from_secs(5),
+                &|| false,
+            )
+            .unwrap();
+        assert!(!removed.success);
+        assert!(
+            String::from_utf8_lossy(&removed.stderr).contains("No such container:"),
+            "orphan container must be removed"
+        );
+        assert!(!orphan_path.exists(), "orphan journal directory reclaimed");
+        let untouched = runtime
+            .command(
+                &claimed,
+                &["container", "inspect", &claimed_id],
+                None,
+                512 * 1024,
+                Duration::from_secs(5),
+                &|| false,
+            )
+            .unwrap();
+        assert!(untouched.success, "claimed container must survive");
+        assert!(claimed
+            .path
+            .join("container.json")
+            .exists());
+        let messages = logs.borrow();
+        assert_eq!(messages.len(), 1);
+        assert!(
+            messages[0]
+                .starts_with("container_parser_orphan_recovery:entry_test:recovered=[")
+        );
+        // Teardown of the claimed fixture.
+        let _ = runtime.command(
+            &claimed,
+            &["rm", "--force", &claimed_id],
+            None,
+            8192,
+            Duration::from_secs(5),
+            &|| false,
+        );
+        fs::remove_file(claimed.path.join("container.json")).unwrap();
+        fs::remove_dir_all(&stranger).unwrap();
+    }
+
+    #[test]
+    fn entry_recovery_failure_is_reported_and_preserves_the_record() {
+        let runtime = Runtime::inspect().unwrap();
+        let unacknowledged = Scratch::new().unwrap();
+        let preserved = unacknowledged.path.clone();
+        // The guardian died between the pre-create and post-create journal
+        // writes: the create outcome was never acknowledged.
+        write_private_journal(
+            &unacknowledged.path.join("container.json"),
+            &journal_bytes(&uuid::Uuid::new_v4().to_string(), None, runtime.digest()),
+        );
+        drop(unacknowledged);
+        let logs = std::cell::RefCell::new(Vec::<String>::new());
+        let error = recover_orphans_once("entry_failure_test", &|line| {
+            logs.borrow_mut().push(line.to_string())
+        })
+        .expect_err("unacknowledged journal must be reported, not replayed");
+        assert_eq!(
+            error,
+            "container_parser_orphan_creation_or_runtime_unverified"
+        );
+        let messages = logs.borrow();
+        assert_eq!(
+            messages[0],
+            "container_parser_orphan_recovery:entry_failure_test:failed:container_parser_orphan_creation_or_runtime_unverified"
+        );
+        // Uncertainty is preserved for reconciliation, never auto-discarded.
+        assert!(preserved.join("container.json").is_file());
+        fs::remove_file(preserved.join("container.json")).unwrap();
+        fs::remove_dir_all(&preserved).unwrap();
+    }
+}

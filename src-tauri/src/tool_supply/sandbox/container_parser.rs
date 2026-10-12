@@ -21,6 +21,7 @@ const OWN_LABEL: &str = "com.oviraptor.offline-parser-owner";
 const GUARDIAN_ARGUMENT: &str = "--nest-private-parser-guardian-v1";
 #[path = "container_parser/orphans.rs"]
 mod orphans;
+pub(crate) use orphans::recover_orphans_once;
 
 /// Called before Tauri/config/DB initialization. The private carrier has no
 /// host execution or target tools, only the fixed offline container protocol.
