@@ -386,5 +386,6 @@ include!("agent_tests_tool_selection_policy_source.rs");
 include!("agent_tests_tool_selection_deleted_archive.rs");
 include!("agent_tests_tool_execution_readiness.rs");
 include!("agent_tests_homogeneous_parser.rs");
+include!("agent_tests_homogeneous_execution.rs");
 include!("agent_tests_human_recovery_source.rs");
 }
