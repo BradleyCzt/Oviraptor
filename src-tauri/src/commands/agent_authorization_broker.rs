@@ -116,7 +116,7 @@ fn claim_authorization_probe_fresh(
         &tx, &context.scan_id, &context.target_url,
     ).map_err(|_| "authorization_identity_binding_denied".to_string())?;
     authorization_identity_binding(&context.identities, identities, identity)?;
-    let authorized=authorization_probe_authority(&tx,context,child,control,side,identity,url)?;
+    let authorized=authorization_probe_authority(&tx,context,child,control,side,identity,url,false)?;
     let Some(budget) = authorized else { return Err("authorization_capability_or_fencing_denied".into()) };
     let spent: i64 = tx.query_row(
         "SELECT COUNT(*) FROM agent_authorization_probe_claims WHERE child_run_id=?1",
@@ -158,7 +158,7 @@ fn claim_authorization_probe_fresh(
     crate::agent_runtime::multi_agent::budget::target::claim(&tx,&lease,&assignment,
         &authorization_budget_source(child,control,side))?;
     agent_require_frozen_web_plan(&tx,context).map_err(str::to_string)?;
-    if authorization_probe_authority(&tx,context,child,control,side,identity,url)?!=Some(budget) {
+    if authorization_probe_authority(&tx,context,child,control,side,identity,url,true)?!=Some(budget) {
         return Err("authorization_capability_or_fencing_denied".into());
     }
     let (rowid, created_at): (i64, String) = tx.query_row(
@@ -180,9 +180,11 @@ fn claim_authorization_probe_fresh(
     Ok(ClaimedAuthorizationSide { rowid, created_at, actor: lease, worker, originals })
 }
 
+#[allow(clippy::too_many_arguments)]
 pub(super) fn authorization_probe_authority(connection: &rusqlite::Connection, context: &AgentRunContext,
     child: &crate::agent_runtime::multi_agent::scheduler::ScheduledChild,
-    control: &SaveAuthorizationControlInput, side: &str, identity: &str, url: &str)
+    control: &SaveAuthorizationControlInput, side: &str, identity: &str, url: &str,
+    during_own_claim: bool)
     -> Result<Option<i64>,String> {
     crate::agent_runtime::multi_agent::attempts::require_live_for_run(connection,&child.run_id)
         .map_err(|_| "authorization_capability_or_fencing_denied".to_string())?;
@@ -190,7 +192,15 @@ pub(super) fn authorization_probe_authority(connection: &rusqlite::Connection, c
     if homogeneous {
         let root:String=connection.query_row("SELECT coordinator_run_id FROM agent_assignments WHERE id=?1",[&child.assignment_id],|r|r.get(0)).map_err(|e|e.to_string())?;
         let actor=crate::commands::homogeneous_execution::actor_for_root(connection,&root)?;
-        crate::commands::homogeneous_execution::check_target_scope(connection,&actor,&child.assignment_id,&control.contract_key)?;
+        // Before the claim the budget is fully determinate (strict gate). After
+        // the probe claims its side, and again inside the response transaction
+        // before reconciliation, the probe's own single target request is the
+        // exactly-one indeterminate entry the probe-tolerant gate admits.
+        if during_own_claim {
+            crate::commands::homogeneous_execution::check_target_scope_during_own_probe(connection,&actor,&child.assignment_id,&control.contract_key)?;
+        } else {
+            crate::commands::homogeneous_execution::check_target_scope(connection,&actor,&child.assignment_id,&control.contract_key)?;
+        }
     }
     connection.query_row(
         "SELECT (SELECT COUNT(*)*3 FROM agent_authorization_controls scope \
@@ -275,7 +285,7 @@ pub(super) fn execute_authorization_side(
     let connection = db::open(&context.db_path)?;
     agent_require_frozen_web_plan(&connection, context).map_err(str::to_string)?;
     if cancel.is_cancelled() { return Err("authorization_attempt_cancelled".into()); }
-    if authorization_probe_authority(&connection,context,child,control,side,identity_key,url)?.is_none() {
+    if authorization_probe_authority(&connection,context,child,control,side,identity_key,url,true)?.is_none() {
         return Err("authorization_capability_or_fencing_denied".into());
     }
     request=request.timeout(crate::agent_runtime::multi_agent::budget::target::transport_timeout(
@@ -324,7 +334,7 @@ pub(super) fn execute_authorization_side(
     let connection=db::open(&context.db_path)?;
     let tx=rusqlite::Transaction::new_unchecked(&connection,rusqlite::TransactionBehavior::Immediate).map_err(|e|e.to_string())?;
     for row in &fresh_claim.originals { row.verify(&tx)?; }
-    if authorization_probe_authority(&tx,context,child,control,side,identity_key,url)?.is_none() {
+    if authorization_probe_authority(&tx,context,child,control,side,identity_key,url,true)?.is_none() {
         return Err("authorization_capability_or_fencing_denied".into());
     }
     let updated = tx.execute(

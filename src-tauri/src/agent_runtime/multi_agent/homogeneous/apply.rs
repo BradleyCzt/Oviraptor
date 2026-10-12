@@ -367,7 +367,13 @@ fn dispatch_degraded_pending(
     let before = intent::snapshot(db, task)?;
     if !before.inflight_assignments.is_empty() { return Ok(None); }
     let Some(slice) = store::load_slices(db, &task.task_id)?.into_iter().find(|slice|
-        slice.state == "pending" || (slice.state == "rejected" && slice.retry_count < slice.max_retries)
+        // The deterministic fallback dispatches a free read-only model round
+        // with an evidence.read lease. Target/review slices carry exclusive
+        // execution carriers and lane-specific reservation contracts, so they
+        // can never be dispatched by this path; picking one would mint a
+        // self-contradictory decision (hardcoded read-only lane).
+        slice.lane == "read_only_analysis"
+            && (slice.state == "pending" || (slice.state == "rejected" && slice.retry_count < slice.max_retries))
     ) else { return Ok(None); };
     pool::provision_workers(db, task, lease.lease_epoch, task.allowed_parallel)?;
     let Some(worker_id) = pool::worker_ids_in_state(db, &task.root_run_id, "idle")?.into_iter().next() else { return Ok(None); };

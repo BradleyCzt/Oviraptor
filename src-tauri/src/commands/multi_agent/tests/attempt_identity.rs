@@ -112,7 +112,7 @@ fn assignment_attempt_expiry_blocks_dedicated_target_authorities() {
     let (root,context,child,control)=budget_authorization_fixture();let db=db::open(&context.db_path).unwrap();
     db.execute("UPDATE agent_assignment_attempts SET expires_at='2000-01-01' WHERE child_run_id=?1",[&child.run_id]).unwrap();
     let before=receipt_database_snapshot(&db);
-    assert!(authorization_probe_authority(&db,&context,&child,&control,"owner",&control.owner_identity,&control.owner_object_url).is_err());
+    assert!(authorization_probe_authority(&db,&context,&child,&control,"owner",&control.owner_identity,&control.owner_object_url,false).is_err());
     assert!(claim_authorization_probe(&context,&child,&control,"owner",&control.owner_identity,&control.owner_object_url).is_err());
     assert_eq!(receipt_database_snapshot(&db),before);drop(db);std::fs::remove_dir_all(root).unwrap();
 }

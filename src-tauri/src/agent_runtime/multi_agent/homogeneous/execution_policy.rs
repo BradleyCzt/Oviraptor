@@ -103,6 +103,25 @@ pub(crate) fn require_on(
         .ok_or_else(|| "homogeneous_execution_not_frozen_at_birth".into())
 }
 
+/// Inside an authorization probe's own claim/response revalidation the single
+/// claimed target request is indeterminate until reconciled; the budget gate
+/// tolerates exactly that entry. Lease, executable-root and original frozen
+/// binding checks stay identical to require_on.
+pub(crate) fn require_on_during_own_probe(
+    db: &Connection,
+    actor: &lease::CoordinatorLease,
+) -> Result<Binding, String> {
+    lease::validate_coordinator_lease(db, actor)?;
+    lease::require_executable_coordinator(db, actor)?;
+    RootOwner::load_original(db, &actor.root_run_id)?.require_executable(db)?;
+    crate::agent_runtime::multi_agent::budget::admission::require_determinate_tolerating_own_probe_claim(
+        db,
+        &actor.root_run_id,
+    )?;
+    read_original_on(db, &actor.root_run_id)?
+        .ok_or_else(|| "homogeneous_execution_not_frozen_at_birth".into())
+}
+
 /// Historical binding verification never grants a live capability.
 pub(crate) fn read_original_on(db: &Connection, root: &str) -> Result<Option<Binding>, String> {
     let row:Option<(String,String,i64)>=db.query_row("SELECT plan_json,scan_id,attempt_number FROM agent_runs WHERE id=?1 AND root_run_id=id AND backend='native' AND role='coordinator'",[root],|r|Ok((r.get(0)?,r.get(1)?,r.get(2)?))).optional().map_err(|e|e.to_string())?;

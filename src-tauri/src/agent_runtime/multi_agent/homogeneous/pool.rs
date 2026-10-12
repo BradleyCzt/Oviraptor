@@ -287,6 +287,11 @@ pub fn reclaim_expired_worker(
     store::set_slice_state(connection, &assignment.slice_id, "rejected")?;
     // 载体随取消一起关闭（attempt→cancelled、run→terminal），否则租约槽位会虚占。
     super::delivery::close_carrier(connection, assignment_id)?;
+    // 执行/复核载体还持有旧 lane lease 与 capability 租约；回收时必须一并
+    // 释放，否则 UNIQUE(scan,attempt,target,lane) 会让该车道在本 attempt 内
+    // 永远无法再次派发（与验收路径 release_on 的清理保持同一语义）。
+    crate::commands::homogeneous_execution::release_on(connection, &assignment)
+        .map_err(|detail| DecisionError::new(reason::SCHEMA_INVALID, detail))?;
     mark_dead(connection, worker_id)?;
     store::settle_budget(
         connection,

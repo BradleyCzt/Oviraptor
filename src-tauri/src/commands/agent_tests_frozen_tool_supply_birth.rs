@@ -172,6 +172,18 @@ fn frozen_tool_supply_original_birth_with_task(
     with_tools:Option<bool>,make_supply:impl FnOnce(&Path)->Result<crate::tool_supply::frozen_plan::tests::TestSupplyFixture,String>,execution:bool,target:&str,
     prepare:impl FnOnce(&rusqlite::Connection,&Path,&str)->Option<(Vec<String>,String)>,
 ) -> (RootTickFixture,crate::tool_supply::frozen_plan::tests::TestSupplyFixture,Option<JsonValue>){
+    frozen_tool_supply_original_birth_with_task_controls(with_tools,make_supply,execution,target,prepare,&[])
+}
+
+/// Birth variant for fixtures that need more than the default control group:
+/// every extra control is registered through the same operator input path
+/// before the scan starts (controls cannot be added once a task is live).
+#[cfg(unix)]
+fn frozen_tool_supply_original_birth_with_task_controls(
+    with_tools:Option<bool>,make_supply:impl FnOnce(&Path)->Result<crate::tool_supply::frozen_plan::tests::TestSupplyFixture,String>,execution:bool,target:&str,
+    prepare:impl FnOnce(&rusqlite::Connection,&Path,&str)->Option<(Vec<String>,String)>,
+    extra_controls:&[SaveAuthorizationControlInput],
+) -> (RootTickFixture,crate::tool_supply::frozen_plan::tests::TestSupplyFixture,Option<JsonValue>){
     let root = std::env::temp_dir().join(format!("oviraptor-tool-supply-root-{}", Uuid::new_v4()));
     let path = db::initialize(&root).unwrap();
     let supply = make_supply(&path).unwrap();
@@ -215,6 +227,25 @@ fn frozen_tool_supply_original_birth_with_task(
     if let Some((ids,_))=&identities {
         let control=SaveAuthorizationControlInput{scan_id:scan.id.clone(),attempt_number:1,target_url:target.into(),contract_key:"idor|/api/orders".into(),owner_object_url:format!("{target}/api/orders?id=owner"),tester_control_url:format!("{target}/api/orders?id=tester"),object_query_key:"id".into(),owner_object_value:"owner".into(),tester_object_value:"tester".into(),response_object_pointer:"/order/id".into(),owner_identity:ids[0].clone(),tester_identity:ids[1].clone()};
         save_authorization_control_in(&mut db,&root,&control).unwrap();
+    }
+    for control in extra_controls {
+        // The operator drafts the control against the scan being born; the
+        // birth path fills the scan binding exactly like the default control.
+        let bound = SaveAuthorizationControlInput{
+            scan_id: scan.id.clone(),
+            attempt_number: 1,
+            target_url: target.into(),
+            contract_key: control.contract_key.clone(),
+            owner_object_url: control.owner_object_url.clone(),
+            tester_control_url: control.tester_control_url.clone(),
+            object_query_key: control.object_query_key.clone(),
+            owner_object_value: control.owner_object_value.clone(),
+            tester_object_value: control.tester_object_value.clone(),
+            response_object_pointer: control.response_object_pointer.clone(),
+            owner_identity: control.owner_identity.clone(),
+            tester_identity: control.tester_identity.clone(),
+        };
+        save_authorization_control_in(&mut db,&root,&bound).unwrap();
     }
     if execution {
         // This fixture input exists before user confirmation/private birth.

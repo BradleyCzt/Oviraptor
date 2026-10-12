@@ -82,7 +82,7 @@ pub(crate) fn read_fact(
     let (raw,hash,tag):(String,String,Vec<u8>)=db.query_row("SELECT fact_json,fact_hash,signature FROM main.agent_homogeneous_execution_facts WHERE id=?1 AND root_run_id=?2",params![id,actor.root_run_id],|r|Ok((r.get(0)?,r.get(1)?,r.get(2)?))).map_err(|_|"homogeneous_execution_original_fact_missing")?;
     let value: Value =
         serde_json::from_str(&raw).map_err(|_| "homogeneous_execution_fact_invalid")?;
-    if value.to_string() != raw
+    if value != raw
         || stable_hash(&raw) != hash
         || value["id"] != id
         || value["rootRunId"] != actor.root_run_id
@@ -113,6 +113,14 @@ fn assignment(
     }
     Ok(a)
 }
+fn target_scope_holds(a: &h::types::HomogeneousAssignment, key: &str) -> bool {
+    a.lane == "target_touching"
+        && a.scope_kind == "asset_id"
+        && a.scope_value == format!("target-control:{key}")
+        && a.capability_lease == ["authorization_probe"]
+        && a.reserved_tokens >= 0
+        && a.reserved_requests == 0
+}
 pub(crate) fn check_target_scope(
     db: &Connection,
     actor: &CoordinatorLease,
@@ -120,13 +128,28 @@ pub(crate) fn check_target_scope(
     key: &str,
 ) -> Result<(), String> {
     let a = assignment(db, actor, id)?;
-    if a.lane != "target_touching"
-        || a.scope_kind != "asset_id"
-        || a.scope_value != format!("target-control:{key}")
-        || a.capability_lease != ["authorization_probe"]
-        || a.reserved_tokens != 0
-        || a.reserved_requests != 0
-    {
+    if !target_scope_holds(&a, key) {
+        return Err("homogeneous_execution_target_scope_denied".into());
+    }
+    Ok(())
+}
+/// Called from the authorization probe's own claim/response revalidation,
+/// where the probe's single claimed target request is legitimately
+/// indeterminate until its outcome receipt reconciles it.
+pub(crate) fn check_target_scope_during_own_probe(
+    db: &Connection,
+    actor: &CoordinatorLease,
+    id: &str,
+    key: &str,
+) -> Result<(), String> {
+    h::execution_policy::require_on_during_own_probe(db, actor)?;
+    let a = h::store::load_assignment(db, id)
+        .map_err(|e| e.detail)?
+        .ok_or("homogeneous_execution_assignment_missing")?;
+    if a.coordinator_run_id != actor.root_run_id || a.worker_profile_id != "homogeneous_v1" {
+        return Err("homogeneous_execution_worker_binding_invalid".into());
+    }
+    if !target_scope_holds(&a, key) {
         return Err("homogeneous_execution_target_scope_denied".into());
     }
     Ok(())
@@ -170,6 +193,7 @@ fn claim(
     }
     Ok((a, child))
 }
+#[allow(clippy::too_many_arguments)]
 fn node_report(
     db: &Connection,
     actor: &CoordinatorLease,
@@ -243,8 +267,7 @@ pub(super) fn run_target(
             &control.tester_control_url,
         ),
     ] {
-        let (r, artifact) =
-            execute_authorization_side(&scoped, &child, &control, side, identity, url)?;
+        let (r, artifact) = execute_authorization_side(&scoped, &child, &control, side, identity, url)?;
         side_refs.push(json!({"name":side,"artifactId":artifact}));
         responses.push(r);
     }
@@ -470,7 +493,7 @@ pub(crate) fn deliver_review(
     let raw:String=tx.query_row("SELECT request_json FROM agent_specialist_calls WHERE assignment_id=?1 AND child_run_id=?2",params![child.assignment_id,child.run_id],|r|r.get(0)).map_err(|e|e.to_string())?;
     let request: Value = serde_json::from_str(&raw).map_err(|e| e.to_string())?;
     if request["messages"][0]["content"] != REVIEW_SYSTEM
-        || request["messages"][1]["content"] != data.to_string()
+        || request["messages"][1]["content"] != data
     {
         return Err("homogeneous_review_original_bundle_changed".into());
     }
@@ -568,7 +591,10 @@ pub(crate) fn accept_on(
             &actor.target_key,
             AGENT_VULNERABILITY_STAGE,
             "vulnerability",
-            &format!("homogeneous-authorization:{}", target["id"]),
+            &format!(
+                "homogeneous-authorization:{}",
+                target["id"].as_str().unwrap_or_default()
+            ),
             "跨账号访问已登记的他人对象",
             "high",
             &record,
@@ -606,7 +632,7 @@ pub(crate) fn drafts(
             &format!("target-control:{key}"),
         ));
     }
-    let mut q=db.prepare("SELECT id FROM agent_homogeneous_execution_facts f JOIN agent_assignments a ON a.id=f.assignment_id AND a.attempt=f.attempt WHERE f.root_run_id=?1 AND f.kind='target' AND a.state='accepted' ORDER BY f.id").map_err(|e|e.to_string())?;
+    let mut q=db.prepare("SELECT f.id FROM agent_homogeneous_execution_facts f JOIN agent_assignments a ON a.id=f.assignment_id AND a.attempt=f.attempt WHERE f.root_run_id=?1 AND f.kind='target' AND a.state='accepted' ORDER BY f.id").map_err(|e|e.to_string())?;
     let ids = q
         .query_map([&task.root_run_id], |r| r.get::<_, String>(0))
         .map_err(|e| e.to_string())?
@@ -676,9 +702,13 @@ pub(crate) fn validate_assign(
 ) -> Result<(), String> {
     h::execution_policy::require_on(db, actor)?;
     if s.lane == "target_touching" {
+        // The lane invariant is "zero paid model rounds" (reserved_requests == 0).
+        // reserved_tokens may be any non-negative figure the coarse Phase-1
+        // admission echoes back; without a request reservation it can never buy
+        // a specialist dispatch, and it is settled back at the verdict.
         if body.capability_lease != ["authorization_probe"]
             || body.reserved_requests != 0
-            || body.reserved_tokens != 0
+            || body.reserved_tokens < 0
         {
             return Err("homogeneous_target_lease_contract_invalid".into());
         }

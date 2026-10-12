@@ -41,6 +41,27 @@ fn require_dimensions(db: &Connection, root: &str) -> Result<(), String> {
     Ok(())
 }
 
+/// Authorization-probe revalidation window: the probe's own claimed target
+/// request stays indeterminate by contract until its outcome receipt is
+/// reconciled. The target lane is exclusive and serial, so at most one such
+/// entry can exist and it belongs to the calling probe. Every other dimension
+/// and every other unknown cost keeps the ordinary zero tolerance.
+pub(crate) fn require_determinate_tolerating_own_probe_claim(
+    db: &Connection,
+    root: &str,
+) -> Result<(), String> {
+    require_dimensions(db, root)?;
+    if let Some(fact) = super::clock::elapsed_fact::read(db, root)? {
+        return Err(if fact.exhausted {
+            "budget_wall_time_exhausted"
+        } else {
+            "budget_elapsed_finalized_no_new_work"
+        }
+        .into());
+    }
+    require_cost_determinate_inner(db, root, true)
+}
+
 pub(crate) fn require_determinate_for_fresh_public_surface_on(
     db:&Connection,
     proof:&crate::commands::external_surface_response_receipt::ClaimedPublicSurfaceWitness,
