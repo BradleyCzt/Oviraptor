@@ -1,5 +1,8 @@
 // Original pending priced approval source only. This is neither a fresh birth
 // nor an execution grant, and does not claim complete ten-dimensional pricing.
+// Kept as the Phase 2 recovery-audit surface; production wiring lands with the
+// human-recovery lane, so the compiler-facing readers do not exist yet.
+#[allow(dead_code)]
 struct NativeHumanRecoverySource {
     connection: usize,
     db_path: std::path::PathBuf,
@@ -11,6 +14,7 @@ struct NativeHumanRecoverySource {
     fact: JsonValue,
     _target_exits: Vec<crate::agent_runtime::execution_owner::NativeInvocationOwner>,
 }
+#[allow(dead_code)]
 impl NativeHumanRecoverySource {
     fn fact(&self) -> &JsonValue {
         &self.fact
@@ -53,6 +57,7 @@ impl NativeHumanRecoverySource {
         Ok(())
     }
 }
+#[allow(dead_code)]
 fn native_human_recovery_source_on(
     db: &rusqlite::Connection,
     path: &Path,

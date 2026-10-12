@@ -153,18 +153,17 @@ pub(crate) fn require_idle_for_root(
             idle.push(guard);
             // These ordinary model assessments have no tool subprocess phase.
             // Human jobs retain their existing directive-specific closure.
-            if matches!(
+            if (matches!(
                 parsed,
                 AgentRole::SpaApiMapper
                     | AgentRole::IdentitySession
                     | AgentRole::DeepInvestigator
                     | AgentRole::ClientSide
-            ) || (parsed==AgentRole::EvidenceReviewer && crate::agent_runtime::multi_agent::homogeneous::execution_policy::read_original_on(db,&scope.root_run_id)?.is_some()) {
-                if request.get("humanDirectiveDispatch").is_none()
+            ) || (parsed==AgentRole::EvidenceReviewer && crate::agent_runtime::multi_agent::homogeneous::execution_policy::read_original_on(db,&scope.root_run_id)?.is_some()))
+                && request.get("humanDirectiveDispatch").is_none()
             {
                 readonly.push(call);
                 }
-            }
         }
     }
     Ok(IdleSpecialists {

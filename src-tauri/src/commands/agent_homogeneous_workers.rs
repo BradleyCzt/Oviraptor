@@ -56,7 +56,7 @@ fn native_homogeneous_seed_observations(
             "candidateOnly":candidate["candidateOnly"].as_bool()},"capture_sha256":hash,"observation_kind":"observed_frontend_api_reference","target_request_executed":false,"vulnerability_confirmed":false})));
     }
     for (kind, payload) in facts {
-        let identity = format!("homogeneous_frontend:{}:{}", hash, payload.to_string());
+        let identity = format!("homogeneous_frontend:{}:{}", hash, payload);
         let exists:bool=tx.query_row("SELECT EXISTS(SELECT 1 FROM agent_evidence_nodes WHERE root_run_id=?1 AND natural_key_hash=?2)",params![actor.root_run_id,evidence_natural_key(&actor.root_run_id,kind,&identity)],|r|r.get(0)).map_err(|e|e.to_string())?;
         if exists {
             continue;

@@ -95,7 +95,7 @@ fn homogeneous_model_case(failure: usize) {
         assert_eq!(task["goal"], "按现有观测拆分并核对分派范围，累计验收后收官");
         let cards = task["slices"].as_array().unwrap();
         let mut refs = homogeneous_product_refs();
-        if matches!(failure, 3 | 4 | 5) && round == 2 {
+        if matches!(failure, 3..=5) && round == 2 {
             // Confirm while the original paid frame is already frozen. The paid
             // action stays immutable and the new guidance enters the next tick.
             let conn = db::open(&root_path).unwrap();
@@ -318,7 +318,7 @@ fn homogeneous_model_case(failure: usize) {
         let _ = fs::remove_dir_all(h.root);
         return;
     }
-    if matches!(failure, 3 | 4 | 5) {
+    if matches!(failure, 3..=5) {
         if failure == 5 {
             assert!(conn.query_row("SELECT count(*) FROM agent_specialist_calls WHERE request_json LIKE '%fixture-account-a%' AND response_json LIKE '%fixture-account-a%'", [], |r| r.get::<_, i64>(0)).unwrap() >= 1);
             let status = native_scan_status_after(&conn, &h.context.scan_id, None).unwrap();
@@ -393,7 +393,7 @@ fn homogeneous_model_case(failure: usize) {
         .iter()
         .filter(|i| i["eventType"] == "worker_report")
         .collect();
-    if matches!(failure, 3 | 4 | 5) {
+    if matches!(failure, 3..=5) {
         let original:String=conn.query_row("SELECT id FROM agent_user_directives",[],|r|r.get(0)).unwrap();
         let guide=timeline.iter().find(|i|i["eventType"]=="homogeneous_guidance").unwrap();
         assert_eq!(guide["sourceUserDirectiveId"],original);

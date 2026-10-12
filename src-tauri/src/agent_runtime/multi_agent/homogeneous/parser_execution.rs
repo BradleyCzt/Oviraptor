@@ -263,12 +263,12 @@ fn verify_frozen_on(
         return Err("homogeneous_parser_original_sdk_receipt_changed".into());
     }
     let (text,hash,signature):(String,String,Vec<u8>)=db.query_row("SELECT fact_json,fact_hash,signature FROM agent_homogeneous_parser_calls WHERE invocation_id=?1 AND root_run_id=?2 AND assignment_id=?3 AND child_run_id=?4",params![call.id,actor.root_run_id,child.assignment_id,child.run_id],|r|Ok((r.get(0)?,r.get(1)?,r.get(2)?))).map_err(|e|e.to_string())?;
-    if text != call.fact.to_string() || hash != stable_hash(&text) {
+    if text != call.fact || hash != stable_hash(&text) {
         return Err("homogeneous_parser_frozen_request_changed".into());
     }
     issuer(db, actor)?.verify_homogeneous_parser_fact(text.as_bytes(), &signature)?;
     let ready = execution_readiness::require_current_on(
-        &tx,
+        tx,
         cfg,
         &actor.root_run_id,
         &call.original_request.approval_id,
@@ -280,10 +280,10 @@ fn verify_frozen_on(
     {
         return Err("homogeneous_parser_approval_changed".into());
     }
-    if request_input(&tx, actor, child, &call.original_request)? != call.request.input {
+    if request_input(tx, actor, child, &call.original_request)? != call.request.input {
         return Err("homogeneous_parser_input_changed".into());
     }
-    let bundle = approved_bundle::open_on(&tx, cfg, &call.original_request.approval_id)?;
+    let bundle = approved_bundle::open_on(tx, cfg, &call.original_request.approval_id)?;
     if bundle.manifest().digest != call.fact["packageDigest"] {
         return Err("homogeneous_parser_package_changed".into());
     }

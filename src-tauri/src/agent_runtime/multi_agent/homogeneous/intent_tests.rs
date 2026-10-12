@@ -810,7 +810,7 @@ fn unlimited_zero_caps_cannot_stop_as_budget_exhausted_and_must_replenish() {
         .contains(&"stop".to_string()));
     let outcome = fixture.run(&fixture.stop_text("budget_exhausted", &[], &[], false));
     assert!(!outcome.applied(), "{outcome:?}");
-    assert!(pending(&fixture).len() >= 1, "{outcome:?}");
+    assert!(!pending(&fixture).is_empty(), "{outcome:?}");
     assert_ne!(fixture.task().state, "stopped");
     assert_eq!(
         intent::latest_stop_reason(&fixture.connection, &fixture.task().task_id).unwrap(),

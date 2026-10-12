@@ -376,7 +376,8 @@ fn native_status_timeline(
             "SELECT homogeneous_worker_id,slice_id,json_extract(task_slice_json,'$.scope_kind'),json_extract(task_slice_json,'$.scope_value') FROM agent_assignments WHERE scheduling_model='homogeneous_workers' AND (id=?1 OR child_run_id=?2) ORDER BY created_at DESC LIMIT 1",
             params![assignment,run],|r|Ok((r.get(0)?,r.get(1)?,r.get(2)?,r.get(3)?))).optional().map_err(|e|e.to_string())?;
         if let Some((worker,slice,kind,value))=homogeneous {
-            if item.get("workerId").is_none() {item["workerId"]=json!(worker);} if item.get("sliceId").is_none() {item["sliceId"]=json!(slice);}
+            if item.get("workerId").is_none() {item["workerId"]=json!(worker);}
+            if item.get("sliceId").is_none() {item["sliceId"]=json!(slice);}
             if item["fromRole"]=="deep_investigator" {item["fromRole"]=json!("homogeneous_worker");}
             if item["toRole"]=="deep_investigator" {item["toRole"]=json!("homogeneous_worker");}
             if item["messageKind"]=="homogeneous_slice_dispatch" || item["eventType"]=="assignment" {

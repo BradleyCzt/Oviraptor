@@ -131,8 +131,8 @@ pub fn allowed_actions(
     // 而不是把对抗样本挡在动作集合之外（DESIGN 附录 C）。
     if !pending.is_empty()
         && !idle_workers.is_empty()
-        && (remaining_tokens.map_or(true, |value| value > 0)
-            || remaining_requests.map_or(true, |value| value > 0))
+        && (remaining_tokens.is_none_or(|value| value > 0)
+            || remaining_requests.is_none_or(|value| value > 0))
     {
         actions.insert(0, "assign".to_string());
     }

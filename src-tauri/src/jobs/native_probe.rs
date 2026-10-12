@@ -280,7 +280,7 @@ fn path_has_register(path: &str) -> bool {
 }
 
 fn path_segments(path: &str) -> impl Iterator<Item = &str> {
-    path.split(|character: char| matches!(character, '/' | '.' | '-' | '_' | ';'))
+    path.split(['/', '.', '-', '_', ';'])
         .filter(|segment| !segment.is_empty())
 }
 
@@ -331,12 +331,7 @@ fn tag_boundary(rest: &str, at: usize) -> bool {
 }
 
 fn control_tag_name(rest: &str) -> Option<&'static str> {
-    for name in ["button", "input", "form", "label", "a"] {
-        if starts_tag(rest, name) {
-            return Some(name);
-        }
-    }
-    None
+    ["button", "input", "form", "label", "a"].into_iter().find(|&name| starts_tag(rest, name)).map(|v| v as _)
 }
 
 fn panic_message(payload: Box<dyn std::any::Any + Send>) -> String {

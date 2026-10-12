@@ -13,7 +13,6 @@ use serde_json::Value as JsonValue;
 /// 下发切片任务的 mailbox 消息 kind。
 use super::delivery::MESSAGE_KIND;
 /// 执行载体角色（现网既有只读角色）。
-
 /// 载体写入失败沿用 SPEC 已有的 `schema_invalid`（与 store 层写入失败同例），
 /// detail 保留原始现网错误码，不新增 reason_code。
 fn carrier_error(detail: String) -> DecisionError {
