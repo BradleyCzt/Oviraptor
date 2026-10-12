@@ -5,8 +5,10 @@
 #[cfg(test)]
 mod agent_acceptance {
     use super::agent_tests::{
-        agent_harness, assert_agent_surface, closing_ledger, findings_for, model_round,
-        retarget_model, seed_session, freeze_harness_plan,
+        agent_harness, closing_ledger, findings_for, model_round,
+        retarget_model, seed_session,
+        fresh_single_production_harness, freeze_fresh_single_production_harness,
+        execute_fresh_single_production_harness, assert_fresh_single_surface,
     };
     use super::*;
     use crate::agent_runtime::contract::{ScopeClass, ScopeSource};
@@ -341,12 +343,11 @@ mod agent_acceptance {
     /// §11: only a confirmed challenge fuses the target, and it stops immediately.
     #[test]
     fn acceptance_fixture_waf_challenge_fuses_the_target() {
-        let mut harness = agent_harness(
-            "accept-waf",
-            acceptance_site,
-            vec![AgentIdentity::anonymous()],
-        );
-        freeze_harness_plan(&harness);
+        // Terminal projection needs the original Single Root (creator/startup,
+        // frozen plan, financial control); the legacy harness had no control,
+        // so the terminal consumer refused it (budget history unverifiable).
+        let mut harness = fresh_single_production_harness("accept-waf", acceptance_site);
+        freeze_fresh_single_production_harness(&mut harness);
         let url = harness.context.target_url.clone();
         retarget_model(
             &mut harness,
@@ -367,21 +368,22 @@ mod agent_acceptance {
                 ),
             ],
         );
-        let outcome = NativeAgentBackend.execute(&harness.context);
-        let AgentTargetOutcome::Limited(stop) = &outcome else {
+        let owned = execute_fresh_single_production_harness(&mut harness);
+        let outcome = &owned.outcome;
+        let AgentTargetOutcome::Limited(stop) = outcome else {
             panic!("a WAF challenge must fuse, got {:?}", outcome.detail());
         };
         assert_eq!(stop.code, AGENT_STOP_WAF);
         assert!(stop.requires_fuse());
         let mut tally = AgentPipelineTally::default();
-        record_agent_target_outcome(
+        record_owned_agent_target_outcome(
             &harness.db_path,
-            "agent-scan",
+            &harness.context.scan_id,
             &harness.context.route,
-            outcome,
+            &owned,
             &mut tally,
         );
-        assert_agent_surface(&harness, &url, "protected_stop", 1, 0);
+        assert_fresh_single_surface(&harness, &url, "protected_stop", 1, 0);
         assert_eq!(
             harness.site_seen.lock().unwrap().len(),
             1,
@@ -709,11 +711,8 @@ mod agent_acceptance {
     /// counted or worded as a clean, uninterrupted finish.
     #[test]
     fn bounded_completions_never_read_as_a_clean_full_finish() {
-        let harness = agent_harness(
-            "accept-bounded",
-            acceptance_site,
-            vec![AgentIdentity::anonymous()],
-        );
+        let mut harness = fresh_single_production_harness("accept-bounded", acceptance_site);
+        freeze_fresh_single_production_harness(&mut harness);
         let mut tally = AgentPipelineTally::default();
         assert!(record_agent_target_outcome(
             &harness.db_path,

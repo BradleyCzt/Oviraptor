@@ -182,6 +182,13 @@ fn multi_terminal_original_actual_owned_producer_consumer_and_replay_keep_origin
             .unwrap();
         assert_eq!((b.reserved, b.indeterminate), (0, 0));
     }
+    // Disposable original audit preflight must succeed without weakening the
+    // subsequent production deletion and idempotency requirements.
+    let snapshot = db.unchecked_transaction().unwrap();
+    let prepared = crate::agent_runtime::deleted_scan_audit::prepare(&snapshot, &h.context.scan_id)
+        .unwrap_or_else(|error| panic!("original closed Multi audit preflight failed: {error}"));
+    drop(prepared);
+    snapshot.rollback().unwrap();
     delete_sentinel_scan_inner(&h.db_path, &h.context.scan_id).unwrap();
     assert!(
         crate::agent_runtime::deleted_scan_audit::verify_deleted(&db, &h.context.scan_id).unwrap()

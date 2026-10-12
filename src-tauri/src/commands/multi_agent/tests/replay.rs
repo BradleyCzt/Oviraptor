@@ -29,7 +29,18 @@ fn unimplemented_specialists_cannot_mint_assignments_or_capability_leases() {
                 1,
             )
             .unwrap_err(),
-            if role == AgentRole::ClientSide { "analysis_specialist_requires_read_only_lane" } else { "specialist_role_not_implemented" }
+            if matches!(
+                role,
+                AgentRole::ClientSide | AgentRole::InputParser | AgentRole::BusinessLogic
+            ) {
+                "analysis_specialist_requires_read_only_lane"
+            } else if role == AgentRole::Upload {
+                "upload_role_not_implemented"
+            } else if role == AgentRole::Concurrency {
+                "concurrency_role_not_implemented"
+            } else {
+                "specialist_role_not_implemented"
+            }
         );
     }
     assert_eq!(receipt_database_snapshot(&connection), before);
@@ -43,6 +54,54 @@ fn unimplemented_specialists_cannot_mint_assignments_or_capability_leases() {
     assert_eq!(assignments, 0);
     drop(connection);
     std::fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn input_parser_and_business_logic_schedule_on_read_only_lane() {
+    use crate::agent_runtime::{
+        contract::{AgentLane, AgentRole},
+        multi_agent::scheduler,
+    };
+
+    for (label, role) in [
+        ("readonly-schedule-input", AgentRole::InputParser),
+        ("readonly-schedule-biz", AgentRole::BusinessLogic),
+    ] {
+        let (root, db_path, _root_run_id, lease) = multi_agent_test_root(label, 100_000, 20);
+        let connection = db::open(&db_path).unwrap();
+        let child = scheduler::schedule_child(
+            &connection,
+            &lease,
+            role,
+            AgentLane::ReadOnlyAnalysis,
+            "validated_readonly_ready",
+            &serde_json::json!({"objective": "readonly schedule path"}),
+            1,
+            &["evidence.read".into(), "mailbox.write".into()],
+            4_000,
+            1,
+        )
+        .unwrap_or_else(|e| panic!("{role:?} schedule failed: {e}"));
+        assert_eq!(child.role, role);
+        assert_eq!(
+            scheduler::schedule_child(
+                &connection,
+                &lease,
+                AgentRole::Upload,
+                AgentLane::ReadOnlyAnalysis,
+                "validated_readonly_ready",
+                &serde_json::json!({"objective": "upload still stub"}),
+                1,
+                &["evidence.read".into()],
+                4_000,
+                1,
+            )
+            .unwrap_err(),
+            "upload_role_not_implemented"
+        );
+        drop(connection);
+        std::fs::remove_dir_all(root).unwrap();
+    }
 }
 
 #[test]

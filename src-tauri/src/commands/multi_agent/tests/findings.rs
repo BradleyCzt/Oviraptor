@@ -175,15 +175,19 @@ fn reviewer_manifest_survives_restart_and_refuses_candidate_or_evidence_mutation
 
 #[test]
 fn reviewer_finish_failure_cannot_publish_an_acked_decision() {
-    let (root, db_path, root_run_id, lease) = multi_agent_test_root("review-finish-fault", 60_000, 20);
-    let connection = db::open(&db_path).unwrap();
-    let mut context = test_context(&db_path, &lease.target_key, vec![AgentIdentity::anonymous()]);
-    context.scan_id = lease.scan_id.clone();
-    context.run = Some(AgentRunLedger { db_path: db_path.clone(), run_id: root_run_id.clone() });
+    // Actual frozen Web Root/C/worker (original 60,000 tokens / 20 requests).
+    let (root, mut context, lease, seen, _stop) =
+        multi_agent_original_test_root("review-finish-fault", 60_000, 20);
+    let root_run_id = lease.root_run_id.clone();
+    let connection = db::open(&context.db_path).unwrap();
     stage_agent_finding(&context, "web", "evidence", "review-finish", "candidate", "info",
         &serde_json::json!({"fact":"frozen"})).unwrap();
-    let mut session = multi_agent_prepare(&mut context).unwrap();
-    let outcome = AgentTargetOutcome::incomplete("fixture executor concluded");
+    let mut session = multi_agent_original_prepare(&mut context);
+    let _real = RealSpecialistTransport::enter();
+    let outcome = run_native_agent(&context);
+    assert!(matches!(outcome, AgentTargetOutcome::Incomplete(_)), "{outcome:?}");
+    let web_calls = seen.lock().unwrap().iter().filter(|wire| specialist_original_is_web_sdk(wire)).count();
+    assert!(web_calls > 0, "delivery requires an actual original paid Web exit");
     multi_agent_finish_execution(&context, &mut session, &outcome).unwrap();
     connection.execute_batch(
         "CREATE TRIGGER reject_reviewer_completion BEFORE UPDATE OF state ON agent_assignments \
@@ -203,9 +207,11 @@ fn reviewer_finish_failure_cannot_publish_an_acked_decision() {
     ).unwrap();
     assert_eq!(state, ("failed".into(), "failed".into(), "failed".into(), "pending".into()));
     let published: i64 = connection.query_row(
-        "SELECT COUNT(*) FROM sentinel_findings WHERE scan_id=?1", [&lease.scan_id], |row| row.get(0),
+        "SELECT COUNT(*) FROM sentinel_findings WHERE scan_id=?1 AND kind<>'coverage'", [&lease.scan_id], |row| row.get(0),
     ).unwrap();
-    assert_eq!(published, 0);
+    assert_eq!(published, 0, "the failed Reviewer cannot publish a candidate; original Web coverage is not a finding");
+    let root_requests = crate::agent_runtime::multi_agent::budget::balance(&connection, &root_run_id, None, "model_requests").unwrap();
+    assert_eq!(root_requests.consumed, seen.lock().unwrap().len() as i64, "all real Root, Web and Reviewer costs remain charged");
     let decision_acks: i64 = connection.query_row(
         "SELECT COUNT(*) FROM agent_messages WHERE root_run_id=?1 AND kind='review_decision' AND acknowledged_at<>''",
         [&root_run_id], |row| row.get(0),

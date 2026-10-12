@@ -15,15 +15,15 @@ fn unlimited_execution_actual_native_creator_reaches_paid_root_web_broker_client
     let root = &f.session.as_ref().unwrap().lease.root_run_id;
     assert_eq!(
         f.h.model_seen.lock().unwrap().len(),
-        14,
-        "paid Root x4, Mapper, Web reaches original max_turns=8, Client"
+        15,
+        "paid Root x5 (including original new-evidence assessment), Mapper, Web reaches original max_turns=8, Client"
     );
-    assert_eq!(root_tick_count(&db, root, "publication"), 4);
+    assert_eq!(root_tick_count(&db, root, "publication"), 5);
     for (dimension, paid) in [
-        ("model_input_tokens", 140),
+        ("model_input_tokens", 150),
         ("model_cached_tokens", 0),
-        ("model_output_tokens", 380),
-        ("model_requests", 14),
+        ("model_output_tokens", 390),
+        ("model_requests", 15),
     ] {
         let fees =
             crate::agent_runtime::multi_agent::budget::balance(&db, root, None, dimension).unwrap();
@@ -43,7 +43,7 @@ fn unlimited_execution_actual_native_creator_reaches_paid_root_web_broker_client
         crate::agent_runtime::multi_agent::budget::balance(&db, root, None, "model_requests")
             .unwrap()
             .consumed,
-        14,
+        15,
         "unlimited still records every original paid SDK"
     );
     assert_eq!(
@@ -96,13 +96,16 @@ fn unlimited_execution_mixed_original_ceiling_keeps_finite_grant_and_actual_sdk_
         );
         multi_agent_finish_execution(&f.h.context, f.session.as_mut().unwrap(), &outcome).unwrap();
         let root = &f.session.as_ref().unwrap().lease.root_run_id;
+        // v6 keeps finite request headroom, shortening Web's paid execution.
+        // Unlimited requests retain the original physical 15-call flow.
+        let expected_calls = if limits.1 > 0 { 10 } else { 15 };
         assert_eq!(
             crate::agent_runtime::multi_agent::budget::balance(&db, root, None, "model_requests")
                 .unwrap()
                 .consumed,
-            14
+            expected_calls
         );
-        assert_eq!(f.h.model_seen.lock().unwrap().len(), 14);
+        assert_eq!(f.h.model_seen.lock().unwrap().len(), expected_calls as usize);
         assert!(
             crate::agent_runtime::multi_agent::attempts::audit_rows::Rows::read(
                 &db,

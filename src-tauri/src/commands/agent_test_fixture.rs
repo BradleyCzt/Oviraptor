@@ -5,18 +5,136 @@ struct RootTickFixture {
     actor: crate::agent_runtime::multi_agent::lease::CoordinatorLease,
     f: WebModeFixture,
 }
+#[derive(Default)]
+struct RootFixtureEvidence<'a> {
+    max_turns: Option<i64>,
+    evidence_patch: Option<&'a JsonValue>,
+    original_v5: bool,
+    mapper_v15: bool,
+}
 fn root_tick_fixture(tag: &str, model_endpoint: &str) -> RootTickFixture {
     root_tick_fixture_protocol(tag, model_endpoint, true)
 }
 fn root_tick_fixture_protocol(tag: &str, model_endpoint: &str, local: bool) -> RootTickFixture {
-    root_tick_fixture_protocol_limits(tag, model_endpoint, local, (60_000,20))
+    root_tick_fixture_protocol_limits(tag, model_endpoint, local, (60_000, 20))
 }
-fn root_tick_fixture_protocol_limits(tag: &str, model_endpoint: &str, local: bool, limits: (i64,i64)) -> RootTickFixture {
+fn root_tick_fixture_protocol_limits(
+    tag: &str,
+    model_endpoint: &str,
+    local: bool,
+    limits: (i64, i64),
+) -> RootTickFixture {
     root_tick_fixture_protocol_limits_timeout(tag, model_endpoint, local, limits, None)
 }
-fn root_tick_fixture_protocol_limits_timeout(tag: &str, model_endpoint: &str, local: bool, limits: (i64,i64), timeout: Option<u64>) -> RootTickFixture {
+fn root_tick_fixture_original_v5_limits(
+    tag: &str,
+    model_endpoint: &str,
+    limits: (i64, i64),
+) -> RootTickFixture {
     let f = web_mode_fixture("multi", "https://authorized.example.test");
+    root_tick_fixture_from_web_mode_evidence_protocol(
+        tag,
+        model_endpoint,
+        true,
+        limits,
+        None,
+        f,
+        RootFixtureEvidence {
+            original_v5: true,
+            ..Default::default()
+        },
+    )
+}
+fn root_tick_fixture_protocol_limits_timeout(
+    tag: &str,
+    model_endpoint: &str,
+    local: bool,
+    limits: (i64, i64),
+    timeout: Option<u64>,
+) -> RootTickFixture {
+    let f = web_mode_fixture("multi", "https://authorized.example.test");
+    root_tick_fixture_from_web_mode(tag, model_endpoint, local, limits, timeout, f)
+}
+fn root_tick_fixture_from_web_mode(
+    tag: &str,
+    model_endpoint: &str,
+    local: bool,
+    limits: (i64, i64),
+    timeout: Option<u64>,
+    f: WebModeFixture,
+) -> RootTickFixture {
+    root_tick_fixture_from_web_mode_turns(tag, model_endpoint, local, limits, timeout, f, None)
+}
+fn root_tick_fixture_from_web_mode_turns(
+    tag: &str,
+    model_endpoint: &str,
+    local: bool,
+    limits: (i64, i64),
+    timeout: Option<u64>,
+    f: WebModeFixture,
+    max_turns: Option<i64>,
+) -> RootTickFixture {
+    root_tick_fixture_from_web_mode_evidence(
+        tag,
+        model_endpoint,
+        local,
+        limits,
+        timeout,
+        f,
+        RootFixtureEvidence {
+            max_turns,
+            ..Default::default()
+        },
+    )
+}
+fn root_tick_fixture_from_web_mode_evidence(
+    tag: &str,
+    model_endpoint: &str,
+    local: bool,
+    limits: (i64, i64),
+    timeout: Option<u64>,
+    f: WebModeFixture,
+    evidence: RootFixtureEvidence<'_>,
+) -> RootTickFixture {
+    root_tick_fixture_from_web_mode_evidence_protocol(
+        tag,
+        model_endpoint,
+        local,
+        limits,
+        timeout,
+        f,
+        evidence,
+    )
+}
+fn root_tick_fixture_from_web_mode_evidence_protocol(
+    tag: &str,
+    model_endpoint: &str,
+    local: bool,
+    limits: (i64, i64),
+    timeout: Option<u64>,
+    f: WebModeFixture,
+    evidence: RootFixtureEvidence<'_>,
+) -> RootTickFixture {
+    let RootFixtureEvidence {
+        max_turns,
+        evidence_patch,
+        original_v5,
+        mapper_v15,
+    } = evidence;
+    assert!(
+        !(original_v5 && mapper_v15),
+        "one original creation protocol"
+    );
     let mut context = test_context(&f.path, &f.target, vec![AgentIdentity::anonymous()]);
+    if let Some(patch) = evidence_patch {
+        for (key, value) in patch.as_object().expect("fixture evidence object") {
+            context
+                .evidence
+                .as_object_mut()
+                .unwrap()
+                .insert(key.clone(), value.clone());
+        }
+    }
     context.scan_id = f.scan.clone();
     context.target_dir = f.work.join("url-pipeline/target-00001");
     fs::create_dir_all(&context.target_dir).unwrap();
@@ -28,11 +146,19 @@ fn root_tick_fixture_protocol_limits_timeout(tag: &str, model_endpoint: &str, lo
     .unwrap();
     context.log_path = f.root.join(format!("{tag}.log"));
     context.environment.api_base = model_endpoint.into();
-    if let Some(timeout) = timeout { context.execution_plan.timeout_seconds = timeout; }
+    if let Some(timeout) = timeout {
+        context.execution_plan.timeout_seconds = timeout;
+    }
+    if let Some(turns) = max_turns {
+        context.execution_plan.max_turns = turns;
+    }
     context.execution_plan.hard_total_tokens = limits.0;
     context.execution_plan.soft_uncached_tokens = limits.0.min(30_000);
     context.execution_plan.hard_model_requests = limits.1;
     context.execution_plan.soft_model_requests = limits.1.min(10);
+    context.execution_plan = native_frozen_tool_supply_prebirth_fixture_plan_for_test(
+        &f.path, &f.scan, 1, &f.target, &context.execution_plan,
+    ).unwrap();
     // All native ceilings/evidence/model input exist before the real first
     // Root INSERT. This fixture cannot relabel or re-sign an existing Root.
     let db = db::open(&f.path).unwrap();
@@ -45,14 +171,95 @@ fn root_tick_fixture_protocol_limits_timeout(tag: &str, model_endpoint: &str, lo
         .unwrap(),
         0
     );
-    if local {
-        persist_frozen_web_execution_plan(&f.path, &f.scan, 1, &f.target, &context.execution_plan).unwrap();
+    if mapper_v15 {
+        let proof = private_web_mode_on(&db, &f.scan, 1).unwrap();
+        let mode = crate::agent_runtime::web_mode::root::NewRootModeDeclaration::from_verified(
+            &proof,
+            &f.target,
+            &context.execution_plan.hash(),
+        )
+        .unwrap()
+        .with_local_deliberation()
+        .unwrap()
+        .with_mapper_v15_bootstrap_for_test()
+        .unwrap()
+        .with_new_evidence_supervision()
+        .unwrap()
+        .with_lease_expiry_supervision()
+        .unwrap()
+        .with_protection_supervision()
+        .unwrap();
+        let budget =
+            fresh_web_root_budget_declaration(&proof, &f.target, &context.execution_plan).unwrap();
+        crate::agent_runtime::store::record_attempt_plan_with_declarations(
+            &db,
+            &f.scan,
+            1,
+            &f.target,
+            context.execution_plan.backend,
+            &context.execution_plan.hash(),
+            &context.execution_plan.as_json(),
+            Some(&budget),
+            Some(&mode),
+        )
+        .unwrap();
+    } else if original_v5 {
+        let proof = private_web_mode_on(&db, &f.scan, 1).unwrap();
+        let mode = crate::agent_runtime::web_mode::root::NewRootModeDeclaration::from_verified(
+            &proof,
+            &f.target,
+            &context.execution_plan.hash(),
+        )
+        .unwrap()
+        .with_local_deliberation()
+        .unwrap()
+        .with_original_v5_bootstrap_for_test()
+        .unwrap()
+        .with_new_evidence_supervision()
+        .unwrap()
+        .with_lease_expiry_supervision()
+        .unwrap()
+        .with_protection_supervision()
+        .unwrap();
+        let budget =
+            fresh_web_root_budget_declaration(&proof, &f.target, &context.execution_plan).unwrap();
+        crate::agent_runtime::store::record_attempt_plan_with_declarations(
+            &db,
+            &f.scan,
+            1,
+            &f.target,
+            context.execution_plan.backend,
+            &context.execution_plan.hash(),
+            &context.execution_plan.as_json(),
+            Some(&budget),
+            Some(&mode),
+        )
+        .unwrap();
+    } else if local {
+        persist_frozen_web_execution_plan(&f.path, &f.scan, 1, &f.target, &context.execution_plan)
+            .unwrap();
     } else {
-        let proof=private_web_mode_on(&db,&f.scan,1).unwrap();
-        let mode=crate::agent_runtime::web_mode::root::NewRootModeDeclaration::from_verified(&proof,&f.target,&context.execution_plan.hash()).unwrap();
-        let budget=fresh_web_root_budget_declaration(&proof,&f.target,&context.execution_plan).unwrap();
-        crate::agent_runtime::store::record_attempt_plan_with_declarations(&db,&f.scan,1,&f.target,context.execution_plan.backend,
-            &context.execution_plan.hash(),&context.execution_plan.as_json(),Some(&budget),Some(&mode)).unwrap();
+        let proof = private_web_mode_on(&db, &f.scan, 1).unwrap();
+        let mode = crate::agent_runtime::web_mode::root::NewRootModeDeclaration::from_verified(
+            &proof,
+            &f.target,
+            &context.execution_plan.hash(),
+        )
+        .unwrap();
+        let budget =
+            fresh_web_root_budget_declaration(&proof, &f.target, &context.execution_plan).unwrap();
+        crate::agent_runtime::store::record_attempt_plan_with_declarations(
+            &db,
+            &f.scan,
+            1,
+            &f.target,
+            context.execution_plan.backend,
+            &context.execution_plan.hash(),
+            &context.execution_plan.as_json(),
+            Some(&budget),
+            Some(&mode),
+        )
+        .unwrap();
     }
     let run = runtime_open_run(&f.path, &f.scan, &context.route).unwrap();
     context.run = Some(run.clone());
@@ -87,11 +294,18 @@ fn root_tick_fixture_protocol_limits_timeout(tag: &str, model_endpoint: &str, lo
             |r| r.get(0),
         )
         .unwrap();
+    let original_value: JsonValue = serde_json::from_str(&original_plan).unwrap();
+    if original_value.get("toolSupply").is_some() {
+        // The scoped test request adds only its typed supply selection before
+        // birth. Every other original input must still equal this fixture.
+        let mut without_supply = original_value.clone();
+        without_supply.as_object_mut().unwrap().remove("toolSupply");
+        assert_eq!(without_supply, context.execution_plan.as_json());
+        context.execution_plan = AgentExecutionPlan::from_json(&original_value).unwrap();
+    }
     assert_eq!(original_plan, context.execution_plan.as_json().to_string());
     bind_agent_evidence_location(&context).unwrap();
-    let parent =
-        crate::agent_runtime::multi_agent::supervisor::WorkerSupervisor::start(&f.path, &actor)
-            .unwrap();
+    let parent = start_original_fixture_supervisor(&f.path, &actor).unwrap();
     context.supervision = Some(parent.ticket());
     let original_rows = web_mode_test_rows(&db);
     native_coordinator_initialize_control(&context, &actor).unwrap();
@@ -172,4 +386,27 @@ fn root_tick_reload_probe(
     .unwrap();
     owner.require_original_coordinator(&db, &actor).unwrap();
     (c, actor)
+}
+
+// Uses the actual private issuer bridge; never fabricates a signed worker.
+fn start_original_fixture_supervisor(
+    path: &Path,
+    actor: &crate::agent_runtime::multi_agent::lease::CoordinatorLease,
+) -> Result<crate::agent_runtime::multi_agent::supervisor::WorkerSupervisor, String> {
+    use crate::agent_runtime::multi_agent::{
+        parent_invocation_owner::ParentInvocationOwner, supervisor::WorkerSupervisor,
+    };
+    let db = db::open(path)?;
+    match original_withdrawal_issuer_on(&db, actor)? {
+        Some(issuer) => {
+            let owner = ParentInvocationOwner::claim(
+                path,
+                &actor.scan_id,
+                actor.attempt_number,
+                &actor.root_run_id,
+            )?;
+            WorkerSupervisor::start_owned_signed(path, actor, owner, issuer)
+        }
+        None => WorkerSupervisor::start(path, actor),
+    }
 }

@@ -317,7 +317,7 @@ pub fn list_assignments_for_coordinator(
     let mut statement = connection
         .prepare(
             &format!(
-                "SELECT {ASSIGNMENT_COLUMNS} FROM agent_assignments WHERE coordinator_run_id=?1 ORDER BY created_at,id"
+                "SELECT {ASSIGNMENT_COLUMNS} FROM agent_assignments WHERE coordinator_run_id=?1 AND scheduling_model='legacy_role_pipeline' ORDER BY created_at,id"
             ),
         )
         .map_err(|error| format!("无法准备 assignment 查询：{error}"))?;

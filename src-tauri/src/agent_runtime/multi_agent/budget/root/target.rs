@@ -41,7 +41,15 @@ impl RootTargetCall {
         request: RootTargetRequest,
         controlled_write: bool,
         upload_bytes: usize,
-    ) -> Result<(Self, crate::agent_runtime::execution_owner::NativeInvocationOwner), String> {
+    ) -> Result<
+        (
+            Self,
+            crate::agent_runtime::execution_owner::NativeInvocationOwner,
+        ),
+        String,
+    > {
+        crate::agent_runtime::target_protection::require_clear_on(tx, &request.scan, &request.target)?;
+        super::super::continuation::migration::require_plain_root_boundary(tx, &owner.root)?;
         if owner.contract["root"]["policy"] != "single" || owner.coordinator.is_some() {
             return Err("budget_root_original_owner_conflict".into());
         }
@@ -86,10 +94,19 @@ impl RootTargetCall {
         }
         call.verify_dispatch(tx)?;
         call.owner.require_executable(tx)?;
-        let path=tx.path().filter(|p|!p.is_empty()).ok_or("single_target_lifetime_database_missing")?;
-        let guard=crate::agent_runtime::execution_owner::claim_native_invocation(std::path::Path::new(path),
-            &call.request.scan,call.request.attempt,lifetime::INVOCATION_KIND,&call.source)?;
-        Ok((call,guard))
+        crate::agent_runtime::target_protection::require_clear_on(tx, &call.request.scan, &call.request.target)?;
+        let path = tx
+            .path()
+            .filter(|p| !p.is_empty())
+            .ok_or("single_target_lifetime_database_missing")?;
+        let guard = crate::agent_runtime::execution_owner::claim_native_invocation(
+            std::path::Path::new(path),
+            &call.request.scan,
+            call.request.attempt,
+            lifetime::INVOCATION_KIND,
+            &call.source,
+        )?;
+        Ok((call, guard))
     }
 
     fn verify_dispatch(&self, db: &Connection) -> Result<(), String> {

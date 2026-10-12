@@ -182,14 +182,16 @@ fn policy_native_routes_without_runtime_adapter() {
         ],
     );
     let requests = h.site_seen.lock().unwrap();
-    assert_eq!(requests.len(), 3);
+    assert_eq!(requests.len(), 4, "public surface capture plus three original Web Broker requests");
     let entries = requests
         .iter()
         .filter(|w| w.starts_with("GET / HTTP/"))
         .collect::<Vec<_>>();
-    assert_eq!(entries.len(), 1);
-    let wire = entries[0].to_ascii_lowercase();
-    assert!(!wire.contains("cookie:") && !wire.contains("authorization:"));
+    assert_eq!(entries.len(), 2);
+    for entry in entries {
+        let wire = entry.to_ascii_lowercase();
+        assert!(!wire.contains("cookie:") && !wire.contains("authorization:"));
+    }
     let profiles = requests
         .iter()
         .filter(|w| w.starts_with("GET /api/profile HTTP/"))

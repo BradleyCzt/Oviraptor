@@ -33,7 +33,7 @@ fn coordinator_tick_expired_or_replaced_original_cannot_publish_paid_decision() 
             f.actor.clone()
         };
         if replacement {
-            let parent = crate::agent_runtime::multi_agent::supervisor::WorkerSupervisor::start(
+            let parent = start_original_fixture_supervisor(
                 &f.context.db_path,
                 &actor,
             )

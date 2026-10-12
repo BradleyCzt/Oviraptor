@@ -15,8 +15,12 @@ use serde_json::Value;
 
 mod dispatch;
 mod lifetime;
+pub(crate) mod mapper_loop;
 mod readonly_closure;
+mod homogeneous_closure;
 pub(crate) use lifetime::{require_idle_for_root, IdleSpecialists};
+mod original_received;
+pub(crate) use original_received::received_original_for_output_on;
 mod closed_audit;
 pub(crate) use closed_audit::verify_received_original;
 #[cfg(test)]
@@ -87,18 +91,9 @@ fn binding(
 ) -> Result<(), String> {
     validate_coordinator_lease(connection, lease)?;
     super::source::validate_surface_role(connection, lease, child.role)?;
-    let lane = match child.role {
-        AgentRole::SpaApiMapper
-        | AgentRole::IdentitySession
-        | AgentRole::DeepInvestigator
-        | AgentRole::RepoMapper
-        | AgentRole::SourceAnalyst
-        | AgentRole::ClientSide => "read_only_analysis",
-        AgentRole::EvidenceReviewer => "review",
-        // Its target capture has a separate durable broker claim. The model
-        // receives only that capture and has no tools or network authority.
-        AgentRole::ExternalSurface => "target_touching",
-        _ => return Err("specialist_role_not_readonly".into()),
+    let lane = match child.role.specialist_readonly_binding_lane() {
+        Some(lane) => lane,
+        None => return Err("specialist_role_not_readonly".into()),
     };
     let bound: bool = connection.query_row(
         "SELECT EXISTS(SELECT 1 FROM agent_assignments a JOIN agent_runs r ON r.id=a.child_run_id \

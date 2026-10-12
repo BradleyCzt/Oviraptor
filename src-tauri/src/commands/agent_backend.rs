@@ -480,7 +480,7 @@ fn agent_attempt_number(db_path: &Path, scan_id: &str) -> i64 {
 }
 
 #[allow(clippy::too_many_arguments)]
-fn agent_build_run_context(
+fn agent_build_run_context_with_tool_configuration(
     db_path: &Path,
     scan_id: &str,
     attempt_number: i64,
@@ -489,6 +489,7 @@ fn agent_build_run_context(
     adaptive: &AgentBudgetSettings,
     backend: AgentBackendKind,
     log_path: &Path,
+    tool_configuration: Option<&crate::tool_supply::ToolAdministratorConfiguration>,
 ) -> AgentRunContext {
     let evidence_path = prepared.target_dir.join("frontend-evidence.json");
     let evidence = json(
@@ -520,7 +521,7 @@ fn agent_build_run_context(
     }
     // A continuation must run on the parent's frozen plan; only a fresh attempt
     // reads today's settings into a new one (§3.5).
-    let plan_and_rejection = agent_frozen_plan(
+    let plan_and_rejection = agent_frozen_plan_with_tool_configuration(
         db_path,
         scan_id,
         &prepared.route.url,
@@ -529,6 +530,7 @@ fn agent_build_run_context(
         adaptive,
         backend,
         attempt_number,
+        tool_configuration,
     )
     .map(|plan| (plan, None)).unwrap_or_else(|rejection| {
         // Nothing is executed in this case: the loop reports the rejection as the
@@ -545,6 +547,7 @@ fn agent_build_run_context(
     });
     let (plan, plan_rejection) = plan_and_rejection;
     AgentRunContext {
+        tool_configuration: tool_configuration.cloned(),
         supervision: None,
         external_surface: true,
         scan_id: scan_id.to_string(),
@@ -592,9 +595,18 @@ struct AgentTargetExecution<'a> {
     log_path: &'a Path,
 }
 
+#[cfg(test)]
 fn run_agent_target(
     prepared: &PreparedFrontendTarget,
     execution: AgentTargetExecution<'_>,
+) -> Result<OwnedAgentTargetOutcome, String> {
+    run_agent_target_with_tool_configuration(prepared, execution, None)
+}
+
+fn run_agent_target_with_tool_configuration(
+    prepared: &PreparedFrontendTarget,
+    execution: AgentTargetExecution<'_>,
+    tool_configuration: Option<&crate::tool_supply::ToolAdministratorConfiguration>,
 ) -> Result<OwnedAgentTargetOutcome, String> {
     let invocation = claim_native_invocation(
         execution.db_path, execution.scan_id, execution.attempt_number,
@@ -615,7 +627,7 @@ fn run_agent_target(
         execution.db_path, execution.scan_id, execution.attempt_number, &prepared.route.url,
     );
     let log_path = execution.log_path.to_path_buf();
-    let outcome = run_owned_agent_target(prepared, execution, &invocation, &mut original_terminal);
+    let outcome = run_owned_agent_target(prepared, execution, &invocation, &mut original_terminal, tool_configuration);
     Ok(OwnedAgentTargetOutcome {
         outcome, original_terminal, log_path, _invocation: invocation,
     })
@@ -626,6 +638,7 @@ fn run_owned_agent_target(
     execution: AgentTargetExecution<'_>,
     invocation: &NativeInvocationOwner,
     original_terminal: &mut OriginalAgentTerminalIdentity,
+    tool_configuration: Option<&crate::tool_supply::ToolAdministratorConfiguration>,
 ) -> AgentTargetOutcome {
     let AgentTargetExecution {
         db_path,
@@ -669,7 +682,7 @@ fn run_owned_agent_target(
             None
         }
     };
-    let mut context = agent_build_run_context(
+    let mut context = agent_build_run_context_with_tool_configuration(
         db_path,
         scan_id,
         attempt_number,
@@ -678,6 +691,7 @@ fn run_owned_agent_target(
         adaptive,
         backend,
         log_path,
+        tool_configuration,
     );
     if let Some(rejection)=context.plan_rejection.as_ref() {return rejection_outcome(&context,rejection);}
     update_target_route(db_path, scan_id, &prepared.route, "scanning");
@@ -741,6 +755,9 @@ fn run_owned_agent_target(
     let mut session = match bind_agent_evidence_location(&context)
         .and_then(|()| multi_agent_prepare_owned(&mut context,parent_owner)) {
         Ok(session) => session,
+        Err(error) if error == "homogeneous_scan_legacy_bootstrap_stepped_aside" => {
+            return run_homogeneous_agent_target(&mut context);
+        }
         Err(error) => {
             let failed = multi_agent_bootstrap_outcome(&error);
             let cleanup_lease = (|| {
@@ -791,6 +808,9 @@ fn run_owned_agent_target(
     let reviewed = multi_agent_review(&context, &mut session, outcome);
     finalize_agent_target(&context, &session.lease, reviewed)
 }
+
+include!("agent_backend_homogeneous.rs");
+include!("agent_homogeneous_workers.rs");
 
 /// Backend selection, the per-target orchestrator and the pipeline tally.
 ///

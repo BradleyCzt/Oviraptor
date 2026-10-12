@@ -38,7 +38,7 @@ function loadPanel(name) {
 }
 const render = (component, props) => renderToString(vue.createSSRApp(component, props));
 
-test('USD budget field explains the source billing boundary without changing Web form semantics', async () => {
+test('USD budget field explains the source gate and Web billing estimate', async () => {
   const panel = loadPanel('WorkbenchBudgetField.vue');
   const tr = (zh) => zh;
   const source = await render(panel, { mode: 'code', modelValue: 5, tr });
@@ -46,7 +46,9 @@ test('USD budget field explains the source billing boundary without changing Web
   assert.match(source, /主动清空/);
   assert.match(source, /不保证实际账单金额上限/);
   const web = await render(panel, { mode: 'web', modelValue: 5, tr });
-  assert.match(web, /费用上限/);
+  assert.match(web, /value="5"/);
+  assert.match(web, /费用预算参考/);
+  assert.match(web, /尚不能限制供应商的实际美元账单/);
   assert.doesNotMatch(web, /主动清空/);
 });
 

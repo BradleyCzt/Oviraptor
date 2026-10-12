@@ -4,6 +4,30 @@ use super::{balance, DIMENSIONS};
 use rusqlite::Connection;
 
 pub(crate) fn require_determinate(db: &Connection, root: &str) -> Result<(), String> {
+    require_dimensions(db, root)?;
+    if let Some(fact) = super::clock::elapsed_fact::read(db, root)? {
+        return Err(if fact.exhausted {
+            "budget_wall_time_exhausted"
+        } else {
+            "budget_elapsed_finalized_no_new_work"
+        }
+        .into());
+    }
+    require_cost_determinate(db, root)
+}
+
+/// Financial history only. A finalized non-exhausted elapsed observation is
+/// not a fresh execution grant. Continuation separately verifies its original
+/// physical proof, all reservations and the still-valid absolute deadline.
+pub(crate) fn require_financially_determinate(db: &Connection, root: &str) -> Result<(), String> {
+    require_dimensions(db, root)?;
+    if super::clock::elapsed_fact::read(db, root)?.is_some_and(|f| f.exhausted) {
+        return Err("budget_wall_time_exhausted".into());
+    }
+    require_cost_determinate(db, root)
+}
+
+fn require_dimensions(db: &Connection, root: &str) -> Result<(), String> {
     let configured: i64 = db
         .query_row(
             "SELECT count(*) FROM agent_budget_limits WHERE root_run_id=?1",
@@ -14,14 +38,26 @@ pub(crate) fn require_determinate(db: &Connection, root: &str) -> Result<(), Str
     if configured != DIMENSIONS.len() as i64 {
         return Err("budget_history_requires_reconciliation".into());
     }
-    if let Some(fact) = super::clock::elapsed_fact::read(db, root)? {
-        return Err(if fact.exhausted {
-            "budget_wall_time_exhausted"
-        } else {
-            "budget_elapsed_finalized_no_new_work"
-        }
-        .into());
+    Ok(())
+}
+
+pub(crate) fn require_determinate_for_fresh_public_surface_on(
+    db:&Connection,
+    proof:&crate::commands::external_surface_response_receipt::ClaimedPublicSurfaceWitness,
+)->Result<(),String> {
+    let actor=proof.verify_unsent_on(db)?;
+    require_dimensions(db,&actor.root_run_id)?;
+    if let Some(fact)=super::clock::elapsed_fact::read(db,&actor.root_run_id)? {
+        return Err(if fact.exhausted {"budget_wall_time_exhausted"} else {"budget_elapsed_finalized_no_new_work"}.into());
     }
+    require_cost_determinate_inner(db,&actor.root_run_id,true)
+}
+
+fn require_cost_determinate(db:&Connection,root:&str)->Result<(),String> {
+    require_cost_determinate_inner(db,root,false)
+}
+
+fn require_cost_determinate_inner(db: &Connection, root: &str, fresh_surface:bool) -> Result<(), String> {
     let uncertain:bool=db.query_row(&format!("SELECT EXISTS(SELECT 1 FROM agent_specialist_calls WHERE root_run_id=?1
           AND (state='uncertain' OR (state='received' AND json_extract(response_json,'$.usageReported')=0)))
         OR EXISTS(SELECT 1 FROM agent_source_model_rounds WHERE root_run_id=?1
@@ -74,7 +110,9 @@ pub(crate) fn require_determinate(db: &Connection, root: &str) -> Result<(), Str
         return Err("budget_indeterminate_requires_reconciliation".into());
     }
     for dimension in DIMENSIONS {
-        if balance(db, root, None, dimension)?.indeterminate > 0 {
+        let unknown=balance(db, root, None, dimension)?.indeterminate;
+        let permitted=if fresh_surface && dimension=="target_requests" {1} else {0};
+        if unknown!=permitted {
             return Err("budget_indeterminate_requires_reconciliation".into());
         }
     }

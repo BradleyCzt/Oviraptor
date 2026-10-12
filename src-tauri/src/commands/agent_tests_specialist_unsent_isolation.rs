@@ -16,7 +16,7 @@ fn specialist_unsent_actual_queue_cancellation_denies_receipt_trigger_business_w
     }));
     context.environment.api_base = format!("http://127.0.0.1:{port}/v1");
     context.environment.deployment = "local".into();
-    let gate = admission::gate(true);
+    let gate = admission::gate_for(true, &context.environment.api_base);
     let occupied = gate.acquire(&CancelToken::new()).unwrap();
     let path = context.db_path.clone();
     let replay_context = context.clone();

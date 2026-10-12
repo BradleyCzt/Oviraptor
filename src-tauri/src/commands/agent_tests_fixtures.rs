@@ -115,6 +115,7 @@
         let mut route = test_route("standard", "framework_application");
         route.url = target_url.into();
         AgentRunContext {
+            tool_configuration: None,
             supervision: None,
             external_surface: false,
             scan_id: "agent-scan".into(),

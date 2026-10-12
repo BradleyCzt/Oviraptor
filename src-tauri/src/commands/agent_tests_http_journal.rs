@@ -443,43 +443,42 @@ fn http_journal_transport_and_partial_body_failures_preserve_charge_without_retr
 #[test]
 fn http_journal_native_loop_stops_same_turn_before_second_tool_or_model_request() {
     for receipt_failure in [false,true] {
-        let (port,seen,stop)=spawn_endpoint(std::sync::Arc::new(move |_| {
+        // The executor comes from the real creator, paid Root+Mapper dispatch and
+        // the original Root budget frame (current Web4 executor contract).
+        let mut f=web_financial_producer_fixture_with_site(move |_| {
             // Invalid response status models a request observed by the server
             // but with no usable response at the client.
             (if receipt_failure {200} else {0},"text/plain","reply".into())
-        }));
-        let (root,mut context,parent)=specialist_inflight_original_executor_context_at(50_000,&format!("http://127.0.0.1:{port}"));
-        let connection=db::open(&context.db_path).unwrap();
-        connection.execute("DELETE FROM tool_invocations",[]).unwrap();
+        });
+        let executor_run=f.context().run.as_ref().unwrap().run_id.clone();
+        let connection=db::open(&f.context().db_path).unwrap();
         if receipt_failure {
             connection.execute_batch("CREATE TRIGGER fail_receipt BEFORE UPDATE ON agent_http_request_claims BEGIN SELECT RAISE(ABORT,'injected'); END;").unwrap();
         }
-        let (model_port,model_stop,model_seen)=spawn_model(vec![model_round(&[
-            ("replay_http",serde_json::json!({"identity":"anonymous","method":"GET","url":context.target_url,"family":"authorization"})),
-            ("replay_http",serde_json::json!({"identity":"anonymous","method":"GET","url":format!("{}/second",context.target_url),"family":"authorization"})),
-        ],10)]);
-        context.environment.api_base=format!("http://127.0.0.1:{model_port}/v1");
-        let outcome=NativeAgentBackend.execute(&context);
+        let target=f.context().target_url.clone();
+        f.set_web_reply(move |_| (200,"application/json",model_round(&[
+            ("replay_http",serde_json::json!({"identity":"anonymous","method":"GET","url":target,"family":"authorization"})),
+            ("replay_http",serde_json::json!({"identity":"anonymous","method":"GET","url":format!("{target}/second"),"family":"authorization"})),
+        ],10)));
+        let outcome=NativeAgentBackend.execute(f.context());
         assert_eq!(outcome.terminal_code(),if receipt_failure {terminal_code::PERSISTENCE_FAILURE} else {terminal_code::REQUEST_RECONCILIATION_REQUIRED},"{}",outcome.detail());
-        assert_eq!(model_seen.lock().unwrap().len(),1);
-        assert_eq!(seen.lock().unwrap().len(),1);
-        let invocations:i64=connection.query_row("SELECT COUNT(*) FROM tool_invocations",[],|r|r.get(0)).unwrap();
+        assert_eq!(f.web_seen.lock().unwrap().len(),1);
+        assert_eq!(f.f.h.site_seen.lock().unwrap().len(),1);
+        let invocations:i64=connection.query_row("SELECT COUNT(*) FROM tool_invocations WHERE run_id=?1",[&executor_run],|r|r.get(0)).unwrap();
         assert_eq!(invocations,1,"second tool from the same model round must not start");
-        let (status,error):(String,String)=connection.query_row("SELECT status,error_class FROM tool_invocations",[],|r|Ok((r.get(0)?,r.get(1)?))).unwrap();
+        let (status,error):(String,String)=connection.query_row("SELECT status,error_class FROM tool_invocations WHERE run_id=?1",[&executor_run],|r|Ok((r.get(0)?,r.get(1)?))).unwrap();
         assert_eq!(status,"failed");
         assert_eq!(error,if receipt_failure {"evidence_write_failed"} else {terminal_code::REQUEST_RECONCILIATION_REQUIRED});
-        let usage=agent_request_accounting(&connection,&context.scan_id,1,&context.target_url).unwrap();
+        let usage=agent_request_accounting(&connection,&f.context().scan_id,1,&f.context().target_url).unwrap();
         assert_eq!((usage.executor_recorded,usage.executor_unresolved),(1,1));
-        let decision:String=connection.query_row("SELECT policy_decision FROM tool_invocations",[],|r|r.get(0)).unwrap();
+        let decision:String=connection.query_row("SELECT policy_decision FROM tool_invocations WHERE run_id=?1",[&executor_run],|r|r.get(0)).unwrap();
         assert_eq!(decision,"allow","a post-dispatch failure must preserve the original authorization");
-        context.resume=true;
-        let resumed=NativeAgentBackend.execute(&context);
+        f.f.h.context.resume=true;
+        let resumed=NativeAgentBackend.execute(f.context());
         assert_eq!(resumed.terminal_code(),terminal_code::REQUEST_RECONCILIATION_REQUIRED,"{}",resumed.detail());
-        assert_eq!(model_seen.lock().unwrap().len(),1,"resume must stop before spending another model round");
-        assert_eq!(seen.lock().unwrap().len(),1);
-        stop.store(true,std::sync::atomic::Ordering::SeqCst);
-        model_stop.store(true,std::sync::atomic::Ordering::SeqCst);
-        drop(connection);drop(parent);drop(context);fs::remove_dir_all(root).unwrap();
+        assert_eq!(f.web_seen.lock().unwrap().len(),1,"resume must stop before spending another model round");
+        assert_eq!(f.f.h.site_seen.lock().unwrap().len(),1);
+        drop(connection);
     }
 }
 

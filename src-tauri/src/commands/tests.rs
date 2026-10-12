@@ -88,6 +88,7 @@ mod tests {
     include!("tests_source_financial_exit_private.rs");
     include!("tests_source_financial_exit_cutover.rs");
     include!("tests_source_dispatch.rs");
+    include!("tests_source_controlled_executor.rs");
     include!("tests_source_heartbeat.rs");
     include!("tests_source_review_material.rs");
     include!("tests_source_review_contract.rs");

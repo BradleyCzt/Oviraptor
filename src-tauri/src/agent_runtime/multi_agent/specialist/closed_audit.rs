@@ -28,10 +28,12 @@ pub(crate) fn verify_received_original(
         .ok_or("specialist_audit_role_invalid")?;
     if !matches!(
         role,
-        AgentRole::SpaApiMapper
+        AgentRole::InputParser
+            | AgentRole::SpaApiMapper
             | AgentRole::IdentitySession
             | AgentRole::DeepInvestigator
             | AgentRole::ExternalSurface
+            | AgentRole::BusinessLogic
             | AgentRole::ClientSide
             | AgentRole::EvidenceReviewer
     ) {
@@ -49,6 +51,10 @@ pub(crate) fn verify_received_original(
         },
         request_hash: hash,
     };
+    if role == AgentRole::BusinessLogic {
+        received_original_for_output_on(db, actor, &call.child)?;
+        return Ok(());
+    }
     let row = load(db, &call)?.ok_or("specialist_original_closed_receipt_required")?;
     verify_received(db, &call, &row)?;
     Ok(())

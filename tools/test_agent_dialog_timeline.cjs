@@ -253,7 +253,7 @@ test('addressed source focus preview explains frozen-phase routing without promi
   assert.doesNotMatch(html, /调度动作/);
   b.state.value.directiveDrafts[0].status = 'rejected';
   const rejected = await renderDialog(b);
-  assert.match(rejected, /草案不会进入 Coordinator 队列/);
+  assert.match(rejected, /草案被拒绝，不会进入主管队列/);
   assert.doesNotMatch(rejected, /仅发送给指定源码角色下一次尚未冻结的阶段/);
 });
 

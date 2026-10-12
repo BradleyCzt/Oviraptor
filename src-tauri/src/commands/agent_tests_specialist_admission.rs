@@ -9,7 +9,7 @@ fn specialist_cancelled_in_model_queue_has_durable_no_send_proof() {
     }));
     context.environment.api_base = format!("http://127.0.0.1:{port}/v1");
     context.environment.deployment = "local".into();
-    let gate = admission::gate(true);
+    let gate = admission::gate_for(true, &context.environment.api_base);
     let occupied = gate.acquire(&CancelToken::new()).unwrap();
     let (done_tx, done_rx) = mpsc::channel();
     let replay_context = context.clone();

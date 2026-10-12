@@ -64,7 +64,7 @@ fn client_side_readonly_actual_specialist_sdk_worker_cost_and_delivery() {
         stop: stop.clone(),
     };
     context.environment.api_base = format!("http://127.0.0.1:{port}/v1");
-    let parent=crate::agent_runtime::multi_agent::supervisor::WorkerSupervisor::start(&path,&lease).unwrap();
+    let parent=start_original_fixture_supervisor(&path,&lease).unwrap();
     context.supervision=Some(parent.ticket());
     let child = scheduler::prepare_readonly_child(
         &db,

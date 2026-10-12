@@ -41,6 +41,12 @@ fn multi_agent_review_inner(
         store,
     };
     if let Err(error) = session.supervisor.check() {
+        // The original supervisor rejects an inactive attempt before any
+        // Reviewer work. Preserve the same cancellation outcome as the later
+        // original authority guard; no other supervisor failure is remapped.
+        if error == "agent_attempt_not_active" {
+            return AgentTargetOutcome::Cancelled;
+        }
         return AgentTargetOutcome::failed(format!("review_supervisor:{error}"));
     }
     let connection = match db::open(&context.db_path) {
@@ -49,6 +55,31 @@ fn multi_agent_review_inner(
             return AgentTargetOutcome::failed(format!("review_gate_persistence:{error}"))
         }
     };
+    // Verify any original birth seal before a missing optional field can select
+    // the legacy renewal path. Reading a declaration alone is not provenance.
+    if let Err(error) = original_withdrawal_issuer_on(&connection, &session.lease) {
+        return AgentTargetOutcome::failed(format!("review_gate_birth:{error}"));
+    }
+    let original_supervision = match crate::agent_runtime::web_mode::root::read(
+        &connection, &session.lease.root_run_id,
+    ) {
+        Ok(mode) => mode.is_some_and(|mode| mode.lease_expiry_supervision().is_some()),
+        Err(error) => return AgentTargetOutcome::failed(format!("review_gate_birth:{error}")),
+    };
+    if original_supervision {
+        // This Root's supervision contract cannot adopt or renew a C. Review
+        // starts only with the original execution authority still valid.
+        let root = native_coordinator_root_context(context, &session.lease);
+        if let Err(error) = native_coordinator_tick_authority(&connection, &root, &session.lease) {
+            // The original authority guard still runs in full. A paused or
+            // cancelled attempt must retain its cancellation outcome rather
+            // than becoming a review failure; neither outcome permits work.
+            if error == "agent_attempt_not_active" {
+                return AgentTargetOutcome::Cancelled;
+            }
+            return AgentTargetOutcome::failed(format!("review_gate_lease:{error}"));
+        }
+    } else {
     session.lease = match crate::agent_runtime::multi_agent::lease::acquire_coordinator_lease(
         &connection,
         &context.scan_id,
@@ -60,6 +91,7 @@ fn multi_agent_review_inner(
         Ok(lease) => lease,
         Err(error) => return AgentTargetOutcome::failed(format!("review_gate_lease:{error}")),
     };
+    }
     match review_attempt_active(&connection, &session.lease) {
         Ok(true) => {}
         Ok(false) => return AgentTargetOutcome::Cancelled,
@@ -92,6 +124,12 @@ fn multi_agent_review_inner(
         "persistedFactRefs": persisted_fact_refs,
         "findingCandidates": finding_candidates,
     }));
+    let original_authorization=(|| -> Result<(),String> {
+        let tx=connection.unchecked_transaction().map_err(|e|e.to_string())?;
+        native_authorization_original_candidate_on(&tx,&session.lease,&context.target_dir,&candidate)?;
+        Ok(())
+    })();
+    if let Err(error)=original_authorization { return AgentTargetOutcome::failed(format!("review_gate_authorization_original:{error}")); }
     let followup = (|| -> Result<Option<JsonValue>, String> {
         let tx = connection
             .unchecked_transaction()
@@ -326,6 +364,11 @@ fn multi_agent_review_inner(
         ) {
             return AgentTargetOutcome::failed(format!("{error};recovery:{recovery_error}"));
         }
+    }
+    if let Err(error) = native_coordinator_original_review_expired_feedback(
+        context, &session.lease, &candidate_id, revision,
+    ) {
+        return AgentTargetOutcome::incomplete(format!("review_lease_supervision:{error}"));
     }
     let success = verdict == "confirmed";
     let gap_error = if verdict == "insufficient_evidence"

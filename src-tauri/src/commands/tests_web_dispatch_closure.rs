@@ -4,14 +4,26 @@ fn web_closure_preserves_old_attempt_and_requires_explicit_new_start() {
     let old_task = fs::read(work_dir.join("task.json")).unwrap();
     let old_binding: Vec<u8> = connection.query_row("SELECT binding_tag FROM native_web_dispatch_bindings",[],|r|r.get(0)).unwrap();
     // Configuration drift must not be worked around by replaying the old plan.
+    // Recovery reconstructs from today's settings, so the drift is the settings
+    // change itself; the old attempt's frozen task.json stays untouched (its
+    // tampering is covered by the continuation guard test below).
     connection.execute("INSERT INTO app_settings(key,value) VALUES('agent_packet_budget','73')",[]).unwrap();
-    fs::write(work_dir.join("task.json"),"changed configuration").unwrap();
-    assert!(claim_web_recovery(&path,"start-test",1,true,|c|recovery_test_reconstruct(c,&root)).is_err());
+    let mut drifted_runtime = binding_test_runtime();
+    drifted_runtime["runtime"]["packet_budget"] = json!(73);
+    let drifted_reconstruct = |c: &rusqlite::Connection| -> Result<PathBuf,String> {
+        let (path,targets) = web_recovery_plan_in(c,&root,"start-test",1)?;
+        assert_eq!(targets.len(),2);
+        verify_web_dispatch_binding_in(c,"start-test",1,&WebBindingDirectory::open(&path)?,&drifted_runtime)?;
+        Ok(path)
+    };
+    assert!(claim_web_recovery(&path,"start-test",1,true,drifted_reconstruct).is_err());
     let closed = close_unclaimed_web_attempt(&path,"start-test",1,true).unwrap();
     assert_eq!(closed["executionState"],"closed_without_dispatch");
     assert_eq!(closed["automaticReplayAllowed"],false);
     assert_eq!(close_unclaimed_web_attempt(&path,"start-test",1,true).unwrap(),closed);
-    assert!(claim_web_recovery(&path,"start-test",1,true,|c|recovery_test_reconstruct(c,&root)).is_err());
+    assert!(claim_web_recovery(&path,"start-test",1,true,drifted_reconstruct).is_err());
+    assert!(claim_web_recovery(&path,"start-test",1,true,|c|recovery_test_reconstruct(c,&root)).is_err(),
+        "a closed attempt cannot be replayed even with its original configuration");
     assert!(!work_dir.parent().unwrap().join("attempt-0002").exists());
     assert_eq!(connection.query_row("SELECT status FROM sentinel_scans",[],|r|r.get::<_,String>(0)).unwrap(),"cancelled");
     assert_eq!(connection.query_row("SELECT claim_id FROM native_branch_dispatches",[],|r|r.get::<_,String>(0)).unwrap(),"");
@@ -20,27 +32,53 @@ fn web_closure_preserves_old_attempt_and_requires_explicit_new_start() {
     let transaction = connection.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate).unwrap();
     let mut next = prepare_web_startup_in(&transaction,&root,"start-test",WebStartMode::Retry).unwrap();
     let policy: String = transaction.query_row("SELECT policy_json FROM sentinel_scan_contexts WHERE scan_id='start-test'",[],|r|r.get(0)).unwrap();
-    persist_web_startup_in(&transaction,&next,"initializing web","test-skill",&serde_json::from_str::<JsonValue>(&policy).unwrap()).unwrap();
+    let policy: JsonValue = serde_json::from_str(&policy).unwrap();
+    persist_web_startup_in(&transaction,&next,"initializing web","test-skill",&policy).unwrap();
+    // The new attempt writes its own frozen task, as every real startup does.
+    fs::write(next.files.path.join("task.json"),json!({"scanId":"start-test","effectiveWebPolicy":policy,
+        "targets":next.targets.iter().map(|(company,url)|json!({"company":company,"url":url})).collect::<Vec<_>>()}).to_string()).unwrap();
     prepare_recovery_test_files(&next);
     for name in ["targets.txt","agent-instruction.md"] {
         fs::write(next.files.path.join(name),"test-owned startup artifact").unwrap();
     }
-    let mut new_runtime = binding_test_runtime();
-    new_runtime["runtime"]["packet_budget"] = json!(73);
+    let new_runtime = drifted_runtime.clone();
     register_web_dispatch_binding_in(&transaction,&next,&new_runtime).unwrap();
+    register_private_web_mode_on(&transaction,&next,&new_runtime).unwrap();
     let next_dir = next.files.path.clone();
     next.files.preserve = true;
     transaction.commit().unwrap();
     let verification = connection.unchecked_transaction().unwrap();
     verify_web_dispatch_binding_in(&verification,"start-test",2,&WebBindingDirectory::open(&next_dir).unwrap(),&new_runtime).unwrap();
+    private_web_mode_on(&verification,"start-test",2).unwrap();
     verification.commit().unwrap();
     assert_eq!(connection.query_row("SELECT attempt_count FROM sentinel_scans",[],|r|r.get::<_,i64>(0)).unwrap(),2);
     assert_eq!(connection.query_row("SELECT status FROM sentinel_scan_attempts WHERE attempt_number=1",[],|r|r.get::<_,String>(0)).unwrap(),"cancelled");
     assert_eq!(connection.query_row("SELECT binding_tag FROM native_web_dispatch_bindings WHERE attempt_number=1",[],|r|r.get::<_,Vec<u8>>(0)).unwrap(),old_binding);
     assert_ne!(connection.query_row("SELECT binding_tag FROM native_web_dispatch_bindings WHERE attempt_number=2",[],|r|r.get::<_,Vec<u8>>(0)).unwrap(),old_binding);
-    assert_eq!(fs::read_to_string(work_dir.join("task.json")).unwrap(),"changed configuration");
+    assert_eq!(fs::read(work_dir.join("task.json")).unwrap(),old_task,"the old attempt's frozen task is preserved byte-for-byte");
     assert!(!old_task.is_empty());
     assert!(close_unclaimed_web_attempt(&path,"start-test",1,true).is_err(),"stale UI cannot close the newer attempt");
+    drop(connection);
+    fs::remove_dir_all(root).unwrap();
+}
+
+// The explicit new start after a closure continues the closed attempt
+// (`cancelled` retries only incomplete targets), so it must first re-verify the
+// parent's private Web mode. A tampered parent task.json is refused before any
+// attempt is allocated, and nothing is changed.
+#[test]
+fn web_closure_continuation_refuses_a_tampered_parent_task() {
+    let (root,path,work_dir,mut connection) = recovery_test_fixture();
+    close_unclaimed_web_attempt(&path,"start-test",1,true).unwrap();
+    fs::write(work_dir.join("task.json"),"changed configuration").unwrap();
+    let before = web_closure_test_snapshot(&connection);
+    let transaction = connection.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate).unwrap();
+    let error = prepare_web_startup_in(&transaction,&root,"start-test",WebStartMode::Retry).err().unwrap();
+    assert_eq!(error,"web_mode_task_invalid");
+    drop(transaction);
+    assert_eq!(web_closure_test_snapshot(&connection),before);
+    assert!(!work_dir.parent().unwrap().join("attempt-0002").exists());
+    assert_eq!(connection.query_row("SELECT attempt_count FROM sentinel_scans",[],|r|r.get::<_,i64>(0)).unwrap(),1);
     drop(connection);
     fs::remove_dir_all(root).unwrap();
 }

@@ -123,6 +123,65 @@ fn auth_session_row(row: &Row<'_>) -> rusqlite::Result<BrowserAuthSession> {
 
 const SESSION_COLUMNS: &str = "id,project_id,owner_scan_id,draft_scope_id,name,entry_url,final_url,status,scope_hosts_json,cookie_count,header_count,storage_count,captured_request_count,last_validated_at,expires_at,last_error,created_at,updated_at";
 
+/// Operator inspection of the identities explicitly bound to this task. This
+/// snapshot grants no execution permission and does not refresh expired sessions.
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ScanIdentityMaterial {
+    session: BrowserAuthSession,
+    document: Value,
+}
+
+#[tauri::command]
+pub fn get_sentinel_scan_identity_material(
+    state: State<'_, AppState>,
+    project_id: i64,
+    scan_id: String,
+) -> Result<Vec<ScanIdentityMaterial>, String> {
+    let connection = db::open(&state.db_path)?;
+    scan_identity_material_on(&connection, project_id, &scan_id)
+}
+
+fn scan_identity_material_on(
+    connection: &rusqlite::Connection,
+    project_id: i64,
+    scan_id: &str,
+) -> Result<Vec<ScanIdentityMaterial>, String> {
+    // Keep policy, ownership and bytes in one read snapshot. Never accept a
+    // caller-provided identity ID or read all identities from a project.
+    let tx = connection.unchecked_transaction().map_err(|e| e.to_string())?;
+    let policy_text: String = tx.query_row(
+        "SELECT context.policy_json FROM sentinel_scans scan JOIN sentinel_scan_contexts context ON context.scan_id=scan.id WHERE scan.id=?1 AND scan.project_id=?2",
+        params![scan_id, project_id], |row| row.get(0),
+    ).map_err(|_| "identity_material_task_scope_mismatch")?;
+    let policy: Value = serde_json::from_str(&policy_text)
+        .map_err(|_| "identity_material_policy_invalid")?;
+    let ids = auth_session_ids_from_policy(&policy);
+    if ids.len() > 16 { return Err("identity_material_count_exceeded".into()); }
+    let mut total_bytes = 0usize;
+    let mut result = Vec::new();
+    for id in ids {
+        let session = session_by_id(&tx, &id)?;
+        if session.project_id != project_id || session.owner_scan_id != scan_id {
+            return Err("identity_material_owner_scope_mismatch".into());
+        }
+        let text: String = tx.query_row(
+            "SELECT session_json FROM browser_auth_sessions WHERE id=?1 AND project_id=?2 AND owner_scan_id=?3",
+            params![id, project_id, scan_id], |row| row.get(0),
+        ).map_err(|_| "identity_material_owner_scope_mismatch")?;
+        total_bytes = total_bytes.checked_add(text.len()).ok_or("identity_material_size_exceeded")?;
+        if text.len() > 256 * 1024 || total_bytes > 1024 * 1024 {
+            return Err("identity_material_size_exceeded".into());
+        }
+        let document: Value = serde_json::from_str(&text)
+            .map_err(|_| "identity_material_document_invalid")?;
+        if !document.is_object() { return Err("identity_material_document_invalid".into()); }
+        result.push(ScanIdentityMaterial { session, document });
+    }
+    // A read-only transaction deliberately ends without writing any state.
+    Ok(result)
+}
+
 fn session_by_id(
     connection: &rusqlite::Connection,
     id: &str,
@@ -1326,6 +1385,55 @@ pub(crate) fn mark_session_invalid(db_path: &Path, session_id: &str, reason: &st
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn identity_material_fixture() -> (std::path::PathBuf, rusqlite::Connection) {
+        let root = std::env::temp_dir().join(format!("oviraptor-identity-material-{}", Uuid::new_v4()));
+        let path = db::initialize(&root).unwrap();
+        let connection = db::open(&path).unwrap();
+        connection.execute("INSERT INTO projects(id,name) VALUES(9001,'Identity material'),(9002,'Other project')", []).unwrap();
+        connection.execute("INSERT INTO sentinel_scans(id,project_id,task_name) VALUES('task-a',9001,'A'),('task-b',9001,'B')", []).unwrap();
+        connection.execute("INSERT INTO sentinel_scan_contexts(scan_id,policy_json) VALUES('task-a','{\"authSessionIds\":[\"identity-a\",\"identity-b\"]}')", []).unwrap();
+        for (id, value) in [("identity-a", "account-a"), ("identity-b", "account-b")] {
+            let document = json!({"cookies":[{"name":"session_id","value":value}],"headers":{"authorization":format!("Bearer {value}")},"localStorage":{"password":format!("password-{value}")}});
+            connection.execute("INSERT INTO browser_auth_sessions(id,project_id,owner_scan_id,name,entry_url,status,expires_at,session_json) VALUES(?1,9001,'task-a',?1,'https://fixture.test','expired','2020-01-01T00:00:00Z',?2)", params![id, document.to_string()]).unwrap();
+        }
+        (root, connection)
+    }
+
+    #[test]
+    fn identity_material_preserves_plaintext_without_revalidating_expired_sessions() {
+        let (root, connection) = identity_material_fixture();
+        let snapshot = scan_identity_material_on(&connection, 9001, "task-a").unwrap();
+        assert_eq!(snapshot.len(), 2);
+        assert_eq!(snapshot[0].document["cookies"][0]["value"], "account-a");
+        assert_eq!(snapshot[1].document["headers"]["authorization"], "Bearer account-b");
+        assert_eq!(snapshot[0].document["localStorage"]["password"], "password-account-a");
+        assert!(snapshot.iter().all(|item| item.session.status == "expired"));
+        assert!(session_document_for_scan(&connection, "identity-a", 9001).is_err());
+        drop(connection); std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn identity_material_rejects_cross_project_cross_task_and_unbound_draft() {
+        let (root, connection) = identity_material_fixture();
+        assert!(scan_identity_material_on(&connection, 9002, "task-a").is_err());
+        assert!(scan_identity_material_on(&connection, 9001, "missing").is_err());
+        for (project, owner) in [(9002, "task-a"), (9001, "task-b"), (9001, "")] {
+            connection.execute("UPDATE browser_auth_sessions SET project_id=?1,owner_scan_id=?2 WHERE id='identity-b'", params![project, owner]).unwrap();
+            assert!(scan_identity_material_on(&connection, 9001, "task-a").is_err());
+        }
+        drop(connection); std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn identity_material_rejects_damaged_or_oversize_documents_atomically() {
+        let (root, connection) = identity_material_fixture();
+        for text in ["not-json".to_string(), "[]".to_string(), json!({"token":"x".repeat(256*1024)}).to_string()] {
+            connection.execute("UPDATE browser_auth_sessions SET session_json=?1 WHERE id='identity-b'", [text]).unwrap();
+            assert!(scan_identity_material_on(&connection, 9001, "task-a").is_err());
+        }
+        drop(connection); std::fs::remove_dir_all(root).unwrap();
+    }
 
     #[test]
     fn cancelling_login_capture_restores_a_safe_previous_state() {

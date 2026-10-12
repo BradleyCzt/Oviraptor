@@ -6,7 +6,7 @@ const props=defineProps<{scanId:string;attempt?:number;active?:boolean}>();
 const {replay,loading,readFailed,connectionUnavailable,refresh}=useNativeSdkLog(
  ()=>props.active!==false&&props.scanId?{scanId:props.scanId,attempt:props.attempt??0}:undefined);
 const stageLabel=(value?:string)=>( ({prepared:"原调用已准备",sent:"已发起请求",response_received:"HTTP 响应已读完",cost_saved:"原费用记录已保存",validated:"SDK 检查已通过",terminal:"SDK 入口已终结"} as Record<string,string>)[value??""]??"阶段需核对");
-const domainLabel=(value?:string)=>( ({root:"Root 模型调用",specialist:"独立子任务调用",source_round:"源码工具轮 SDK 调用"} as Record<string,string>)[value??""]??"调用归属需核对");
+const domainLabel=(value?:string)=>( ({root:"Root 模型调用",specialist:"独立子任务调用",source_round:"源码工具轮 SDK 调用",mapper_loop:"Mapper 受控工具轮 SDK 调用"} as Record<string,string>)[value??""]??"调用归属需核对");
 const terminalLabel=(value?:string)=>( ({returned:"原结果已返回",withheld:"结果未交付后续工作",uncertain:"结果未知 · 原占用保留",unsent:"尚未发出",failed:"入口状态需核对"} as Record<string,string>)[value??""]??"尚无终结记录");
 const costLabel=(value?:string)=>( ({received:"已保存收到响应的原费用事实",uncertain:"已保存未知结果的原费用事实",unsent:"已保存未发出的原费用事实"} as Record<string,string>)[value??""]??"");
 const calls=computed(()=>{

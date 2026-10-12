@@ -26,10 +26,7 @@ pub fn reassign_undispatched_expired(
     let mut assignment = super::assignment::load_assignment(&tx, &original.assignment_id)?
         .ok_or("assignment_replacement_missing")?;
     if assignment.role != original.role
-        || !matches!(
-            original.role,
-            AgentRole::SpaApiMapper | AgentRole::IdentitySession | AgentRole::DeepInvestigator
-        )
+        || !original.role.allows_undispatched_worker_replacement()
     {
         return Err("assignment_replacement_role_requires_dedicated_recovery".into());
     }

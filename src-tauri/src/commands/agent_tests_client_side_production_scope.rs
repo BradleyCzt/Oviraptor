@@ -55,7 +55,17 @@ fn client_hook_untouched_scope(f: &ClientHookFixture) -> Vec<(String, String)> {
                 _ => "0".into(),
             };
             let quoted = format!("\"{}\"", table.replace('"', "\"\""));
-            let sql = format!("SELECT rowid,* FROM {quoted} WHERE NOT ({excluded}) ORDER BY rowid");
+            let without_rowid: bool = db.query_row("SELECT wr FROM pragma_table_list WHERE schema='main' AND name=?1", [&table], |r| r.get(0)).unwrap();
+            let sql = if without_rowid {
+                let primary_keys: Vec<String> = db.prepare("SELECT name FROM pragma_table_info(?1,'main') WHERE pk>0 ORDER BY pk").unwrap()
+                    .query_map([&table], |r| r.get::<_, String>(0)).unwrap()
+                    .collect::<rusqlite::Result<_>>().unwrap();
+                assert!(!primary_keys.is_empty(), "WITHOUT ROWID table must have its original primary key");
+                let order = primary_keys.iter().map(|column| format!("\"{}\"", column.replace('"', "\"\""))).collect::<Vec<_>>().join(",");
+                format!("SELECT * FROM {quoted} WHERE NOT ({excluded}) ORDER BY {order}")
+            } else {
+                format!("SELECT rowid,* FROM {quoted} WHERE NOT ({excluded}) ORDER BY rowid")
+            };
             let mut q = db.prepare(&sql).unwrap();
             let n = q.column_count();
             let rows = q

@@ -39,8 +39,20 @@ fn agent_resolve_against(base: &str, href: &str) -> Option<String> {
         return None;
     }
     if let Ok(abs) = reqwest::Url::parse(href) {
-        if abs.scheme() == "http" || abs.scheme() == "https" {
-            return Some(abs.to_string());
+        match abs.scheme() {
+            "http" | "https" => return Some(abs.to_string()),
+            // U82: inventory realtime endpoints as same-origin https/http paths.
+            "ws" | "wss" => {
+                let mut rewritten = abs;
+                let httpish = if rewritten.scheme() == "ws" {
+                    "http"
+                } else {
+                    "https"
+                };
+                rewritten.set_scheme(httpish).ok()?;
+                return Some(rewritten.to_string());
+            }
+            _ => {}
         }
     }
     let base = reqwest::Url::parse(base).ok()?;
@@ -133,6 +145,30 @@ fn agent_is_static_surface_path(path: &str) -> bool {
 
 /// Pull same-origin app paths out of HTML/JS so classic sites (onclick / $.ajax)
 /// still feed the agent queue when the browser only saw one XHR.
+/// U96: public-surface seeding mode. String harvest is live; CDP click/BFS
+/// explore is not wired yet — do not advertise click-explore coverage.
+const NATIVE_SURFACE_EXPLORE_MODE: &str = "string_only";
+
+fn native_surface_explore_mode() -> &'static str {
+    NATIVE_SURFACE_EXPLORE_MODE
+}
+
+fn native_surface_click_explore_ready() -> bool {
+    native_surface_explore_mode() == "click_explore"
+}
+
+/// U97: CDP/DOM click-BFS entry. Not wired — callers must not invent candidates.
+fn native_surface_click_explore_candidates(
+    _dom_html: &str,
+    _base_url: &str,
+) -> Result<Vec<(String, String)>, String> {
+    if !native_surface_click_explore_ready() {
+        return Err("surface_click_explore_not_ready".into());
+    }
+    // Future: walk onclick/nav controls via CDP and return method/path pairs.
+    Ok(Vec::new())
+}
+
 fn agent_harvest_surface_paths(body: &str, base_url: &str) -> Vec<(String, String)> {
     let mut out: Vec<(String, String)> = Vec::new();
     let mut push = |method: &str, raw: &str| {
@@ -175,11 +211,86 @@ fn agent_harvest_surface_paths(body: &str, base_url: &str) -> Vec<(String, Strin
     // Explicit ajax / navigation patterns — prefer POST when ajax-like.
     let patterns = [
         (r#"(?i)url\s*:\s*["']([^"']+)["']"#, "POST"),
+        (r#"(?i)\burl\s*=\s*["'](/[^"']+)["']"#, "GET"),
+        (r#"(?i)\baction\s*=\s*["'](/[^"']+)["']"#, "POST"),
+        (r#"(?i)\bhref\s*=\s*["'](/[^"']+)["']"#, "GET"),
+        (r#"(?i)setAttribute\(\s*["'](?:href|action|src)["']\s*,\s*["'](/[^"']+)["']"#, "GET"),
+        (r#"(?i)\b(?:routerLink|ng-href)\s*=\s*["'](/[^"']+)["']"#, "GET"),
+        (r#"(?i)xlink:href\s*=\s*["'](/[^"']+)["']"#, "GET"),
+        (r#"(?i)<use\b[^>]*\bhref\s*=\s*["'](/[^"']+)["']"#, "GET"),
+        (r#"(?i)\b(?:poster|cite)\s*=\s*["'](/[^"']+)["']"#, "GET"),
+        (r#"(?i)\bsrcset\s*=\s*["']\s*(/[^\s,"']+)"#, "GET"),
+        (r#"(?i)\bimagesrcset\s*=\s*["']\s*(/[^\s,"']+)"#, "GET"),
+        (r#"(?i)<meta\b[^>]*(?:property|name)\s*=\s*["'](?:og:url|og:image|twitter:url|twitter:image)["'][^>]*content\s*=\s*["']([^"']+)["']"#, "GET"),
+        (r#"(?i)\bbackground\s*=\s*["'](/[^"']+)["']"#, "GET"),
+        (r#"(?i)url\(\s*["']?(/[^"')\s]+)["']?\s*\)"#, "GET"),
+        (r#"(?i)\b(?:longdesc|usemap)\s*=\s*["'](/[^"']+)["']"#, "GET"),
+        (r#"(?i)<base\b[^>]*\bhref\s*=\s*["'](/[^"']+)["']"#, "GET"),
+        (r#"(?i)<meta\b[^>]*content\s*=\s*["']([^"']+)["'][^>]*(?:property|name)\s*=\s*["'](?:og:url|og:image|twitter:url|twitter:image)["']"#, "GET"),
         (r#"(?i)\.ajax\(\s*\{[^}]{0,200}?url\s*:\s*["']([^"']+)["']"#, "POST"),
+        // jQuery / axios / http client shorthand — classic sites often skip .ajax({url:}).
+        (r#"(?i)\$\.(?:get|post|getJSON)\(\s*["']([^"']+)["']"#, "POST"),
+        (r#"(?i)\$\.(?:load|getScript)\(\s*["']([^"']+)["']"#, "GET"),
+        (r#"(?i)\baxios\.(?:get|post|put|delete|patch)\(\s*["']([^"']+)["']"#, "POST"),
+        (r#"(?i)\bhttps?\.(?:get|post|put|delete|patch|request)\(\s*["']([^"']+)["']"#, "POST"),
+        (r#"(?i)\bfetch\(\s*["']([^"']+)["']"#, "GET"),
+        // SPA routers + meta refresh — common public surfaces without classic href.
+        (r#"(?i)\b(?:router\.(?:push|replace)|navigate)\(\s*["']([^"']+)["']"#, "GET"),
+        (r#"(?i)\bpath\s*:\s*["'](/[^"']+)["']"#, "GET"),
+        (r#"(?i)http-equiv\s*=\s*["']refresh["'][^>]*content\s*=\s*["'][^"']*url=([^"'\s>]+)"#, "GET"),
+        (r#"(?i)content\s*=\s*["'][^"']*url=([^"'\s>]+)["'][^>]*http-equiv\s*=\s*["']refresh["']"#, "GET"),
         (r#"(?i)(?:location\.href|window\.location|location)\s*=\s*["']([^"']+)["']"#, "GET"),
-        (r#"(?i)tourl\(\s*["']([^"']+)["']"#, "GET"),
-        (r#"(?i)onclick\s*=\s*["'][^"']*?(?:location|tourl|open)\s*\(\s*['"]([^'"]+)['"]"#, "GET"),
+        (r#"(?i)location\.(?:assign|replace)\(\s*["']([^"']+)["']"#, "GET"),
+        (r#"(?i)history\.(?:pushState|replaceState)\(\s*[^,]+,\s*[^,]+,\s*["']([^"']+)["']"#, "GET"),
+        (r#"(?i)(?:window\.)?open\(\s*["']([^"']+)["']"#, "GET"),
+        (r#"(?i)tourl{1,2}\(\s*["']([^"']+)["']"#, "GET"),
+        // Any onclick handler whose first string arg looks like a same-site path
+        // (covers tourl/location/open and site-specific navigators).
+        (r#"(?i)onclick\s*=\s*["'][^"']*?\(\s*['"]([^'"]+)['"]"#, "GET"),
         (r#"(?i)(?:href|action)\s*=\s*["']([^"']+)["']"#, "GET"),
+        // HTML5 per-control form overrides.
+        (r#"(?i)formaction\s*=\s*["']([^"']+)["']"#, "POST"),
+        // data-* navigation hooks used by many admin skins.
+        (r#"(?i)data-(?:href|url|path|link|action|route|api|endpoint|target)\s*=\s*["']([^"']+)["']"#, "GET"),
+
+        // Classic XHR / realtime endpoints often miss href/ajax({url}).
+        (r#"(?i)\.open\(\s*["'](?:GET|POST|PUT|DELETE|PATCH)["']\s*,\s*["']([^"']+)["']"#, "POST"),
+        (r#"(?i)new\s+WebSocket\(\s*["']([^"']+)["']"#, "GET"),
+        (r#"(?i)new\s+EventSource\(\s*["']([^"']+)["']"#, "GET"),
+
+        (r#"(?i)navigator\.sendBeacon\(\s*["']([^"']+)["']"#, "POST"),
+        (r#"(?i)\bimport\(\s*["']([^"']+)["']"#, "GET"),
+
+        (r#"(?i)new\s+Worker\(\s*["']([^"']+)["']"#, "GET"),
+        (r#"(?i)navigator\.serviceWorker\.register\(\s*["']([^"']+)["']"#, "GET"),
+
+        (r#"(?i)\bping\s*=\s*["']([^"']+)["']"#, "POST"),
+
+        // HTMX declarative fetches on classic and hybrid pages.
+        (r#"(?i)\bhx-(?:get|post|put|patch|delete)\s*=\s*["']([^"']+)["']"#, "POST"),
+
+        // Vue/Alpine click handlers with a first string path arg (mirrors onclick).
+        (r#"(?i)(?:@click|v-on:click|x-on:click)\s*=\s*["'][^"']*?\(\s*['"]([^'"]+)['"]"#, "GET"),
+        // U148: <track src="/..."> text-track endpoints (classic media gap).
+        (r#"(?i)<track\b[^>]*\bsrc\s*=\s*["'](/[^"']+)["']"#, "GET"),
+        // U149: <video|audio|source src="/..."> media endpoints (often stream routes).
+        (r#"(?i)<(?:video|audio|source)\b[^>]*\bsrc\s*=\s*["'](/[^"']+)["']"#, "GET"),
+        // U150: data-src lazy-load hook (not in the data-* nav alternation).
+        (r#"(?i)\bdata-src\s*=\s*["'](/[^"']+)["']"#, "GET"),
+        // U154: fetch(new Request("/...")) wrapper — plain fetch( misses the Request() wrap.
+        (r#"(?i)new\s+Request\(\s*["'](/[^"']+)["']"#, "GET"),
+        // U155: JSON/config endpoint keys ("api"/"endpoint"/...): "/..." — quoted key skips url: regex.
+        (r#"(?i)"(?:api|apiUrl|apiBase|endpoint|baseURL|basePath)"\s*:\s*["'](/[^"']+)["']"#, "GET"),
+        // U156: `.src = "/..."` dynamic property assignment (Image()/script/media); tag src= has a space not a dot.
+        (r#"(?i)\.src\s*=\s*["'](/[^"']+)["']"#, "GET"),
+        // U157: bare CSS `@import "/..."` (string form) — url() form already covered, bare string was not.
+        (r#"(?i)@import\s+["'](/[^"']+)["']"#, "GET"),
+        // U158: Worker `importScripts("/...")` — \bimport( needs "import(", here it's "importScripts(".
+        (r#"(?i)importScripts\(\s*["'](/[^"']+)["']"#, "GET"),
+        // U164: <img|input|frame src="/..."> element sources (classic/media/legacy frameset).
+        (r#"(?i)<(?:img|input|frame)\b[^>]*\bsrc\s*=\s*["'](/[^"']+)["']"#, "GET"),
+        // U165: fetch(`/...`) backtick template literal — plain fetch( needs a quote.
+        (r#"(?i)\bfetch\(\s*`(/[^`]+)`"#, "GET"),
     ];
     for (pat, method) in patterns {
         if let Ok(re) = regex::Regex::new(pat) {
@@ -194,6 +305,44 @@ fn agent_harvest_surface_paths(body: &str, base_url: &str) -> Vec<(String, Strin
     // Script src — fetch later for deeper harvest (GET).
     for src in agent_extract_script_srcs(body) {
         push("GET", &src);
+    }
+
+    // Same-site iframe app shells (classic portals embed admin frames).
+    if let Ok(re) = regex::Regex::new(r#"(?i)<iframe\b[^>]*\bsrc\s*=\s*["']([^"']+)["']"#) {
+        for cap in re.captures_iter(body).take(40) {
+            if let Some(m) = cap.get(1) {
+                push("GET", m.as_str());
+            }
+        }
+    }
+
+    // Module / prefetch hints often point at same-site app bundles that hold routes.
+    if let Ok(re) = regex::Regex::new(
+        r#"(?i)<link\b[^>]*\brel\s*=\s*["'](?:modulepreload|prefetch|preload)["'][^>]*\bhref\s*=\s*["']([^"']+)["']"#,
+    ) {
+        for cap in re.captures_iter(body).take(40) {
+            if let Some(m) = cap.get(1) {
+                push("GET", m.as_str());
+            }
+        }
+    }
+    if let Ok(re) = regex::Regex::new(
+        r#"(?i)<link\b[^>]*\bhref\s*=\s*["']([^"']+)["'][^>]*\brel\s*=\s*["'](?:modulepreload|prefetch|preload)["']"#,
+    ) {
+        for cap in re.captures_iter(body).take(40) {
+            if let Some(m) = cap.get(1) {
+                push("GET", m.as_str());
+            }
+        }
+    }
+
+    // Embedded plugin shells sometimes host same-site app routes.
+    if let Ok(re) = regex::Regex::new(r#"(?i)<(?:embed|object)\b[^>]*(?:src|data)\s*=\s*["']([^"']+)["']"#) {
+        for cap in re.captures_iter(body).take(40) {
+            if let Some(m) = cap.get(1) {
+                push("GET", m.as_str());
+            }
+        }
     }
 
     // Generic /Controller/Action style paths in JS/HTML text.

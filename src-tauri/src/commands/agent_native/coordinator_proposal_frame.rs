@@ -1,12 +1,13 @@
 impl NativeCoordinatorFrame {
     fn investigator(
-        tx: &rusqlite::Transaction<'_>,
+        tx: &rusqlite::Connection,
         context: &AgentRunContext,
         actor: &crate::agent_runtime::multi_agent::lease::CoordinatorLease,
         candidate: &str,
         revision: i64,
         missing: &JsonValue,
     ) -> Result<Self, String> {
+    if tx.is_autocommit() { return Err("gap_original_snapshot_required".into()); }
         use crate::agent_runtime::{
             contract::AgentRole,
             multi_agent::{mailbox, scheduler, specialist},
@@ -45,7 +46,7 @@ impl NativeCoordinatorFrame {
             run_id: run,
             role: AgentRole::DeepInvestigator,
         };
-        let receipt = specialist::received_for_reconciliation(tx, actor, &child)?;
+        let receipt = specialist::received_for_local_delivery(tx, actor, &child)?;
         if !receipt.rejection.is_empty() {
             return Err("root_proposal_frame_paid_output_rejected".into());
         }
@@ -65,6 +66,15 @@ impl NativeCoordinatorFrame {
         let message = mailbox::verified_completed_output(tx, actor, &message)?;
         let assessment: JsonValue = serde_json::from_str(&assessment)
             .map_err(|_| "root_proposal_frame_assessment_invalid")?;
+        let expected_assessment = crate::agent_runtime::secrets::redact_json(&json!({
+            "candidateId":candidate,"evidenceRevision":revision,
+            "summary":"当前缺口需要新的已校验合同或证据 revision，暂不派发目标请求",
+            "decision":"deferred_requires_new_evidence_revision",
+            "reasonCode":gap_assessment_reason(&proposal,3),
+            "newAttemptRequired":proposal["nextStep"]=="request_new_contract",
+            "targetRequestsGranted":0,"schemaVersion":3
+        }));
+        mailbox::verified_completed_gap_assessment(tx,actor,&child,&expected_assessment)?;
         if message.payload["schemaVersion"] != 3
             || message.payload["proposal"] != crate::agent_runtime::secrets::redact_json(&proposal)
             || assessment["schemaVersion"] != 3

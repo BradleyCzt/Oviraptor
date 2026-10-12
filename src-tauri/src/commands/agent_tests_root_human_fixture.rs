@@ -89,7 +89,13 @@ fn human_root_producer_with_limits(reply: u8, requests: u8, turns: u8) -> HumanR
     h.context.execution_plan.hard_model_requests = requests.into();
     h.context.execution_plan.soft_model_requests = requests.into();
     h.context.execution_plan.max_turns = turns.into();
-    freeze_fresh_multi_production_harness(&mut h);
+    if requests == 6 {
+        // Historical six-request deferral cases keep their original v5 birth
+        // and exact limits; normal fresh Human Root cases still exercise v6.
+        freeze_fresh_multi_production_harness_original_v5(&mut h);
+    } else {
+        freeze_fresh_multi_production_harness(&mut h);
+    }
     let mut f = HumanRootProducer {
         f: BudgetTriggerFixture {
             h,

@@ -36,9 +36,27 @@ fn client_side_actual_finish_preserves_reviewer_headroom_from_original_fresh_lim
         client_hook_assert_no_new_grant(&f);
     }
 }
+
+#[test]
+fn client_side_actual_finish_uses_reviewer_floor_15000_not_legacy_8000() {
+    // 22k leaves room under a legacy 8k floor+8k grant (16k) but not under 15k+8k (23k).
+    let mut f = client_hook_fixture("client-source-floor-15k", 22_000, 20);
+    let before = client_hook_untouched_scope(&f);
+    let costs = client_hook_target_costs(&f.db);
+    let error = f.finish().unwrap_err();
+    assert!(
+        error.contains("client_side_budget_headroom_missing_reviewer_floor_preserved"),
+        "22k must preserve 15k Reviewer floor: {error}"
+    );
+    assert_eq!(client_hook_untouched_scope(&f), before);
+    assert_eq!(client_hook_target_costs(&f.db), costs);
+    client_hook_assert_supplier_closure(&f);
+    client_hook_assert_no_new_grant(&f);
+}
+
 #[test]
 fn client_side_actual_finish_cross_coordinator_cannot_adopt_original_supplier_or_control() {
-    use crate::agent_runtime::multi_agent::{lease, supervisor::WorkerSupervisor};
+    use crate::agent_runtime::multi_agent::lease;
     let mut f = client_hook_fixture("client-source-cross-c", 60000, 20);
     // Join C1 before replacing its actual lease; do not race its renewal thread.
     let old = f.session.take().unwrap();
@@ -57,7 +75,7 @@ fn client_side_actual_finish_cross_coordinator_cannot_adopt_original_supplier_or
     )
     .unwrap();
     assert_eq!(actor.lease_epoch, original.lease_epoch + 1);
-    let supervisor = WorkerSupervisor::start(&f.context.db_path, &actor).unwrap();
+    let supervisor = start_original_fixture_supervisor(&f.context.db_path, &actor).unwrap();
     f.context.supervision = Some(supervisor.ticket());
     f.session = Some(MultiAgentSession {
         supervisor,

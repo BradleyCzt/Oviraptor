@@ -49,6 +49,16 @@ pub(crate) fn schedule_child_in_transaction(
     reserved_requests: i64,
 ) -> Result<ScheduledChild, String> {
     let connection: &Connection = transaction;
+    // DESIGN §5.1 / §5.2：同质任务由 homogeneous::apply 的调度分支负责（含 slice_id 的
+    // dedupe + lane_slots 配额 + 不写旧 lane 互斥表）。legacy 分支一律不受影响。
+    if crate::agent_runtime::multi_agent::homogeneous::apply::task_exists_for_root(
+        connection,
+        &lease.root_run_id,
+    )
+    .unwrap_or(false)
+    {
+        return Err("homogeneous_worker_requires_homogeneous_scheduler".into());
+    }
     validate_coordinator_lease(connection, lease)?;
     let mut issued_lease = lease.clone();
     issued_lease.lease_expires_at = connection.query_row(
@@ -98,6 +108,12 @@ pub(crate) fn schedule_child_in_transaction(
     assignment.capability_lease = capabilities.to_vec();
     validate_coordinator_lease(transaction, lease)?;
     require_executable_coordinator(transaction, lease)?;
+    if role == AgentRole::Authorization && super::assignment::load_assignment(transaction, &assignment_id)?.is_none() {
+        crate::agent_runtime::multi_agent::budget::supervision_capacity::require_authorization_issue_headroom_on(transaction, lease)?;
+    }
+    if role == AgentRole::ExternalSurface && super::assignment::load_assignment(transaction, &assignment_id)?.is_none() {
+        crate::agent_runtime::multi_agent::budget::supervision_capacity::require_external_surface_issue_headroom_on(transaction, lease, reserved_requests)?;
+    }
     if role == AgentRole::WebExecutor {
         if super::assignment::load_assignment(transaction,&assignment_id)?.is_some() {
             let original=verify_scheduled_authority(transaction,lease,&assignment)?;
@@ -107,11 +123,14 @@ pub(crate) fn schedule_child_in_transaction(
     // Upgraded databases can contain active assignments written before the
     // lane table existed. Treat those as occupying their lane too; never
     // silently reclaim a slot on expiry, particularly a target-touching one.
+    // DESIGN §6：同质 Worker 的行用 agent_lane_slots 计配额，不参与这里的互斥盘点，
+    // 否则同 target 的多切片并行会被误判成 agent_lane_occupied。
     let legacy_occupant: bool = transaction
         .query_row(
             "SELECT EXISTS(SELECT 1 FROM agent_assignments a JOIN agent_runs r ON r.id=a.coordinator_run_id \
              WHERE r.scan_id=?1 AND r.attempt_number=?2 AND a.target_key=?3 AND a.lane=?4 \
-             AND a.id<>?5 AND a.state IN ('prepared','leased','running','waiting_review'))",
+             AND a.id<>?5 AND a.state IN ('prepared','leased','running','waiting_review') \
+             AND a.scheduling_model='legacy_role_pipeline')",
             params![
                 lease.scan_id,
                 lease.attempt_number,

@@ -92,6 +92,60 @@ pub(super) fn verify_closed(db: &Connection, root: &str) -> Result<(), String> {
     for assignment in calls {
         specialist::verify_received_original(db, &actor, &assignment)?;
     }
+    if crate::agent_runtime::web_mode::root::read(db, root)?
+        .and_then(|mode| mode.bootstrap_dispatch())
+        .is_some_and(|contract| contract["schemaVersion"] == 15)
+    {
+        // Older normal v15 archives predate this additive receipt table.
+        // Do not create it or change their bytes. An actually expired worker
+        // below still requires its original signed expired receipt and fails
+        // closed when that source is absent.
+        let has_expired: bool = db.query_row(
+            "SELECT EXISTS(SELECT 1 FROM main.sqlite_master WHERE type='table' AND name='agent_mapper_loop_expired_receipts')",
+            [], |row| row.get(0),
+        ).map_err(|error| error.to_string())?;
+        let expired_inventory = if has_expired {
+            " UNION SELECT assignment_id,child_run_id FROM main.agent_mapper_loop_expired_receipts WHERE root_run_id=?1 OR child_run_id IN (SELECT id FROM agent_runs WHERE root_run_id=?1)"
+        } else {
+            ""
+        };
+        let sql = format!(
+            "SELECT id,child_run_id FROM agent_assignments WHERE coordinator_run_id=?1 AND (role='spa_api_mapper' OR json_type(task_slice_json,'$.mapperLoop') IS NOT NULL)
+             UNION SELECT assignment_id,child_run_id FROM agent_mapper_loop_journal WHERE root_run_id=?1 OR child_run_id IN (SELECT id FROM agent_runs WHERE root_run_id=?1)
+             UNION SELECT assignment_id,child_run_id FROM agent_mapper_loop_final_receipts WHERE root_run_id=?1 OR child_run_id IN (SELECT id FROM agent_runs WHERE root_run_id=?1)
+             {expired_inventory} ORDER BY 1,2",
+        );
+        let mut query = db.prepare(&sql).map_err(|error| error.to_string())?;
+        let children = query
+            .query_map([root], |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+            })
+            .map_err(|error| error.to_string())?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|error| error.to_string())?;
+        for (assignment_id, run_id) in children {
+            let child = crate::agent_runtime::multi_agent::scheduler::ScheduledChild {
+                assignment_id,
+                run_id,
+                role: crate::agent_runtime::contract::AgentRole::SpaApiMapper,
+            };
+            let worker = crate::agent_runtime::multi_agent::attempts::current(
+                db,
+                &actor,
+                &child.assignment_id,
+            )?;
+            if worker.state == "expired" {
+                if !has_expired {
+                    return Err("deleted_audit_mapper_loop_original_expired_missing".into());
+                }
+                crate::agent_runtime::multi_agent::specialist::mapper_loop::expired_seal::read_original_on(db, &actor, &child)?
+                    .ok_or("deleted_audit_mapper_loop_original_expired_missing")?;
+            } else {
+                crate::agent_runtime::multi_agent::specialist::mapper_loop::final_seal::read_final_original_on(db, &actor, &child)?
+                    .ok_or("deleted_audit_mapper_loop_original_final_missing")?;
+            }
+        }
+    }
     budget::web_lifetime::verify_closed_original(db, &actor)?;
     super::delivery::verify(db, &actor)?;
     Ok(())

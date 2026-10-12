@@ -141,8 +141,11 @@ export function useAgentDialogStatus(options: {
     }
   }
 
-  async function loadStatus(afterSequence?: number) {
-    if (!visible()) return;
+  async function loadStatus(afterSequence?: number, requestedByUser = false) {
+    // Native window occlusion can leave a newly selected view hidden before
+    // its visibility event arrives. Explicit navigation still needs one DB
+    // snapshot; automatic event/poll reads remain visibility gated.
+    if (disposed || isDisposed() || (!requestedByUser && !visible())) return;
     cancel(timer);
     timer = undefined;
     if (!scanId.value) { state.value = undefined; return; }

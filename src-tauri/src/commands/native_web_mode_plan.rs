@@ -1,6 +1,18 @@
+// Read-only route classification; this does not grant recovery authority.
+fn ordinary_web_recovery_scope_on(db: &rusqlite::Connection, scan: &str) -> Result<bool, String> {
+    db.query_row(
+        "SELECT EXISTS(SELECT 1 FROM main.native_protection_recovery_drafts WHERE scan_id=?1)
+        OR EXISTS(SELECT 1 FROM main.native_protection_recovery_cancellations WHERE scan_id=?1)
+        OR EXISTS(SELECT 1 FROM main.native_protection_recovery_scope_budgets WHERE scan_id=?1)
+        OR EXISTS(SELECT 1 FROM main.native_web_mode_actions WHERE scan_id=?1 AND json_extract(action_json,'$.kind')='protection_recovery')",
+        [scan], |r| r.get(0),
+    ).map_err(|e| e.to_string())
+}
+
 include!("native_web_root_budget.rs");
 
 // Ordinary Web entry only. Source's old plan publisher never calls this helper.
+#[cfg(test)]
 fn persist_frozen_web_execution_plan(
     db_path: &Path,
     scan: &str,
@@ -8,8 +20,23 @@ fn persist_frozen_web_execution_plan(
     target: &str,
     plan: &AgentExecutionPlan,
 ) -> Result<(), String> {
+    persist_frozen_web_execution_plan_with_tool_configuration(db_path,scan,attempt,target,plan,None)
+}
+
+fn persist_frozen_web_execution_plan_with_tool_configuration(
+    db_path: &Path, scan: &str, attempt: i64, target: &str,
+    plan: &AgentExecutionPlan,
+    configuration: Option<&crate::tool_supply::ToolAdministratorConfiguration>,
+) -> Result<(), String> {
     use crate::agent_runtime::{store, web_mode::root};
     let db = db::open(db_path)?;
+    // Recovery scope needs its own signed budget/model/identity consumer. Never
+    // let this ordinary publisher mint schema2 default ceilings for it, even
+    // if a future startup has already produced a valid private Mode receipt.
+    // The retained action and cancellation also deny a lost draft relation.
+    if ordinary_web_recovery_scope_on(&db, scan)? {
+        return Err("protection_recovery_requires_dedicated_root_budget".into());
+    }
     let proof = private_web_mode_on(&db, scan, attempt)?;
     if !proof.fact().targets.iter().any(|v| v == target) {
         return Err("web_mode_target_not_frozen".into());
@@ -25,19 +52,33 @@ fn persist_frozen_web_execution_plan(
         ids
     };
     if existing.is_empty() {
+        #[cfg(test)]
+        let prepared_plan = AgentExecutionPlan::from_json(
+            &agent_tests::native_frozen_tool_supply_plan_for_test(
+                db_path, scan, attempt, target, plan.as_json(),
+            )?,
+        ).ok_or("tool_supply_test_original_plan_invalid")?;
+        #[cfg(test)]
+        let plan = &prepared_plan;
         let declaration =
-            root::NewRootModeDeclaration::from_verified(&proof, target, &plan.hash())?.with_local_deliberation()?;
+            root::NewRootModeDeclaration::from_verified(&proof, target, &plan.hash())?.with_local_deliberation()?.with_new_evidence_supervision()?.with_lease_expiry_supervision()?.with_protection_supervision()?;
+        #[cfg(test)]
+        let declaration = agent_tests::native_mapper_physical_new_birth_for_test(
+            &db, db_path, scan, attempt, target, plan, declaration,
+        )?;
         let budget = fresh_web_root_budget_declaration(&proof, target, plan)?;
-        return store::record_attempt_plan_with_declarations(
+        let native_plan = plan.as_json();
+        return store::record_attempt_plan_with_declarations_and_tool_configuration(
             &db,
             scan,
             attempt,
             target,
             plan.backend,
             &plan.hash(),
-            &plan.as_json(),
+            &native_plan,
             Some(&budget),
             Some(&declaration),
+            configuration,
         );
     }
     if existing.len() != 1 {

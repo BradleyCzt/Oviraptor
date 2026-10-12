@@ -57,6 +57,8 @@ pub(crate) fn claim(
     assignment: &str,
     source: &str,
 ) -> Result<(), String> {
+    crate::agent_runtime::target_protection::require_clear_on(tx, &lease.scan_id, &lease.target_key)?;
+    super::continuation::migration::require_plain_root_boundary(tx, &lease.root_run_id)?;
     super::admission::require_determinate(tx, &lease.root_run_id)?;
     super::clock::sample(tx, lease, assignment)?;
     append(
@@ -78,7 +80,8 @@ pub(crate) fn claim(
         1,
         &format!("target:{source}:dispatch"),
         source,
-    )
+    )?;
+    crate::agent_runtime::target_protection::require_clear_on(tx, &lease.scan_id, &lease.target_key)
 }
 
 pub(crate) fn receive(
@@ -110,3 +113,5 @@ pub(crate) fn receive_for_run(tx: &Transaction<'_>, run: &str, source: &str) -> 
     }
     Ok(())
 }
+
+include!("target/receipt.rs");

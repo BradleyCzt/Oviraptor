@@ -49,7 +49,7 @@ fn bind_agent_evidence_location(context: &AgentRunContext) -> Result<(), String>
     transaction.commit().map_err(|e| format!("followup_location_commit:{e}"))
 }
 
-fn resolve_agent_evidence_location(connection: &rusqlite::Connection, root: &str) -> Result<PathBuf, String> {
+pub(crate) fn resolve_agent_evidence_location(connection: &rusqlite::Connection, root: &str) -> Result<PathBuf, String> {
     let (scan, stored_attempt, stored_target, current_attempt): (String, String, String, String) = connection.query_row(
         "SELECT l.scan_id,l.attempt_dir,l.target_dir,a.work_dir FROM agent_evidence_locations l \
          JOIN agent_runs r ON r.id=l.root_run_id AND r.scan_id=l.scan_id \
@@ -82,7 +82,8 @@ pub struct GapFollowupPreview {
     target_requests_granted: u64,
 }
 
-fn gap_followup_preview_in(connection: &rusqlite::Transaction<'_>, scan_id: &str, message_id: &str) -> Result<GapFollowupPreview, String> {
+fn gap_followup_preview_in(connection: &rusqlite::Connection, scan_id: &str, message_id: &str) -> Result<GapFollowupPreview, String> {
+    if connection.is_autocommit() { return Err("gap_original_snapshot_required".into()); }
     let (root, assignment, child, target, project, raw): (String,String,String,String,i64,String) = connection.query_row(
         "SELECT m.root_run_id,m.assignment_id,m.to_run_id,r.target_url,s.project_id,m.payload_json \
          FROM agent_messages m JOIN agent_runs r ON r.id=m.root_run_id \

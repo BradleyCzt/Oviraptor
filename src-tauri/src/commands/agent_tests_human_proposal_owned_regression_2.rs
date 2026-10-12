@@ -107,7 +107,8 @@ fn directive_proposal_recovers_local_commit_failures_without_duplicate_model_cal
 fn directive_proposal_real_executor_child_preserves_reviewer_budget() {
     use crate::agent_runtime::multi_agent::scheduler;
     // Test the actual scheduled executor reservation; it performs no target I/O.
-    let f = root_tick_fixture_protocol_limits("proposal-executor", "http://127.0.0.1:9/v1", true, (20_000,20));
+    // 27k with an 8k held executor leaves ~19k free: one 4k proposal + 15k Reviewer floor, not a second.
+    let f = root_tick_fixture_protocol_limits("proposal-executor", "http://127.0.0.1:9/v1", true, (27_000,20));
     let mut context=f.context.clone();
     let connection=db::open(&context.db_path).unwrap();
     let executor=scheduler::schedule_child(&connection,&f.actor,crate::agent_runtime::contract::AgentRole::WebExecutor,crate::agent_runtime::contract::AgentLane::TargetTouching,
@@ -120,7 +121,7 @@ fn directive_proposal_real_executor_child_preserves_reviewer_budget() {
     assert_eq!(apply_human_proposal_actions(&context,&mut inbox).unwrap().len(),1);
     assert_eq!(seen.lock().unwrap().len(),1);
     let (tokens,requests):(i64,i64)=connection.query_row("SELECT total_tokens-spent_tokens-reserved_tokens,total_requests-spent_requests-reserved_requests FROM agent_budget_ledger",[],|r|Ok((r.get(0)?,r.get(1)?))).unwrap();
-    assert!(tokens>=8_000 && requests>=1,"review reservation consumed: {tokens}/{requests}");
+    assert!(tokens>=15_000 && requests>=1,"review reservation consumed: {tokens}/{requests}");
     let status:String=connection.query_row("SELECT status FROM agent_user_directives WHERE id=?1",[id],|r|r.get(0)).unwrap();
     assert_eq!(status,"completed");
     let second=confirm_queue_directive(&connection,&f.actor,"@investigator 请分析已有证据");

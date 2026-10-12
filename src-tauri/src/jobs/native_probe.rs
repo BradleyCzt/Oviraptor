@@ -31,6 +31,8 @@ const PROBE_FIELDS: &[&str] = &[
     "probe_body_bytes",
     "probe_virtual_host",
     "probe_redirect_scope",
+    "has_login",
+    "has_register",
 ];
 
 #[derive(Clone, Debug)]
@@ -165,6 +167,258 @@ fn html_title(body: &str) -> String {
         .collect()
 }
 
+fn portal_flags(url: &str, title: &str, body: &str) -> (&'static str, &'static str) {
+    let mut login = false;
+    let mut register = false;
+    note_portal_url(&mut login, &mut register, url);
+    note_portal_text(&mut login, &mut register, title, true);
+    scan_portal_markup(body, &mut login, &mut register);
+    (
+        if login { "1" } else { "0" },
+        if register { "1" } else { "0" },
+    )
+}
+
+fn cached_probe_is_current(row: &Record) -> bool {
+    let outcome = text(row, &["probe_outcome"]);
+    let needs_portal = matches!(
+        outcome.as_str(),
+        "web_alive"
+            | "web_restricted"
+            | "browser_render_required"
+            | "virtual_host_required"
+            | "blocked_content"
+            | "web_abnormal"
+    );
+    if !needs_portal {
+        return true;
+    }
+    let login = text(row, &["has_login"]);
+    let register = text(row, &["has_register"]);
+    matches!(login.as_str(), "0" | "1") && matches!(register.as_str(), "0" | "1")
+}
+
+fn note_portal_url(login: &mut bool, register: &mut bool, raw: &str) {
+    let path = url_path(raw);
+    if path_has_login(&path) {
+        *login = true;
+    }
+    if path_has_register(&path) {
+        *register = true;
+    }
+}
+
+fn note_portal_text(login: &mut bool, register: &mut bool, raw: &str, allow_admin_label: bool) {
+    let value = collapse_ws(&raw.to_ascii_lowercase());
+    if value.is_empty() {
+        return;
+    }
+    if value.contains("登录")
+        || value.contains("登入")
+        || value.contains("登陆")
+        || value.contains("sign in")
+        || value.contains("signin")
+        || value.contains("log in")
+        || value.contains("login")
+        || (allow_admin_label && value.chars().count() <= 24 && value.contains("后台"))
+    {
+        *login = true;
+    }
+    if value.contains("注册")
+        || value.contains("註冊")
+        || value.contains("sign up")
+        || value.contains("signup")
+        || value.contains("register")
+        || value.contains("create account")
+    {
+        *register = true;
+    }
+}
+
+fn collapse_ws(value: &str) -> String {
+    value.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
+fn url_path(raw: &str) -> String {
+    let trimmed = raw.trim();
+    let no_query = trimmed.split(['#', '?']).next().unwrap_or(trimmed);
+    if let Some((_, rest)) = no_query.split_once("://") {
+        return rest
+            .find('/')
+            .map(|index| rest[index..].to_ascii_lowercase())
+            .unwrap_or_else(|| "/".into());
+    }
+    if let Some(rest) = no_query.strip_prefix("//") {
+        return rest
+            .find('/')
+            .map(|index| rest[index..].to_ascii_lowercase())
+            .unwrap_or_else(|| "/".into());
+    }
+    no_query.to_ascii_lowercase()
+}
+
+fn path_has_login(path: &str) -> bool {
+    const NEEDLES: &[&str] = &[
+        "/login", "login.", "signin", "sign-in", "sign_in", "logon", "log-in", "log_in",
+    ];
+    NEEDLES.iter().any(|needle| path.contains(needle))
+        || path_segments(path).any(|segment| {
+            matches!(
+                segment,
+                "login" | "signin" | "logon" | "admin" | "auth" | "authentication"
+            )
+        })
+}
+
+fn path_has_register(path: &str) -> bool {
+    const NEEDLES: &[&str] = &[
+        "/register", "register.", "signup", "sign-up", "sign_up", "/regist",
+    ];
+    NEEDLES.iter().any(|needle| path.contains(needle))
+        || path_segments(path)
+            .any(|segment| matches!(segment, "register" | "signup" | "regist" | "registration"))
+}
+
+fn path_segments(path: &str) -> impl Iterator<Item = &str> {
+    path.split(|character: char| matches!(character, '/' | '.' | '-' | '_' | ';'))
+        .filter(|segment| !segment.is_empty())
+}
+
+fn scan_portal_markup(body: &str, login: &mut bool, register: &mut bool) {
+    let lower = body.to_ascii_lowercase();
+    let mut index = 0usize;
+    while index < lower.len() {
+        let rest = &lower[index..];
+        if starts_tag(rest, "script") {
+            index += skip_until(rest, "</script>");
+            continue;
+        }
+        if starts_tag(rest, "style") {
+            index += skip_until(rest, "</style>");
+            continue;
+        }
+        if let Some(name) = control_tag_name(rest) {
+            let Some(close) = rest.find('>') else {
+                // A truncated page can end inside a tag. len-1 is not a char boundary
+                // when that ending is Chinese, and slicing there panics the probe thread.
+                apply_control(name, rest, login, register);
+                index += rest.len();
+                continue;
+            };
+            apply_control(name, &rest[..close], login, register);
+            if matches!(name, "a" | "button" | "label") {
+                let inner = &rest[close + 1..];
+                let end = inner.find('<').unwrap_or(inner.len());
+                note_portal_text(login, register, prefix_bytes(inner, end.min(80)), true);
+            }
+            index += close + 1;
+            continue;
+        }
+        index += rest.chars().next().map(|character| character.len_utf8()).unwrap_or(1);
+    }
+}
+
+fn starts_tag(rest: &str, name: &str) -> bool {
+    let marker = format!("<{name}");
+    rest.starts_with(&marker) && tag_boundary(rest, marker.len())
+}
+
+fn tag_boundary(rest: &str, at: usize) -> bool {
+    match rest[at..].chars().next() {
+        None => true,
+        Some(character) => !character.is_ascii_alphanumeric() && character != '-' && character != '_',
+    }
+}
+
+fn control_tag_name(rest: &str) -> Option<&'static str> {
+    for name in ["button", "input", "form", "label", "a"] {
+        if starts_tag(rest, name) {
+            return Some(name);
+        }
+    }
+    None
+}
+
+fn panic_message(payload: Box<dyn std::any::Any + Send>) -> String {
+    payload
+        .downcast_ref::<String>()
+        .cloned()
+        .or_else(|| payload.downcast_ref::<&str>().map(|message| (*message).to_string()))
+        .unwrap_or_else(|| "未提供异常说明".into())
+}
+
+fn skip_until(rest: &str, closer: &str) -> usize {
+    rest.find(closer)
+        .map(|position| position + closer.len())
+        .unwrap_or(rest.len())
+        .max(1)
+}
+
+fn apply_control(name: &str, tag: &str, login: &mut bool, register: &mut bool) {
+    if name == "input" && attr_is(tag, "type", "password") {
+        *login = true;
+    }
+    for key in ["href", "action", "formaction", "onclick", "onsubmit"] {
+        if let Some(value) = attr_value(tag, key) {
+            note_portal_url(login, register, value);
+        }
+    }
+    for key in ["value", "placeholder", "aria-label", "title", "alt"] {
+        if let Some(value) = attr_value(tag, key) {
+            note_portal_text(login, register, value, true);
+        }
+    }
+}
+
+fn attr_is(tag: &str, name: &str, expected: &str) -> bool {
+    attr_value(tag, name).is_some_and(|value| value == expected)
+}
+
+fn attr_value<'a>(tag: &'a str, name: &str) -> Option<&'a str> {
+    let needle = format!("{name}=");
+    let mut search = tag;
+    while let Some(position) = search.find(&needle) {
+        let boundary = position == 0
+            || match search[..position].chars().next_back() {
+                None => true,
+                Some(character) => {
+                    !character.is_ascii_alphanumeric() && character != '-' && character != '_'
+                }
+            };
+        if boundary {
+            return Some(read_attr(&search[position + needle.len()..]));
+        }
+        search = &search[position + needle.len()..];
+    }
+    None
+}
+
+fn prefix_bytes(value: &str, max_bytes: usize) -> &str {
+    if max_bytes >= value.len() {
+        return value;
+    }
+    let mut end = max_bytes;
+    while end > 0 && !value.is_char_boundary(end) {
+        end -= 1;
+    }
+    &value[..end]
+}
+
+fn read_attr(raw: &str) -> &str {
+    let Some(first) = raw.chars().next() else {
+        return "";
+    };
+    if first == '"' || first == '\'' {
+        let rest = &raw[first.len_utf8()..];
+        let end = rest.find(first).unwrap_or(rest.len());
+        return &rest[..end];
+    }
+    let end = raw
+        .find(|character: char| character.is_whitespace() || character == '>')
+        .unwrap_or(raw.len());
+    &raw[..end]
+}
+
 fn javascript_shell(body: &str, content_type: &str) -> bool {
     let lower = body.to_ascii_lowercase();
     if !content_type.to_ascii_lowercase().contains("html") && !lower.contains("<html") {
@@ -297,6 +551,7 @@ fn probe_one(
                     bytes.truncate(options.max_body_bytes);
                     let body = String::from_utf8_lossy(&bytes);
                     let title = html_title(&body);
+                    let (has_login, has_register) = portal_flags(&final_url, &title, &body);
                     let (content_category, content_score, content_matches) = content_rules
                         .classify(&final_url, &title, &body, options.content_threshold);
                     let state = if (200..400).contains(&status) || [401, 403].contains(&status) {
@@ -349,6 +604,8 @@ fn probe_one(
                         ("content_matches", content_matches),
                         ("body_sha256", format!("{:x}", Sha256::digest(&bytes))),
                         ("probe_body_bytes", bytes.len().to_string()),
+                        ("has_login", has_login.into()),
+                        ("has_register", has_register.into()),
                     ] {
                         result.insert(key.into(), value);
                     }
@@ -524,7 +781,8 @@ pub fn probe_assets(
         for row in &rows {
             if let Some(previous) = cached.remove(&(stage.clone(), row_identity(row))) {
                 let outcome = text(&previous, &["probe_outcome"]);
-                if PROBE_OUTCOMES.contains(&outcome.as_str()) {
+                if PROBE_OUTCOMES.contains(&outcome.as_str()) && cached_probe_is_current(&previous)
+                {
                     buckets.entry(outcome).or_default().push(previous);
                     completed += 1;
                     reused += 1;
@@ -586,9 +844,12 @@ pub fn probe_assets(
                     progress(completed, total);
                 }
                 for handle in handles {
-                    handle
-                        .join()
-                        .map_err(|_| "Rust 探测工作线程异常退出".to_string())?;
+                    handle.join().map_err(|payload| {
+                        format!(
+                            "Rust 探测工作线程异常退出：{}",
+                            panic_message(payload)
+                        )
+                    })?;
                 }
                 Ok(())
             })?;
@@ -611,7 +872,7 @@ pub fn probe_assets(
             json!({"complete": true, "selected_rows": rows.len(), "counts": counts}),
         );
     }
-    let checkpoint = json!({"version": 2, "probe_version": 5, "native": true, "fingerprint":fingerprint,"reused_results":reused,"stage_order": stage_summary.keys().collect::<Vec<_>>(), "stages": stage_summary});
+    let checkpoint = json!({"version": 2, "probe_version": 6, "native": true, "fingerprint":fingerprint,"reused_results":reused,"stage_order": stage_summary.keys().collect::<Vec<_>>(), "stages": stage_summary});
     fs::write(
         output.join("checkpoint.json"),
         serde_json::to_vec_pretty(&checkpoint).map_err(|error| error.to_string())?,
@@ -623,4 +884,54 @@ pub fn probe_assets(
     )
     .map_err(|error| error.to_string())?;
     Ok(checkpoint)
+}
+
+#[cfg(test)]
+mod portal_flag_tests {
+    use super::portal_flags;
+
+    #[test]
+    fn portal_flags_read_login_and_register_controls() {
+        let (login, register) = portal_flags(
+            "http://127.0.0.1/app",
+            "业务系统",
+            r#"<html><a href="/user/login">进入</a><button>注册账号</button><script>var login = "/admin";</script><p>正文里的登录和注册不算入口</p></html>"#,
+        );
+        assert_eq!((login, register), ("1", "1"));
+
+        let (login, register) = portal_flags(
+            "http://127.0.0.1/login.jsp",
+            "首页",
+            "<html>hello</html>",
+        );
+        assert_eq!((login, register), ("1", "0"));
+
+        let (login, register) = portal_flags(
+            "http://127.0.0.1/news",
+            "行业新闻",
+            "<html><p>如何登录并注册账号</p><script>location='/login'</script></html>",
+        );
+        assert_eq!((login, register), ("0", "0"));
+
+        let (login, register) = portal_flags(
+            "http://127.0.0.1/",
+            "欢迎",
+            r#"<form><input type="password" name="pwd"></form>"#,
+        );
+        assert_eq!((login, register), ("1", "0"));
+
+        let (login, register) = portal_flags("http://127.0.0.1/", "系统登录", "<html></html>");
+        assert_eq!((login, register), ("1", "0"));
+
+        let label = "业务办理入口".repeat(20);
+        let long_page = format!(
+            "<html><a href=\"/portal\">{label}</a><button>{label}</button><label>{label}</label><a title=\"{label}\""
+        );
+        let (login, register) = portal_flags("http://127.0.0.1/app", "首页", &long_page);
+        assert_eq!((login, register), ("0", "0"));
+
+        let open_tag = format!("<a title=\"{}\"", "系统登录");
+        let (login, register) = portal_flags("http://127.0.0.1/app", "首页", &open_tag);
+        assert_eq!((login, register), ("1", "0"));
+    }
 }

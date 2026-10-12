@@ -547,16 +547,27 @@
     /// §13.2: settings edits must not change the plan a continuation runs on.
     #[test]
     fn continuation_reuses_the_frozen_plan_and_fresh_rebuilds_it() {
-        let (_root, db_path) = temp_database("remediation-frozen-plan");
-        seed_scan(&db_path, "agent-scan", "scanning");
-        seed_attempt_row(&db_path, 2, "resume");
-        let context = test_context(
-            &db_path,
-            "https://app.example.invalid",
-            vec![AgentIdentity::anonymous()],
-        );
+        // The task comes from the real creator/startup/HMAC (frozen Web Root
+        // declaration per attempt), as `persist_frozen_web_execution_plan` requires.
+        let root = std::env::temp_dir()
+            .canonicalize()
+            .unwrap()
+            .join(format!("oviraptor-remediation-frozen-plan-{}", Uuid::new_v4()));
+        let db_path = db::initialize(&root).unwrap();
+        let mut db = db::open(&db_path).unwrap();
+        db.execute("INSERT INTO projects(id,name) VALUES(9001,'Frozen plan')", [])
+            .unwrap();
+        let target = "https://app.example.invalid";
+        let scan = with_web_creator_test_id("agent-scan", || {
+            web_mode_test_draft(&db, Some("single"), target).unwrap()
+        });
+        assert_eq!(scan.id, "agent-scan");
+        web_mode_test_start(&root, &mut db, &scan.id, WebStartMode::Confirm).unwrap();
+        let context = test_context(&db_path, target, vec![AgentIdentity::anonymous()]);
+        // Newly frozen Web plans are V2 with the explicit web-only boundary.
         let frozen = serde_json::json!({
-            "schemaVersion": 1,
+            "schemaVersion": 2,
+            "executionSurface": "web_only",
             "owner": "oviraptor",
             "backend": "native",
             "mode": "quick",
@@ -587,13 +598,21 @@
             "modelProvider": "cloud",
             "timeoutSeconds": 60
         });
-        write_agent_checkpoint(
+        // Attempt 1 freezes this plan through the production Web Root path.
+        persist_frozen_web_execution_plan(
             &db_path,
             "agent-scan",
+            1,
             &context.route.url,
-            "agent_execution_plan",
-            &frozen,
-        ).unwrap();
+            &AgentExecutionPlan::from_json(&frozen).unwrap(),
+        )
+        .unwrap();
+        // The parent pauses; "继续扫描" opens attempt 2 as a real continuation.
+        db.execute("UPDATE sentinel_scans SET status='paused' WHERE id='agent-scan'", [])
+            .unwrap();
+        db.execute("UPDATE sentinel_scan_attempts SET status='paused' WHERE scan_id='agent-scan' AND attempt_number=1", [])
+            .unwrap();
+        web_mode_test_start(&root, &mut db, "agent-scan", WebStartMode::Resume).unwrap();
 
         let resumed = frozen_plan_for(&db_path, &context, 2);
         assert_eq!(resumed.soft_uncached_tokens, 11_000, "the parent budget stands");
@@ -601,12 +620,19 @@
         assert_eq!(resumed.max_turns, 5);
         assert_eq!(resumed.attempt_number, 2, "only the attempt identity is refreshed");
 
-        seed_attempt_row(&db_path, 3, "fresh");
+        // The continuation completes; "重新执行" opens attempt 3 as a fresh start.
+        db.execute("UPDATE sentinel_scans SET status='completed' WHERE id='agent-scan'", [])
+            .unwrap();
+        db.execute("UPDATE sentinel_scan_attempts SET status='completed' WHERE scan_id='agent-scan' AND attempt_number=2", [])
+            .unwrap();
+        web_mode_test_start(&root, &mut db, "agent-scan", WebStartMode::Retry).unwrap();
         let rebuilt = frozen_plan_for(&db_path, &context, 3);
         assert_ne!(
             rebuilt.soft_uncached_tokens, 11_000,
             "重新执行 rebuilds the plan from the current settings"
         );
+        drop(db);
+        let _ = fs::remove_dir_all(root);
     }
 
     /// §3.6: a checkpoint that cannot be safely inherited must stop the

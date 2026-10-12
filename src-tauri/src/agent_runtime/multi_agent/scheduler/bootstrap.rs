@@ -40,35 +40,45 @@ pub fn prepare_readonly_child(
     task_slice: &JsonValue,
     reserved_tokens: i64,
 ) -> Result<ScheduledChild, String> {
-    prepare_readonly_child_checked(connection,lease,role,trigger,task_slice,reserved_tokens, |_|Ok(()))
+    prepare_readonly_child_checked(
+        connection,
+        lease,
+        role,
+        trigger,
+        task_slice,
+        reserved_tokens,
+        |_| Ok(()),
+    )
 }
 
 /// The captured paid Root proof is checked in the same child issuance transaction.
 pub fn prepare_readonly_child_checked(
-    connection:&Connection,
-    lease:&CoordinatorLease,
-    role:AgentRole,
-    trigger:&str,
-    task_slice:&JsonValue,
-    reserved_tokens:i64,
-    verify:impl Fn(&Connection)->Result<(),String>,
-)->Result<ScheduledChild,String> {
-    if !matches!(
-        role,
-        AgentRole::SpaApiMapper
-            | AgentRole::IdentitySession
-            | AgentRole::RepoMapper
-            | AgentRole::SourceAnalyst
-            | AgentRole::ClientSide
-    ) {
+    connection: &Connection,
+    lease: &CoordinatorLease,
+    role: AgentRole,
+    trigger: &str,
+    task_slice: &JsonValue,
+    reserved_tokens: i64,
+    verify: impl Fn(&Connection) -> Result<(), String>,
+) -> Result<ScheduledChild, String> {
+    if !role.is_readonly_bootstrap_role() {
         return Err("readonly_bootstrap_role_invalid".into());
     }
     let tx = rusqlite::Transaction::new_unchecked(connection, TransactionBehavior::Immediate)
         .map_err(|e| format!("readonly_bootstrap_lock:{e}"))?;
-    let (child, fresh) = prepare_readonly_child_in_transaction(&tx, lease, role, trigger, task_slice, reserved_tokens, verify)?;
+    let (child, fresh) = prepare_readonly_child_in_transaction(
+        &tx,
+        lease,
+        role,
+        trigger,
+        task_slice,
+        reserved_tokens,
+        verify,
+    )?;
     // Replay stays a read-only lookup: even callback writes roll back on Drop.
     if fresh {
-        tx.commit().map_err(|e| format!("readonly_bootstrap_commit:{e}"))?;
+        tx.commit()
+            .map_err(|e| format!("readonly_bootstrap_commit:{e}"))?;
     }
     Ok(child)
 }
@@ -84,14 +94,7 @@ pub(crate) fn prepare_readonly_child_in_transaction(
     reserved_tokens: i64,
     verify: impl Fn(&Connection) -> Result<(), String>,
 ) -> Result<(ScheduledChild, bool), String> {
-    if !matches!(
-        role,
-        AgentRole::SpaApiMapper
-            | AgentRole::IdentitySession
-            | AgentRole::RepoMapper
-            | AgentRole::SourceAnalyst
-            | AgentRole::ClientSide
-    ) {
+    if !role.is_readonly_bootstrap_role() {
         return Err("readonly_bootstrap_role_invalid".into());
     }
     verify(tx)?;
@@ -157,7 +160,11 @@ pub(crate) fn prepare_readonly_child_in_transaction(
         verify(tx)?;
         return Ok((child, false));
     }
-    if role == AgentRole::ClientSide {
+    // ClientSide/Identity pre-check when a ledger already exists. SpaApiMapper
+    // is often the first child after a paid Root journal with no coarse ledger
+    // yet, so it only post-checks in the same transaction (after reserve).
+    // RepoMapper/SourceAnalyst stay on the source budget surface.
+    if role.requires_web_reviewer_floor_on_bootstrap() {
         super::client_side::require_reviewer_floor(tx, lease, reserved_tokens, 1)?;
     }
     let child = schedule_child_in_transaction(
@@ -173,7 +180,13 @@ pub(crate) fn prepare_readonly_child_in_transaction(
         1,
     )?;
     mark_child_running_in_transaction(tx, lease, &child)?;
-    if role == AgentRole::ClientSide {
+    // Web-root Reviewer floor: see AgentRole::requires_web_reviewer_floor_on_bootstrap; SpaApiMapper only when
+    // this root actually has a web_mode projection (source-fixture siblings that
+    // reuse the Mapper role name stay on the source budget surface).
+    if role.requires_web_reviewer_floor_on_bootstrap()
+        || (role == AgentRole::SpaApiMapper
+            && crate::agent_runtime::web_mode::root::read(tx, &lease.root_run_id)?.is_some())
+    {
         super::client_side::require_reviewer_floor(tx, lease, 0, 0)?;
     }
     verify(tx)?;
@@ -189,7 +202,7 @@ pub fn ensure_fresh_web_executor_attempt(
     connection: &Connection,
     lease: &CoordinatorLease,
 ) -> Result<(), String> {
-    ensure_fresh_web_executor_attempt_except(connection,lease,None)
+    ensure_fresh_web_executor_attempt_except(connection, lease, None)
 }
 
 // Exclude only the verified original physical run and assignment; other
@@ -245,6 +258,125 @@ pub(crate) fn verify_running_mapper_in_transaction(
     expected.capability_lease = vec!["evidence.read".into(), "mailbox.write".into()];
     if verify_scheduled_authority(tx, lease, &expected)? != *child {
         return Err("mapper_allocation_original_worker_conflict".into());
+    }
+    Ok(())
+}
+
+/// Explicit original v15 only. The old one-call readonly issuer is unchanged.
+pub(crate) fn prepare_mapper_loop_in_transaction(
+    tx: &rusqlite::Transaction<'_>,
+    lease: &CoordinatorLease,
+    task: &JsonValue,
+    input: &super::budget::model::mapper_loop_contract::FrozenMapperLoopInput,
+    verify: impl Fn(&Connection) -> Result<(), String>,
+) -> Result<(ScheduledChild, bool), String> {
+    input.require_on(tx, lease)?;
+    verify(tx)?;
+    validate_coordinator_lease(tx, lease)?;
+    require_executable_coordinator(tx, lease)?;
+    ensure_fresh_readonly_fence(tx, lease)?;
+    super::source::validate_surface_role(tx, lease, AgentRole::SpaApiMapper)?;
+    if task["mapperLoop"] != *input.fact() || task["mapperLoopHash"] != input.hash() {
+        return Err("mapper_loop_task_source_changed".into());
+    }
+    let trigger = "frontend_evidence_ready";
+    let dedup = format!("spa_api_mapper:{trigger}:{}:1", lease.target_key);
+    let id = format!(
+        "asg-{}",
+        &store::stable_hash(&format!("{}:{dedup}", lease.root_run_id))[..24]
+    );
+    let existing: Option<String> = tx
+        .query_row(
+            "SELECT child_run_id FROM agent_assignments WHERE id=?1",
+            [&id],
+            |r| r.get(0),
+        )
+        .optional()
+        .map_err(|e| e.to_string())?;
+    if let Some(run_id) = existing {
+        let child = ScheduledChild {
+            assignment_id: id,
+            run_id,
+            role: AgentRole::SpaApiMapper,
+        };
+        let grant =
+            super::budget::model::original_mapper_loop_grant_on(tx, lease, &child.assignment_id)?;
+        let stored: String = tx
+            .query_row(
+                "SELECT task_slice_json FROM agent_assignments WHERE id=?1",
+                [&child.assignment_id],
+                |r| r.get(0),
+            )
+            .map_err(|e| e.to_string())?;
+        if grant.input().fact() != input.fact()
+            || stored.as_bytes() != crate::agent_runtime::secrets::redact_json(task).to_string().as_bytes()
+        {
+            return Err("mapper_loop_original_grant_conflict".into());
+        }
+        let running: bool = tx
+            .query_row(
+                "SELECT state='running' FROM agent_assignments WHERE id=?1",
+                [&child.assignment_id],
+                |r| r.get(0),
+            )
+            .map_err(|e| e.to_string())?;
+        if running {
+            verify_running_mapper_loop_in_transaction(tx, lease, &child, task, input)?;
+        }
+        verify(tx)?;
+        return Ok((child, false));
+    }
+    super::budget::supervision_capacity::require_mapper_loop_issue_headroom_on(tx, lease)?;
+    let child = schedule_child_in_transaction(
+        tx,
+        lease,
+        AgentRole::SpaApiMapper,
+        AgentLane::ReadOnlyAnalysis,
+        trigger,
+        task,
+        1,
+        &["evidence.read".into(), "mailbox.write".into()],
+        input.reserved_tokens(),
+        2,
+    )?;
+    mark_child_running_in_transaction(tx, lease, &child)?;
+    verify_running_mapper_loop_in_transaction(tx, lease, &child, task, input)?;
+    let grant =
+        super::budget::model::original_mapper_loop_grant_on(tx, lease, &child.assignment_id)?;
+    if grant.input().fact() != input.fact() {
+        return Err("mapper_loop_original_grant_conflict".into());
+    }
+    super::budget::supervision_capacity::require_mapper_loop_reserved_headroom_on(tx, lease)?;
+    verify(tx)?;
+    Ok((child, true))
+}
+
+pub(crate) fn verify_running_mapper_loop_in_transaction(
+    tx: &rusqlite::Transaction<'_>,
+    lease: &CoordinatorLease,
+    child: &ScheduledChild,
+    task: &JsonValue,
+    input: &super::budget::model::mapper_loop_contract::FrozenMapperLoopInput,
+) -> Result<(), String> {
+    input.require_on(tx, lease)?;
+    let trigger = "frontend_evidence_ready";
+    let mut expected = AgentAssignment::new(
+        child.assignment_id.clone(),
+        lease.root_run_id.clone(),
+        AgentRole::SpaApiMapper,
+        AgentLane::ReadOnlyAnalysis,
+        lease.target_key.clone(),
+        format!("spa_api_mapper:{trigger}:{}:1", lease.target_key),
+    );
+    expected.child_run_id = child.run_id.clone();
+    expected.trigger_code = trigger.into();
+    expected.task_slice = task.clone();
+    expected.evidence_revision = 1;
+    expected.reserved_tokens = input.reserved_tokens();
+    expected.reserved_requests = 2;
+    expected.capability_lease = vec!["evidence.read".into(), "mailbox.write".into()];
+    if verify_scheduled_authority(tx, lease, &expected)? != *child {
+        return Err("mapper_loop_original_worker_conflict".into());
     }
     Ok(())
 }

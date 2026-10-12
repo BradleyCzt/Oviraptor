@@ -10,7 +10,26 @@ fn complete_target_child_delivery(
     payload: &JsonValue,
     success: bool,
     summary: &str,
-) -> Result<(), String> {
+) -> Result<Option<crate::agent_runtime::web_mode::capability_transition_receipt::CapabilityTransitionGuard>, String> {
+    complete_target_child_delivery_on(connection, lease, child, TargetChildDeliveryMessage {
+        kind, correlation_id, payload, success, summary,
+    }, None)
+}
+struct TargetChildDeliveryMessage<'a> {
+    kind: &'a str,
+    correlation_id: &'a str,
+    payload: &'a JsonValue,
+    success: bool,
+    summary: &'a str,
+}
+fn complete_target_child_delivery_on(
+    connection: &rusqlite::Connection,
+    lease: &crate::agent_runtime::multi_agent::lease::CoordinatorLease,
+    child: &crate::agent_runtime::multi_agent::scheduler::ScheduledChild,
+    delivery: TargetChildDeliveryMessage<'_>,
+    authorization_target_dir: Option<&std::path::Path>,
+) -> Result<Option<crate::agent_runtime::web_mode::capability_transition_receipt::CapabilityTransitionGuard>, String> {
+    let TargetChildDeliveryMessage { kind, correlation_id, payload, success, summary } = delivery;
     use crate::agent_runtime::{
         contract::AgentRole,
         multi_agent::{lease::{require_executable_coordinator, validate_coordinator_lease}, mailbox, scheduler},
@@ -34,6 +53,25 @@ fn complete_target_child_delivery(
     ).map_err(|error|format!("target_child_delivery_binding_or_usage:{error}"))?;
     let event_floor: i64=tx.query_row("SELECT COALESCE(MAX(sequence),0) FROM agent_collaboration_events",[],|row|row.get(0))
         .map_err(|error|format!("target_child_delivery_event_cursor:{error}"))?;
+    let capability_mode = if success && child.role == AgentRole::WebExecutor {
+        let declaration = crate::agent_runtime::web_mode::root::read(&tx, &lease.root_run_id)?;
+        if declaration.is_some_and(|mode| mode.bootstrap_dispatch().is_some_and(|b|
+            b["capabilityTransitionRule"] == crate::agent_runtime::web_mode::capability_transition_receipt::RULE)) {
+            Some(original_root_capture_mode(&tx, &lease.root_run_id)?)
+        } else { None }
+    } else { None };
+    let authorization_guard = if success && child.role == AgentRole::Authorization
+        && crate::agent_runtime::web_mode::root::read(&tx, &lease.root_run_id)?
+            .is_some_and(|mode| mode.bootstrap_dispatch().is_some_and(|b|
+                b["authorizationOutputRule"] == authorization_output_receipt::RULE)) {
+        let mode = original_root_capture_mode(&tx, &lease.root_run_id)?;
+        Some(authorization_output_receipt::capture_before_on(&tx, lease, child,
+            authorization_target_dir.ok_or("authorization_output_original_directory_required")?, &mode)?)
+    } else { None };
+    let capability_guard = capability_mode.as_ref().map(|mode|
+        crate::agent_runtime::web_mode::capability_transition_receipt::capture_before_on(
+            &tx, lease, child, mode,
+        )).transpose()?;
     let payload=redact_json(payload);
     let message=mailbox::send(&tx,lease,&child.run_id,&lease.root_run_id,child.role.as_str(),
         AgentRole::Coordinator.as_str(),kind,correlation_id,&child.assignment_id,revision,&payload)?;
@@ -70,5 +108,14 @@ fn complete_target_child_delivery(
     if visible!=3 { return Err("target_child_delivery_event_postcondition_failed".into()); }
     validate_coordinator_lease(&tx,lease)?;
     require_executable_coordinator(&tx,lease)?;
-    tx.commit().map_err(|error|format!("target_child_delivery_commit:{error}"))
+    if let (Some(mode), Some(guard)) = (&capability_mode, &capability_guard) {
+        crate::agent_runtime::web_mode::capability_transition_receipt::issue_after_on(
+            &tx, lease, child, mode, guard, &message,
+        )?;
+    }
+    if let Some(guard) = &authorization_guard {
+        authorization_output_receipt::issue_after_on(&tx, lease, child, guard, &message)?;
+    }
+    tx.commit().map_err(|error|format!("target_child_delivery_commit:{error}"))?;
+    Ok(capability_guard)
 }

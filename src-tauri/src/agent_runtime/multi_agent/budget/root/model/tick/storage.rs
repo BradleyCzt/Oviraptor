@@ -64,10 +64,16 @@ impl SavedDecision {
     pub(super) fn fact(&self) -> Value {
         let mut value = json!({"version":1,"summary":self.summary.as_json(),"invoice":self.invoice,
             "costProof":self.cost_proof,"requestProof":self.request_proof,"unknown":self.unknown});
-        if let Some(step) = &self.local_step { value["localStep"] = step.as_json(); }
+        if let Some(step) = &self.local_step {
+            value["localStep"] = step.as_json();
+        }
         value
     }
-    pub(super) fn financial_response(&self) -> Result<ModelResponse, String> {
+    pub(super) fn financial_response(
+        &self,
+        db: &Connection,
+        call: &super::super::RootModelCall,
+    ) -> Result<ModelResponse, String> {
         use crate::agent_runtime::model::UsageDelta;
         let u = &self.invoice["usage"];
         let n = |key: &str| u[key].as_i64().ok_or("root_tick_usage_invalid".to_string());
@@ -80,6 +86,7 @@ impl SavedDecision {
             return Err("root_tick_usage_invalid".into());
         }
         Ok(ModelResponse {
+            cached_usage_reported: call.read_cache_provenance(db, &self.invoice)?,
             text: String::new(),
             tool_calls: vec![],
             finish_reason: "stop".into(),

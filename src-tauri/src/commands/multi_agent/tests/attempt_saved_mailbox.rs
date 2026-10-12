@@ -126,6 +126,10 @@ fn assignment_attempt_saved_gap_messages_require_original_candidate_and_thread()
                 [],
             )
             .unwrap();
+            // This fixture keeps the Root's live WorkerSupervisor (100 ms sweep),
+            // which withdraws the attempts just backdated. Let that production
+            // withdrawal commit first so it cannot land between the snapshots.
+            settle_supervisor_withdrawal_of_backdated_attempts(&db, &lease.root_run_id);
             let payload = serde_json::json!({"summary":"needs operator review",
                 "candidateId":if wrong=="candidate" {"foreign"} else {"candidate-gap"},"evidenceRevision":2,
                 "targetRequestsGranted":0,"decision":"deferred_requires_new_evidence_revision","schemaVersion":3});
@@ -172,5 +176,31 @@ fn assignment_attempt_saved_gap_messages_require_original_candidate_and_thread()
             drop(db);
             std::fs::remove_dir_all(f.root).unwrap();
         }
+    }
+}
+
+/// Waits (bounded) until the live WorkerSupervisor has no due attempt left for
+/// this Root, using the supervisor's own deadline predicate.
+fn settle_supervisor_withdrawal_of_backdated_attempts(db: &rusqlite::Connection, root_run_id: &str) {
+    let until = std::time::Instant::now() + std::time::Duration::from_secs(10);
+    loop {
+        let due: bool = db
+            .query_row(
+                "SELECT EXISTS(SELECT 1 FROM agent_assignments a
+                 JOIN agent_assignment_attempts x ON x.assignment_id=a.id AND x.child_run_id=a.child_run_id
+                 WHERE a.coordinator_run_id=?1 AND x.state IN ('leased','running','paused')
+                   AND COALESCE(datetime(x.expires_at)<=datetime('now','localtime'),1))",
+                [root_run_id],
+                |row| row.get(0),
+            )
+            .unwrap();
+        if !due {
+            return;
+        }
+        assert!(
+            std::time::Instant::now() < until,
+            "live WorkerSupervisor never withdrew the backdated attempts"
+        );
+        std::thread::sleep(std::time::Duration::from_millis(10));
     }
 }

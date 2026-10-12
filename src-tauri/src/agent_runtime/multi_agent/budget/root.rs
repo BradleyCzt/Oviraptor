@@ -1,5 +1,5 @@
 //! Root control accounting; no child assignment or Coordinator is fabricated.
-use super::{entries, Kind, DIMENSIONS};
+use super::{entries, Kind, DENIED_BY_CONTRACT_DIMENSIONS, DIMENSIONS};
 use crate::agent_runtime::multi_agent::lease::{self, CoordinatorLease};
 use rusqlite::{params, Connection, OptionalExtension, Transaction};
 use serde_json::{json, Value};
@@ -35,6 +35,7 @@ fn contract(db: &Connection, root: &str) -> Result<Value, String> {
         "declaredRoot":r.get::<_,String>(9)?,
     }))).map_err(|_|"budget_root_binding_conflict".to_string())?;
     if let Some(mode) = crate::agent_runtime::web_mode::root::read(db, root)? {
+        if let Some(protocol) = mode.new_evidence_supervision() { value["newEvidenceSupervision"] = protocol; }
         if let Some(local) = mode.local_deliberation() { value["localDeliberation"] = local; }
         if let Some(bootstrap) = mode.bootstrap_dispatch() { value["bootstrapDispatch"] = bootstrap; }
         if let Some(observation)=mode.live_budget_observation() {value["liveBudgetObservation"]=observation;}
@@ -229,6 +230,9 @@ impl RootOwner {
         {
             return Err("budget_entry_invalid".into());
         }
+        if DENIED_BY_CONTRACT_DIMENSIONS.contains(&dimension) {
+            return Err("budget_dimension_denied_by_contract".into());
+        }
         entries::persist(
             tx,
             &self.root,
@@ -254,6 +258,9 @@ impl RootOwner {
         self.verify(tx)?;
         if amount <= 0 || key.trim().is_empty() || source.trim().is_empty() {
             return Err("budget_entry_invalid".into());
+        }
+        if DENIED_BY_CONTRACT_DIMENSIONS.contains(&dimension) {
+            return Err("budget_dimension_denied_by_contract".into());
         }
         entries::persist_known_cost(
             tx,

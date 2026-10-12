@@ -1,12 +1,12 @@
 // Actual new role failure must close its original worker without refund/retry.
 #[test]
 fn client_side_readonly_actual_unknown_sdk_root_close_pauses_original_worker_without_refund() {
-    use crate::agent_runtime::{contract::AgentRole,multi_agent::{scheduler,supervisor::WorkerSupervisor}};
+    use crate::agent_runtime::{contract::AgentRole,multi_agent::scheduler};
     let (directory,path,root,lease,mut context,slice)=client_readonly_negative_fixture("client-original-root-close");
     let (port,seen,stop)=spawn_endpoint(std::sync::Arc::new(|_|(503,"application/json",r#"{"error":{"message":"original provider failure"}}"#.into())));
     let _cleanup=ClientSideReadonlyTestGuard {root:directory,stop};
     context.environment.api_base=format!("http://127.0.0.1:{port}/v1");
-    let parent=WorkerSupervisor::start(&path,&lease).unwrap();context.supervision=Some(parent.ticket());
+    let parent=start_original_fixture_supervisor(&path,&lease).unwrap();context.supervision=Some(parent.ticket());
     let db=db::open(&path).unwrap();
     let child=scheduler::prepare_readonly_child(&db,&lease,AgentRole::ClientSide,"client_side_frozen_observations_ready",&slice,8000).unwrap();
     let failed=multi_agent_child_round_transport(&context,&lease,&child,"只读配置分析，无工具；保留行为缺口",slice.clone());
@@ -31,7 +31,7 @@ fn client_side_readonly_actual_unknown_sdk_root_close_pauses_original_worker_wit
 
 #[test]
 fn client_side_readonly_actual_busy_sdk_refuses_root_close_then_preserves_paid_undelivered_result() {
-    use crate::agent_runtime::{contract::AgentRole,multi_agent::{scheduler,supervisor::WorkerSupervisor}};
+    use crate::agent_runtime::{contract::AgentRole,multi_agent::scheduler};
     use std::sync::{Arc,Mutex,mpsc};
     let (directory,path,_,lease,mut context,slice)=client_readonly_negative_fixture("client-original-busy-close");
     let (arrive_tx,arrive)=mpsc::channel();let (release_tx,release)=mpsc::channel();let release=Mutex::new(release);
@@ -41,7 +41,7 @@ fn client_side_readonly_actual_busy_sdk_refuses_root_close_then_preserves_paid_u
     }));
     let _cleanup=ClientSideReadonlyTestGuard {root:directory,stop};
     context.environment.api_base=format!("http://127.0.0.1:{port}/v1");
-    let parent=WorkerSupervisor::start(&path,&lease).unwrap();context.supervision=Some(parent.ticket());
+    let parent=start_original_fixture_supervisor(&path,&lease).unwrap();context.supervision=Some(parent.ticket());
     let db=db::open(&path).unwrap();
     let child=scheduler::prepare_readonly_child(&db,&lease,AgentRole::ClientSide,"client_side_frozen_observations_ready",&slice,8000).unwrap();
     let outcome=AgentTargetOutcome::incomplete("original ClientSide SDK must exit before Root closure");

@@ -29,14 +29,48 @@ fn private_web_mode_on(
         .read("task.json", WEB_DISPATCH_BINDING_LIMIT, false, false)?
         .ok_or("web_mode_task_missing")?;
     let document: JsonValue = serde_json::from_slice(&task).map_err(|_| "web_mode_task_invalid")?;
-    let (schema, tag): (i64, Vec<u8>) = db
+    let bindings: i64 = db.query_row("SELECT
+        (SELECT count(*) FROM native_web_dispatch_bindings WHERE scan_id=?1 AND attempt_number=?2 AND branch='web')+
+        (SELECT count(*) FROM agent_financial_startup_bindings WHERE scan_id=?1 AND attempt_number=?2)",
+        params![scan,attempt],|r|r.get(0)).map_err(|_|"web_mode_startup_proof_missing")?;
+    if bindings == 0 {
+        return Err("web_mode_startup_proof_missing".into());
+    }
+    if bindings != 1 {
+        return Err("web_mode_startup_proof_conflict".into());
+    }
+    let (schema, tag, financial, financial_approval): (i64, Vec<u8>, Option<String>, Option<String>) = db
         .query_row(
-            "SELECT schema_version,binding_tag FROM native_web_dispatch_bindings
-        WHERE scan_id=?1 AND attempt_number=?2 AND branch='web'",
+            "SELECT schema_version,binding_tag,NULL,NULL FROM native_web_dispatch_bindings
+        WHERE scan_id=?1 AND attempt_number=?2 AND branch='web'
+        UNION ALL SELECT 1,binding_tag,binding_fact_json,approval_id FROM agent_financial_startup_bindings
+        WHERE scan_id=?1 AND attempt_number=?2",
             params![scan, attempt],
-            |r| Ok((r.get(0)?, r.get(1)?)),
+            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)),
         )
         .map_err(|_| "web_mode_startup_proof_missing")?;
+    if let Some(raw) = financial {
+        let binding: JsonValue =
+            serde_json::from_str(&raw).map_err(|_| "financial_continuation_startup_invalid")?;
+        let canonical = binding.to_string();
+        if raw != canonical
+            || binding["domain"] != "oviraptor.financial-continuation.v1"
+            || binding.as_object().map(|o| o.len()) != Some(6)
+            || binding["approvalId"].as_str() != financial_approval.as_deref()
+            || crate::agent_runtime::store::stable_hash(&raw) != fact.runtime_hash
+            || document["financialContinuation"]["approvalId"] != binding["approvalId"]
+            || document["financialContinuation"]["proposalHash"] != binding["proposalHash"]
+            || document["taskPurpose"] != "new_work_after_original_cost_confirmation"
+        {
+            return Err("financial_continuation_startup_changed".into());
+        }
+        aws_lc_rs::hmac::verify(
+            &aws_lc_rs::hmac::Key::new(aws_lc_rs::hmac::HMAC_SHA256, &key),
+            raw.as_bytes(),
+            &tag,
+        )
+        .map_err(|_| "financial_continuation_startup_signature_invalid")?;
+    }
     let tags = tag.iter().map(|b| format!("{b:02x}")).collect::<String>();
     let targets = mode_task_targets(&document)?;
     let policy = &document["effectiveWebPolicy"];

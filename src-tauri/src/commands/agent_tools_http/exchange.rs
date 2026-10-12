@@ -1,4 +1,10 @@
-fn agent_http_exchange(
+use super::*;
+
+include!("protection_witness.rs");
+include!("protection_fresh.rs");
+include!("protection_capture.rs");
+
+pub(super) fn agent_http_exchange(
     context: &AgentRunContext,
     runtime: &mut AgentToolRuntime,
     request: &AgentHttpRequest,
@@ -29,6 +35,14 @@ fn agent_http_exchange_inner(
     agent_single_require_fresh(context).map_err(agent_http_claim_error)?;
     if runtime.cancelled() {
         return Err(serde_json::json!({"error":"任务已暂停或取消","code":"cancelled"}));
+    }
+    if runtime.protected_stop.is_none() {
+        let persisted = db::open(&context.db_path)
+            .and_then(|db| agent_protection_stop_on(&db, context));
+        match persisted {
+            Ok(stop) => runtime.protected_stop = stop,
+            Err(_) => return Err(serde_json::json!({"error":"无法核验目标的持久保护状态","code":"tool_authorization_unavailable"})),
+        }
     }
     if let Some(stop) = &runtime.protected_stop {
         return Err(serde_json::json!({"code":"protected","stop":stop}));
@@ -84,15 +98,16 @@ fn agent_http_exchange_inner(
     }
     // Commit the request claim before any send. The journal is authoritative
     // even if the process dies before finish_tool or the Native checkpoint.
-    let claim = claim_agent_http_request_with_headers(context, runtime, request, &url, &headers)
+    let mut sealed_transport = claim_agent_http_sealed_transport_with_headers(context, runtime, request, &url, &headers)
         .map_err(agent_http_claim_error)?;
+    let claim = sealed_transport.claim();
     runtime.spend_request();
     runtime.current_request_index += 1;
     if let Some(run) = &context.run {
         let timeout = db::open(&context.db_path)
             .and_then(|db| {
                 let ceiling = Duration::from_secs(request.timeout_seconds.clamp(5, 30));
-                match claim.as_ref().and_then(|claim| claim.root_target.as_ref()) {
+                match claim.and_then(|claim| claim.root_target.as_ref()) {
                     Some(original) => original.transport_timeout(&db, ceiling),
                     None => crate::agent_runtime::multi_agent::budget::target::transport_timeout(
                         &db,
@@ -104,6 +119,9 @@ fn agent_http_exchange_inner(
             .map_err(agent_http_claim_error)?;
         call = call.timeout(timeout);
     }
+    let pre_send = protection_pre_send_witness(context, request, claim)
+        .map_err(|_| json!({"code":terminal_code::REQUEST_RECONCILIATION_REQUIRED,
+            "phase":"before_send","error":"原发送授权无法冻结；已占用请求不得重放"}))?;
     let started = Instant::now();
     let mut response = call.send().map_err(|error| {
         if claim.is_some() {
@@ -116,10 +134,11 @@ fn agent_http_exchange_inner(
         }
     })?;
     let status = response.status().as_u16();
-    if let Some(claim) = &claim {
-        receive_agent_http_headers(context, claim, status)
+    if claim.is_some() {
+        sealed_transport.receive_headers(context, status)
             .map_err(|reason| serde_json::json!({"error":reason,"code":"evidence_write_failed"}))?;
     }
+    let claim = sealed_transport.claim();
     // A saved original bill is not permission to use a late response.
     agent_single_require_fresh(context).map_err(agent_http_claim_error)?;
     let content_type = response
@@ -234,6 +253,10 @@ fn agent_http_exchange_inner(
             .unwrap_or_else(|| "redirect_without_location".to_string()),
         _ => String::new(),
     };
+    let protected_response = ProtectionCapturedResponse {
+        url: &url, headers: &headers, body: &body, status,
+        content_type: &content_type, truncated,
+    };
     if status != 404
         && is_directory_block_signal(&format!(
             "http {status} {content_type} {}",
@@ -245,7 +268,9 @@ fn agent_http_exchange_inner(
             format!("目标返回明确的 WAF、验证码或机器人挑战信号（HTTP {status}）"),
         );
         runtime.protected_stop = Some(stop.clone());
-        return Err(serde_json::json!({"code": "protected", "stop": stop}));
+        return Err(capture_protected_http_response(
+            context, runtime, request, claim, pre_send.as_ref(), protected_response, stop,
+        ));
     }
     // §11: the site keeps refusing. One 429 is a throttle to work around; two in a
     // row inside the same attempt means this run will not be answered, so it stops
@@ -261,7 +286,9 @@ fn agent_http_exchange_inner(
                 ),
             );
             runtime.protected_stop = Some(stop.clone());
-            return Err(serde_json::json!({"code": "protected", "stop": stop}));
+            return Err(capture_protected_http_response(
+                context, runtime, request, claim, pre_send.as_ref(), protected_response, stop,
+            ));
         }
     } else {
         runtime.rate_limited_streak = 0;
@@ -314,6 +341,15 @@ fn agent_http_exchange_inner(
     // the same redacted facts the model saw and the untouched bytes stay in the
     // payload files next to it.
     let mut view = agent_model_view(summary, runtime);
+    // A03: only the actual transport can supply this durable claim identity.
+    // It is captured in the hashed artifact, never reconstructed from a graph row.
+    if let Some(claim) = &claim {
+        view["httpClaim"] = json!({"schemaVersion":1,"runId":claim.run_id,
+            "invocationId":claim.invocation_id,"requestIndex":claim.request_index,
+            "budgetAttempt":claim.budget_attempt,"ordinal":claim.ordinal,
+            "requestHash":claim.request_hash});
+    }
+
     let artifact_id = match agent_write_http_record(
         context,
         runtime.target_requests,
@@ -393,3 +429,5 @@ fn agent_http_exchange_inner(
     }
     Ok(view)
 }
+
+include!("protection_witness_tests.rs");

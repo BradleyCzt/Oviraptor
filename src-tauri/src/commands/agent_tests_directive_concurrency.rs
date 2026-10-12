@@ -92,9 +92,10 @@ fn directive_claim_does_not_reject_another_targets_confirmed_message() {
 fn directive_writes_revalidate_fencing_after_waiting_for_the_database_writer() {
     use crate::agent_runtime::multi_agent::directive;
     use std::sync::atomic::{AtomicBool, Ordering};
-    // This callback runs only on the dedicated worker connection. A real SQLite
-    // write lock, not a delay guess, proves that the worker reached contention.
+    // The directive transition writes through the dedicated worker connection,
+    // so its busy callback proves it reached the real SQLite write lock.
     static WRITE_WAITING: AtomicBool = AtomicBool::new(false);
+    static WORKER_STARTED: AtomicBool = AtomicBool::new(false);
     let mut observations = Vec::new();
     for finish in [false, true] {
         WRITE_WAITING.store(false, Ordering::SeqCst);
@@ -133,7 +134,9 @@ fn directive_writes_revalidate_fencing_after_waiting_for_the_database_writer() {
         ).unwrap();
         let worker_lease = lease.clone();
         let worker_id = id.clone();
+        WORKER_STARTED.store(false, Ordering::SeqCst);
         let handle = std::thread::spawn(move || {
+            WORKER_STARTED.store(true, Ordering::SeqCst);
             if finish {
                 finish_coordinator_run(&worker, &worker_lease, &AgentTargetOutcome::Cancelled)
             } else {
@@ -147,10 +150,27 @@ fn directive_writes_revalidate_fencing_after_waiting_for_the_database_writer() {
             }
         });
         let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
-        while !WRITE_WAITING.load(Ordering::SeqCst) && std::time::Instant::now() < deadline {
-            std::thread::yield_now();
-        }
-        let reached_writer = WRITE_WAITING.load(Ordering::SeqCst);
+        let reached_writer = if finish {
+            // Finalization never writes through the caller's connection: the
+            // elapsed-fact and closure writers each open their own private,
+            // authorized connection (budget/clock/elapsed_fact/writer.rs,
+            // budget/clock/closure_writer.rs) with their own busy timeout, so
+            // the worker connection's busy handler cannot observe them. Their
+            // only pre-lock work is reads; a started worker that is still
+            // unfinished after holding the real write lock for a full window
+            // is parked on that lock (BEGIN IMMEDIATE), and its result below
+            // can only be stale if it validated after the commit.
+            while !WORKER_STARTED.load(Ordering::SeqCst) && std::time::Instant::now() < deadline {
+                std::thread::yield_now();
+            }
+            std::thread::sleep(std::time::Duration::from_millis(500));
+            WORKER_STARTED.load(Ordering::SeqCst) && !handle.is_finished()
+        } else {
+            while !WRITE_WAITING.load(Ordering::SeqCst) && std::time::Instant::now() < deadline {
+                std::thread::yield_now();
+            }
+            WRITE_WAITING.load(Ordering::SeqCst)
+        };
         transaction.commit().unwrap();
         let result = handle.join().unwrap();
         let actual: String = connection

@@ -1,4 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
+import { rootCostReconciliationApi } from "./reconciliation/api";
 import type { NativeSdkLogPage } from "./execution/nativeSdkLogContract";
 import type { NativeProcessLogPage } from "./execution/nativeProcessLogContract";
 import type {
@@ -16,6 +17,7 @@ import type {
   GapFollowupSubmission,
   AppSecScanResult,
   BrowserAuthSession,
+  ScanIdentityMaterial,
   InvestigationGraph,
   InvestigationHypothesis,
   InvestigationValidation,
@@ -60,6 +62,7 @@ import type {
 } from "../../types";
 
 export const sentinelApi = {
+  ...rootCostReconciliationApi,
   recoverNativeSourcePauseResult: (scanId: string, attemptNumber: number) =>
     invoke<{ schemaVersion: 1; scanId: string; attemptNumber: number; rootRunId: string; scanStatus: "paused"; branchStatus: "partial"; changed: boolean; executionReplayed: false }>(
       "recover_native_source_pause_result", { scanId, attemptNumber }),
@@ -154,6 +157,33 @@ export const sentinelApi = {
     projectId, taskName, urls, scanMode, maxBudgetUsd, authSessionId, authSessionIds, authSessionScopeId,
     skillIds, instruction, closure, orchestrationMode,
   }),
+  createSentinelUrlScanWithToolSelection: (
+    projectId: number,
+    taskName: string,
+    urls: string[],
+    scanMode: "quick" | "standard" | "deep" = "standard",
+    maxBudgetUsd?: number,
+    authSessionId?: string,
+    authSessionIds?: string[],
+    authSessionScopeId?: string,
+    skillIds?: number[],
+    instruction?: string,
+    closure?: "breadth" | "proof",
+    orchestrationMode?: "single" | "multi",
+    approvedIds?: string[],
+  ) => invoke<SentinelScan>("create_sentinel_url_scan_with_tool_selection", {
+    projectId, taskName, urls, scanMode, maxBudgetUsd, authSessionId, authSessionIds, authSessionScopeId,
+    skillIds, instruction, closure, orchestrationMode, approvedIds,
+  }),
+  createSentinelHomogeneousUrlScan: (
+    projectId: number, taskName: string, urls: string[], scanMode: "quick" | "standard" | "deep" = "standard",
+    maxBudgetUsd?: number, authSessionId?: string, authSessionIds?: string[], authSessionScopeId?: string,
+    skillIds?: number[], instruction?: string, closure?: "breadth" | "proof",
+    _orchestrationMode?: "single" | "multi", execution = false, approvedIds?: string[],
+  ) => invoke<SentinelScan>("create_sentinel_homogeneous_url_scan", {
+    projectId, taskName, urls, scanMode, maxBudgetUsd, authSessionId, authSessionIds,
+    authSessionScopeId, skillIds, instruction, closure, execution, approvedIds,
+  }),
   previewAgentGapFollowup: (scanId: string, assessmentMessageId: string) =>
     invoke<GapFollowupPreview>("preview_agent_gap_followup", { scanId, assessmentMessageId }),
   createAgentGapFollowup: (input: GapFollowupDraftInput) =>
@@ -166,6 +196,8 @@ export const sentinelApi = {
     invoke<BrowserAuthSession[]>("list_browser_auth_sessions", { projectId, draftScopeId }),
   listSentinelScanAuthSessions: (scanId: string) =>
     invoke<BrowserAuthSession[]>("list_sentinel_scan_auth_sessions", { scanId }),
+  getSentinelScanIdentityMaterial: (projectId: number, scanId: string) =>
+    invoke<ScanIdentityMaterial[]>("get_sentinel_scan_identity_material", { projectId, scanId }),
   openBrowserAuthSession: (input: { id?: string; projectId: number; name: string; entryUrl: string; draftScopeId?: string; scanId?: string }) =>
     invoke<BrowserAuthSession>("open_browser_auth_session", { input }),
   finishBrowserAuthSession: (sessionId: string) =>

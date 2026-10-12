@@ -158,3 +158,19 @@ fn web_draft_creation_rejects_wrong_scope_or_archived_project_without_consuming_
     drop(connection);
     fs::remove_dir_all(root).unwrap();
 }
+
+#[test]
+fn homogeneous_draft_freezes_opt_in_goal_before_signature_and_legacy_stays_default() {
+    let (root, connection, _) = web_draft_fixture();
+    let scan=create_sentinel_url_scan_scheduling_in(&connection,1,"Homogeneous".into(),vec!["https://draft.example.test/".into()],Some("standard".into()),None,None,None,None,None,Some("核对现有接口观测依据".into()),Some("breadth".into()),Some("multi".into()),true).unwrap();
+    assert_eq!(scan.status,"draft");
+    assert!(crate::agent_runtime::multi_agent::homogeneous::model_worker::enabled(&connection,&scan.id,1).unwrap());
+    let plan:String=connection.query_row("SELECT plan_json FROM native_scan_plans WHERE scan_id=?1",[&scan.id],|r|r.get(0)).unwrap();
+    let plan:JsonValue=serde_json::from_str(&plan).unwrap();assert_eq!(plan["goal"],"核对现有接口观测依据");assert_eq!(plan["lane"],"read_only_analysis");assert_eq!(plan["allowedParallel"],3);
+    assert!(native_scan_status_after(&connection,&scan.id,None).is_ok(),"Web scheduling metadata must not be decoded as a source plan");
+    let legacy=create_sentinel_url_scan_with_mode_in(&connection,1,"Legacy".into(),vec!["https://draft.example.test/".into()],None,None,None,None,None,None,None,None,None).unwrap();
+    assert!(!crate::agent_runtime::multi_agent::homogeneous::model_worker::enabled(&connection,&legacy.id,1).unwrap());
+    connection.execute("UPDATE native_scan_plans SET plan_hash='tampered' WHERE scan_id=?1",[&scan.id]).unwrap();
+    assert!(crate::agent_runtime::multi_agent::homogeneous::model_worker::enabled(&connection,&scan.id,1).is_err());
+    drop(connection);let _=fs::remove_dir_all(root);
+}

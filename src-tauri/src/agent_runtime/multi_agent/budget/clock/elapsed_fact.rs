@@ -46,7 +46,7 @@ pub(crate) fn record_if_exceptional(
 
 /// Pure financial proof of an already committed fact. Never creates a fact
 /// inside the publication writer or changes any executable permission.
-pub(super) fn verify_existing(
+pub(crate) fn verify_existing(
     db: &Connection,
     c: &crate::agent_runtime::multi_agent::lease::CoordinatorLease,
 ) -> Result<Option<ElapsedFact>, String> {

@@ -8,12 +8,13 @@ enum NativeCoordinatorModelCostRule {
 impl NativeCoordinatorModelCostRule {
     fn from_original(bootstrap: &JsonValue) -> Result<Self, String> {
         match bootstrap.get("modelCostRule") {
-            None if bootstrap["schemaVersion"] == 5 => {
+            None if matches!(bootstrap["schemaVersion"].as_i64(), Some(5..=15)) => {
                 Err("root_model_cost_original_rule_invalid".into())
             }
             None => Ok(Self::OriginalConservative),
             Some(v)
-                if bootstrap["schemaVersion"] == 5
+                if (bootstrap["schemaVersion"] == 5
+                    || crate::agent_runtime::multi_agent::budget::supervision_capacity::enabled(bootstrap))
                     && v.as_str() == Some(NATIVE_UNLIMITED_MODEL_COST_RULE) =>
             {
                 Ok(Self::NativeUnlimitedNoScarcity)

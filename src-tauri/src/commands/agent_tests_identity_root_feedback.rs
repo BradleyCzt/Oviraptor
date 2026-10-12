@@ -28,7 +28,9 @@ fn identity_root_feedback_actual_closed_worker_returns_metadata_once_before_web_
     assert_eq!(native_coordinator_rust_dispatch_policy(&root,&frame,&decision,crate::agent_runtime::contract::AgentRole::WebExecutor,
         512,0,[Some(60000),Some(20),Some(32)]).unwrap_err(),"root_trigger_role_conflict");
     web_mode_assert_rows(&db,&rows);
-    multi_agent_finish_execution(&f.context,&mut session,&AgentTargetOutcome::incomplete("identity metadata proof")).unwrap();
+    let outcome=run_native_agent(&f.context);
+    assert!(matches!(outcome,AgentTargetOutcome::BoundedCompleted(_) | AgentTargetOutcome::Incomplete(_)),"{}",outcome.detail());
+    multi_agent_finish_execution(&f.context,&mut session,&outcome).unwrap();
     drop(session);drop(f);stop.store(true,std::sync::atomic::Ordering::SeqCst);
 }
 #[test]
@@ -76,7 +78,9 @@ fn identity_root_feedback_original_consumed_ack_and_payload_cannot_be_reinterpre
         let error=native_coordinator_identity_feedback(&f.context,&session.lease,&session.mapper,&identity_root_child(&db,&session.lease.root_run_id)).err().unwrap();
         web_mode_assert_rows(&db,&before);assert_eq!(seen.lock().unwrap().len(),5);
         assert_eq!(error,expected);
-        multi_agent_finish_execution(&f.context,&mut session,&AgentTargetOutcome::incomplete("damaged identity mailbox retained")).unwrap();
+        let outcome=run_native_agent(&f.context);
+    assert!(matches!(outcome,AgentTargetOutcome::BoundedCompleted(_) | AgentTargetOutcome::Incomplete(_)),"{}",outcome.detail());
+    multi_agent_finish_execution(&f.context,&mut session,&outcome).unwrap();
         drop(session);drop(f);stop.store(true,std::sync::atomic::Ordering::SeqCst);
     }
 }
@@ -102,7 +106,7 @@ fn identity_root_feedback_paid_worker_or_metadata_change_withholds_publication_a
         assert_eq!(seen.lock().unwrap().len(),4);assert_eq!(root_tick_count(&db,&f.actor.root_run_id,"publication"),1);
         assert_eq!(crate::agent_runtime::multi_agent::budget::balance(&db,&f.actor.root_run_id,Some(""),"model_requests").unwrap().consumed,2);
         assert_eq!(db.query_row("SELECT count(*) FROM agent_assignments WHERE role='web_executor'",[],|r|r.get::<_,i64>(0)).unwrap(),0);
-        let parent=crate::agent_runtime::multi_agent::supervisor::WorkerSupervisor::start(&f.context.db_path,&f.actor).unwrap();
+        let parent=start_original_fixture_supervisor(&f.context.db_path,&f.actor).unwrap();
         f.context.supervision=Some(parent.ticket());f.parent=Some(parent);
         let mapper=identity_root_mapper(&db,&f.actor.root_run_id);let child=identity_root_child(&db,&f.actor.root_run_id);
         let before=web_mode_test_rows(&db);

@@ -60,6 +60,15 @@ fn scan_deletion_paid_single_real_sdk_unknown_cost_keeps_original_rows_after_bra
             .unwrap(),
         0
     );
+    assert_eq!(
+        db.query_row(
+            "SELECT count(*) FROM native_deleted_scan_audits_v2",
+            [],
+            |r| r.get::<_, i64>(0)
+        )
+        .unwrap(),
+        0
+    );
 }
 #[test]
 fn scan_deletion_paid_single_implicit_fk_business_owner_is_preserved() {

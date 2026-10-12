@@ -46,8 +46,6 @@ function newAgentModelProfile(name = ""): AgentModelProfile {
 }
 
 const defaults = {
-  pythonExecutable: "python3",
-  redisCliExecutable: "",
   modelProfiles: [] as AgentModelProfile[],
   activeModelProfileId: "",
   modelDeployment: "cloud",
@@ -744,21 +742,6 @@ onMounted(loadRulePacks);
     </div>
     <div v-else-if="tab === 'runtime'" class="form-grid two">
       <label class="field"
-        ><span>{{ tr('Python（辅助工具）', 'Python (helper tools)') }}</span
-        ><input v-model="form.settings.pythonExecutable" placeholder="python3"
-      /></label>
-      <label class="field"
-        ><span>redis-cli executable</span
-        ><input
-          v-model="form.settings.redisCliExecutable"
-          :placeholder="
-            tr(
-              '留空自动检测；Windows 可填写完整 exe 路径',
-              'Blank for auto-detect; Windows can use a full exe path',
-            )
-          "
-      /></label>
-      <label class="field"
         ><span>{{
           tr(
             "Windows runtime directory（建议）",
@@ -816,27 +799,27 @@ onMounted(loadRulePacks);
       <p class="helper span-two">
         {{
           tr(
-            "资产业务 worker 已内置为 Rust，无需 pandas、requests、openpyxl 或外部脚本目录。Python 仅供辅助工具使用；浏览器与 JavaScript AST 仍需要 Node.js。",
-            "Asset workers are built in with Rust; pandas, requests, openpyxl and external worker directories are not required. Python is only used by helper tools; browser and JavaScript AST helpers still require Node.js.",
+            "资产业务 worker 已内置为 Rust，无需 pandas、requests、openpyxl 或外部脚本目录。当前生产工具无需 Python 或 Redis；浏览器与 JavaScript AST 仍需要 Node.js。",
+            "Asset workers are built in with Rust; pandas, requests, openpyxl and external worker directories are not required. Current production tools require neither Python nor Redis; browser and JavaScript AST helpers still require Node.js.",
           )
         }}
       </p>
       <p class="helper span-two">
         {{
           tr(
-            "Windows 建议把 Python/Redis 工具放到 C:\\oviraptor\\runtime，或分别填写 python.exe 与 redis-cli.exe 的完整路径；无需修改系统 PATH。",
-            "On Windows, place Python/Redis tools under C:\\oviraptor\\runtime or enter full paths to python.exe and redis-cli.exe; system PATH changes are optional.",
+            "Windows 浏览器与 AST 工具需要 Node.js；远程 Worker 连接需要 Tailscale。",
+            "On Windows, browser and AST tools need Node.js; remote Worker connections need Tailscale.",
           )
         }}
       </p>
     </div>
     <div v-else-if="tab === 'agent'" class="agent-policy-settings">
       <div class="skill-format-guide">
-        <strong>{{ tr("原生 Agent 自适应分流", "Adaptive native Agent routing") }}</strong
+        <strong>{{ tr("多 Agent 运行环境", "Multi-agent runtime") }}</strong
         ><span>{{
           localProfileActive
             ? tr("当前使用本地模型：云端费用和请求预算已隐藏，运行时会根据模型参数规模自动限制并发、输出长度和首轮等待时间。", "A local model is active. Cloud cost and request budgets are hidden; runtime concurrency, output length, and first-turn wait are adapted to model size automatically.")
-            : tr("当前使用云端 API：提高浏览器覆盖、证据包和模型验证预算，同时保留 WAF、验证码与持续限流硬停止。", "A cloud API is active. Browser coverage, evidence packets, and model verification budgets are raised while WAF, CAPTCHA, and sustained-rate-limit hard stops remain active.")
+            : tr("当前使用云端 API：Native Root 协调专家任务，授权与预算由运行时校验；WAF、验证码与持续限流仍会停止目标请求。", "A cloud API is active. Native Root coordinates specialist tasks with runtime authorization and budget checks; WAF, CAPTCHA, and sustained rate limiting stop target requests.")
         }}</span>
       </div>
       <section class="agent-packet-policy">
@@ -844,7 +827,7 @@ onMounted(loadRulePacks);
           <strong>{{ tr("SRC 专项能力已内置", "SRC specialist capabilities are built in") }}</strong>
           <span>{{ tr("原始 HTTP、有界竞争、按契约受控写入、攻击链关联和每任务 HTTP OAST 会自动准备，不再需要额外开关。目标无法回连当前工作站时，任务会只把 OAST 类别标记为网络不可达。", "Raw HTTP, bounded races, contract-gated writes, attack-chain correlation, and per-task HTTP OAST are prepared automatically. If the target cannot route back to this workstation, only OAST-dependent checks are marked unreachable.") }}</span>
         </div>
-        <p class="helper">{{ tr("内置适配器依赖 Python 标准库，不安装第三方 Python 包；写请求仍必须包含清理、回滚、次数上限和业务不变量，不可逆操作继续禁止。", "The adapter uses only the Python standard library and installs no third-party package. Write contracts still require cleanup, rollback, attempt limits, and a business invariant; irreversible actions remain disabled.") }}</p>
+        <p class="helper">{{ tr("内置适配器由原生运行时执行；写请求仍必须包含清理、回滚、次数上限和业务不变量，不可逆操作继续禁止。", "The adapter uses the native runtime. Write contracts still require cleanup, rollback, attempt limits, and a business invariant; irreversible actions remain disabled.") }}</p>
       </section>
       <div v-if="localProfileActive" class="agent-governance-grid">
         <article class="agent-governance-card">
@@ -893,27 +876,7 @@ onMounted(loadRulePacks);
         <div><strong>{{ tr("本地模型自动资源策略", "Automatic local-model resource policy") }}</strong><span>{{ tr("从模型名称识别参数规模：20B–59B 严格串行、单次最多输出 4096 Token、首轮最长等待 1200 秒；60B 以上最多输出 3072 Token、等待 1800 秒；13B 以下仅在火力全开时允许最多 2 个上游请求。停止或暂停任务会立即断开仍在执行的本地推理，避免旧任务继续占用 CPU。", "Model size is inferred from its name: 20B–59B runs serially with at most 4,096 output tokens and a 1,200-second first-turn window; 60B+ uses 3,072 tokens and 1,800 seconds; below 13B allows at most two upstream requests only in full-power mode. Stopping or pausing a task immediately disconnects local inference so old tasks cannot keep consuming CPU.") }}</span></div>
         <p class="helper">{{ tr("模型服务自身的上下文窗口、KV Cache、量化方式和 CPU/GPU 线程仍由 MLX、LM Studio 或 Ollama 配置；Oviraptor 负责阻止并发放大和孤儿推理，不会偷偷把 Quick / Standard 改成 Deep。", "The model server still owns context length, KV cache, quantization, and CPU/GPU threads in MLX, LM Studio, or Ollama. Oviraptor prevents concurrency amplification and orphan inference, and never silently promotes Quick or Standard to Deep.") }}</p>
       </section>
-      <section v-if="cloudPolicyVisible" class="agent-packet-policy">
-        <div>
-          <strong>{{ tr("发送给原生 Agent 的前端数据预算", "Frontend packet budget for the native Agent") }}</strong>
-          <span>{{ tr("统一限制 frontend-evidence.json 与代码片段总量；URL、状态、API、参数、路由、敏感线索和运行时信号按优先级保留。", "Caps frontend-evidence.json and code slices together; URLs, status, APIs, parameters, routes, sensitive clues, and runtime signals are retained by priority.") }}</span>
-        </div>
-        <div class="form-grid two">
-          <label class="field"
-            ><span>{{ tr("压缩策略", "Compression strategy") }}</span
-            ><select v-model="form.settings.agentFrontendPacketMode">
-              <option value="balanced">{{ tr("均衡（使用自定义预算）", "Balanced (use custom budget)") }}</option>
-              <option value="compact">{{ tr("紧凑（固定 6 KB）", "Compact (fixed 6 KB)") }}</option>
-              <option value="custom">{{ tr("自定义预算", "Custom budget") }}</option>
-            </select></label
-          >
-          <label class="field"
-            ><span>{{ tr("前端数据总预算（KB）", "Frontend packet budget (KB)") }}</span
-            ><input v-model.number="form.settings.agentFrontendPacketBudgetKb" type="number" min="4" max="64" step="1"
-          /></label>
-        </div>
-        <p class="helper">{{ tr("云端默认 24 KB：Standard 最多携带 4 组 API/路由证据，Deep 最多 6 组。预算只裁剪发送给 Agent 的副本，不删除本地完整探测结果。", "Cloud defaults to 24 KB: Standard carries up to four API/route groups and Deep up to six. Only the Agent copy is trimmed; complete local recon is retained.") }}</p>
-      </section>
+
       <fieldset v-if="cloudPolicyVisible" class="agent-policy-controls">
       <div class="form-grid two">
         <label class="field"

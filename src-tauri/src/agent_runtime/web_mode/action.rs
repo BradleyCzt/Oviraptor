@@ -31,6 +31,21 @@ impl NewWebAction {
         {
             return Err("web_mode_action_invalid".into());
         }
+        // Public action hashes cannot reclassify a signed recovery relation as
+        // another independent action or combine two incompatible provenances.
+        let recovery: bool = db.query_row(
+            "SELECT EXISTS(SELECT 1 FROM main.native_protection_recovery_drafts WHERE scan_id=?1)",
+            [scan], |r| r.get(0),
+        ).map_err(|e| e.to_string())?;
+        if recovery != (self.kind == "protection_recovery") {
+            return Err("web_mode_recovery_action_kind_changed".into());
+        }
+        if recovery && db.query_row(
+            "SELECT EXISTS(SELECT 1 FROM main.agent_gap_followups WHERE scan_id=?1) OR EXISTS(SELECT 1 FROM main.native_web_closure_handoffs WHERE scan_id=?1)",
+            [scan], |r| r.get::<_, bool>(0),
+        ).map_err(|e| e.to_string())? {
+            return Err("web_mode_recovery_action_conflicting_relation".into());
+        }
         let actual: Vec<String> = {
             let mut q = db
                 .prepare("SELECT url FROM sentinel_targets WHERE scan_id=?1 ORDER BY url")
@@ -45,6 +60,10 @@ impl NewWebAction {
         let tuple:(String,String,String,String)=match self.kind.as_str() {
             "gap_followup"=>db.query_row("SELECT request_id,source_scan_id,source_hash,request_hash FROM agent_gap_followups WHERE scan_id=?1",[scan],|r|Ok((r.get(0)?,r.get(1)?,r.get(2)?,r.get(3)?))),
             "closure_handoff"=>db.query_row("SELECT request_id,source_scan_id,json_extract(preview_json,'$.sourceHash'),input_hash FROM native_web_closure_handoffs WHERE scan_id=?1",[scan],|r|Ok((r.get(0)?,r.get(1)?,r.get(2)?,r.get(3)?))),
+            "protection_recovery"=> {
+                crate::commands::native_protection_recovery_draft_action_on(db,scan)?;
+                db.query_row("SELECT request_id,source_scan_id,proposal_hash,approval_id FROM main.native_protection_recovery_drafts WHERE scan_id=?1",[scan],|r|Ok((r.get(0)?,r.get(1)?,r.get(2)?,r.get(3)?)))
+            },
             _=>return Err("web_mode_action_kind_invalid".into()),
         }.map_err(|_|"web_mode_action_original_relation_missing")?;
         if tuple
@@ -73,6 +92,11 @@ pub(crate) fn freeze_new(fresh: FreshModeDraft<'_, '_>, fact: &NewWebAction) -> 
         AuthAction::Insert {
             table_name: "native_web_mode_actions",
         } if c.database_name == Some("main") && c.accessor.is_none() => Authorization::Allow,
+        // Recovery action verification checks original physical DB identity.
+        AuthAction::Pragma {
+            pragma_name: "database_list",
+            ..
+        } => Authorization::Allow,
         AuthAction::Read { .. }
         | AuthAction::Select
         | AuthAction::Function { .. }
@@ -107,7 +131,7 @@ pub(crate) fn read_hash(db: &Connection, scan: &str) -> Result<Option<String>, S
         .optional()
         .map_err(|e| e.to_string())?;
     let Some((draft, text, hash)) = row else {
-        let independent:bool=db.query_row("SELECT EXISTS(SELECT 1 FROM agent_gap_followups WHERE scan_id=?1) OR EXISTS(SELECT 1 FROM native_web_closure_handoffs WHERE scan_id=?1)",[scan],|r|r.get(0)).map_err(|e|e.to_string())?;
+        let independent:bool=db.query_row("SELECT EXISTS(SELECT 1 FROM agent_gap_followups WHERE scan_id=?1) OR EXISTS(SELECT 1 FROM native_web_closure_handoffs WHERE scan_id=?1) OR EXISTS(SELECT 1 FROM main.native_protection_recovery_drafts WHERE scan_id=?1)",[scan],|r|r.get(0)).map_err(|e|e.to_string())?;
         return if independent {
             Err("web_mode_independent_action_missing".into())
         } else {

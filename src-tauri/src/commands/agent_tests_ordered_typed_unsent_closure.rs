@@ -1,7 +1,7 @@
 // A gateway BeforeTransport receipt is distinct from a missing response.
 fn ordered_closure_actual_queued_cancel(f: &RootTickFixture, id: &str) -> crate::agent_runtime::multi_agent::directive::ordered_execution::ActionJob {
     use crate::agent_runtime::model::{admission, CancelToken};
-    let gate = admission::gate(true);
+    let gate = admission::gate_for(true, &f.context.environment.api_base);
     let occupied = gate.acquire(&CancelToken::new()).unwrap();
     let db = db::open(&f.context.db_path).unwrap();
     let order = std::thread::scope(|scope| {
@@ -73,9 +73,13 @@ fn ordered_typed_unsent_closure_damaged_receipt_or_foreign_log_owner_cannot_rele
         "UPDATE agent_specialist_calls SET usage_json='{\"modelRequests\":1}'",
         "DROP TRIGGER native_sdk_log_owner_no_update; UPDATE native_sdk_log_owners SET worker_id=NULL WHERE domain='specialist'",
     ] {
-        let (mut f, id) = ordered_exec_fixture("ordered-typed-unsent-damaged", "http://127.0.0.1:9/v1");
+        // Own never-contacted provider: a shared fixed endpoint would share
+        // one admission domain with the sibling iteration-heavy test.
+        let (port, seen, _stop) = spawn_endpoint(std::sync::Arc::new(|_| (500, "application/json", "must not send".into())));
+        let (mut f, id) = ordered_exec_fixture("ordered-typed-unsent-damaged", &format!("http://127.0.0.1:{port}/v1"));
         f.context.environment.deployment = "local".into();
         let _job = ordered_closure_actual_queued_cancel(&f, &id);
+        assert!(seen.lock().unwrap().is_empty(), "queued typed-unsent call must never reach the provider");
         let db = db::open(&f.context.db_path).unwrap();
         db.execute_batch(damage).unwrap();
         let before = super::tests::application_table_snapshot(&db);
@@ -91,9 +95,13 @@ fn ordered_typed_unsent_closure_silent_or_collateral_writes_roll_back_all_origin
         "CREATE TRIGGER typed_unsent_close_fault AFTER UPDATE OF state ON agent_assignments WHEN NEW.state='cancelled' BEGIN UPDATE projects SET name='unauthorized-typed-unsent'; END;",
         "CREATE TRIGGER typed_unsent_close_fault AFTER UPDATE OF state ON agent_assignments WHEN NEW.state='cancelled' BEGIN UPDATE agent_specialist_calls SET failure_code=''; END;",
     ] {
-        let (mut f, id) = ordered_exec_fixture("ordered-typed-unsent-fault", "http://127.0.0.1:9/v1");
+        // Own never-contacted provider: a shared fixed endpoint would share
+        // one admission domain with the sibling iteration-heavy test.
+        let (port, seen, _stop) = spawn_endpoint(std::sync::Arc::new(|_| (500, "application/json", "must not send".into())));
+        let (mut f, id) = ordered_exec_fixture("ordered-typed-unsent-fault", &format!("http://127.0.0.1:{port}/v1"));
         f.context.environment.deployment = "local".into();
         let _job = ordered_closure_actual_queued_cancel(&f, &id);
+        assert!(seen.lock().unwrap().is_empty(), "queued typed-unsent call must never reach the provider");
         let db = db::open(&f.context.db_path).unwrap();
         db.execute_batch(fault).unwrap();
         let before = super::tests::application_table_snapshot(&db);

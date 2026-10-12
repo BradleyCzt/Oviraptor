@@ -1,6 +1,6 @@
 // Actual ordinary creator/startup/HMAC and captured user-entry outcome.
 // No ad-hoc Root financial issuer, inherited mode, or mutable-state terminal.
-fn fresh_single_production_harness(
+pub(super) fn fresh_single_production_harness(
     tag: &str,
     site: impl Fn(String) -> (u16, &'static str, String) + Send + Sync + 'static,
 ) -> AgentHarness {
@@ -118,7 +118,7 @@ fn fresh_web_production_harness_with_sessions(
         model_seen,
     }
 }
-fn freeze_fresh_single_production_harness(h: &mut AgentHarness) {
+pub(super) fn freeze_fresh_single_production_harness(h: &mut AgentHarness) {
     let c = &mut h.context;
     persist_frozen_web_execution_plan(&h.db_path, &c.scan_id, 1, &c.target_url, &c.execution_plan)
         .unwrap();
@@ -154,7 +154,7 @@ fn freeze_fresh_single_production_harness(h: &mut AgentHarness) {
         0
     );
 }
-fn execute_fresh_single_production_harness(h: &mut AgentHarness) -> OwnedAgentTargetOutcome {
+pub(super) fn execute_fresh_single_production_harness(h: &mut AgentHarness) -> OwnedAgentTargetOutcome {
     let prepared = PreparedFrontendTarget {
         position: 1,
         route: h.context.route.clone(),
@@ -204,7 +204,7 @@ fn execute_fresh_single_production_harness(h: &mut AgentHarness) -> OwnedAgentTa
     owned
 }
 
-fn assert_fresh_single_surface(
+pub(super) fn assert_fresh_single_surface(
     h: &AgentHarness,
     url: &str,
     status: &str,
@@ -360,7 +360,7 @@ fn fresh_single_identity_null_document_after_sdk_refuses_before_http_and_preserv
 }
 fn fresh_single_identity_revocation_after_sdk(kind: &'static str) {
     use std::sync::{
-        atomic::{AtomicUsize, Ordering},
+        atomic::Ordering,
         Arc,
     };
     let mut h = fresh_single_production_harness_with_sessions(
@@ -376,44 +376,89 @@ fn fresh_single_identity_revocation_after_sdk(kind: &'static str) {
     let scan = h.context.scan_id.clone();
     let live_context = h.context.clone();
     let url = format!("{}/api/profile", h.context.target_url);
-    let rounds = AtomicUsize::new(0);
-    let (port, seen, stop) = spawn_endpoint(Arc::new(move |_| {
-        let response = if rounds.fetch_add(1, Ordering::SeqCst) == 0 {
-            // Actual SDK is already sent. Change only this temporary task's
-            // authority, retaining both original captured session rows.
-            let db = db::open(&path).unwrap();
-            let changed = match kind {
-                "policy-withdrawal" => db.execute("UPDATE sentinel_scan_contexts SET policy_json=json_set(policy_json,'$.authSessionIds',json('[]'),'$.authSessionId','') WHERE scan_id=?1",[&scan]),
-                "expiry" => db.execute("UPDATE browser_auth_sessions SET expires_at='2000-01-01T00:00:00Z' WHERE id='session-b' AND owner_scan_id=?1",[&scan]),
-                "foreign-owner" => db.execute("UPDATE browser_auth_sessions SET owner_scan_id='other-task' WHERE id='session-b' AND owner_scan_id=?1",[&scan]),
-                "host-change" => db.execute("UPDATE browser_auth_sessions SET session_json=json_set(session_json,'$.scopeHosts',json('[\"example.invalid\"]')) WHERE id='session-b' AND owner_scan_id=?1",[&scan]),
-                "reused-material" => db.execute("UPDATE browser_auth_sessions SET session_json=json_set(session_json,'$.cookies',(SELECT json_extract(session_json,'$.cookies') FROM browser_auth_sessions WHERE id='session-a'),'$.headers',(SELECT json_extract(session_json,'$.headers') FROM browser_auth_sessions WHERE id='session-a')) WHERE id='session-b' AND owner_scan_id=?1",[&scan]),
-                "missing-material" => db.execute("UPDATE browser_auth_sessions SET session_json=json_set(session_json,'$.cookies',json('[]'),'$.headers',json('{}')) WHERE id='session-b' AND owner_scan_id=?1",[&scan]),
-                "corrupt-document" => db.execute("UPDATE browser_auth_sessions SET session_json='{' WHERE id='session-b' AND owner_scan_id=?1",[&scan]),
-                "null-document" => db.execute("UPDATE browser_auth_sessions SET session_json='null' WHERE id='session-b' AND owner_scan_id=?1",[&scan]),
-                _ => panic!("unknown revocation fixture"),
-            }.unwrap();
-            assert_eq!(changed, 1);
-            assert_eq!(
-                agent_authorize_tool(&live_context, "replay_http"),
-                Err("tool_identity_binding_denied")
-            );
-            model_round(
-                &[(
-                    "replay_http",
-                    json!({"identity":"session-a","method":"GET","url":url,"family":"authorization"}),
-                )],
-                100,
-            )
-        } else {
-            model_round(&[], 10)
-        };
-        (200, "application/json", response)
-    }));
+    let revocation: &'static str = match kind {
+        "policy-withdrawal" => "UPDATE sentinel_scan_contexts SET policy_json=json_set(policy_json,'$.authSessionIds',json('[]'),'$.authSessionId','') WHERE scan_id=?1",
+        "expiry" => "UPDATE browser_auth_sessions SET expires_at='2000-01-01T00:00:00Z' WHERE id='session-b' AND owner_scan_id=?1",
+        "foreign-owner" => "UPDATE browser_auth_sessions SET owner_scan_id='other-task' WHERE id='session-b' AND owner_scan_id=?1",
+        "host-change" => "UPDATE browser_auth_sessions SET session_json=json_set(session_json,'$.scopeHosts',json('[\"example.invalid\"]')) WHERE id='session-b' AND owner_scan_id=?1",
+        "reused-material" => "UPDATE browser_auth_sessions SET session_json=json_set(session_json,'$.cookies',(SELECT json_extract(session_json,'$.cookies') FROM browser_auth_sessions WHERE id='session-a'),'$.headers',(SELECT json_extract(session_json,'$.headers') FROM browser_auth_sessions WHERE id='session-a')) WHERE id='session-b' AND owner_scan_id=?1",
+        "missing-material" => "UPDATE browser_auth_sessions SET session_json=json_set(session_json,'$.cookies',json('[]'),'$.headers',json('{}')) WHERE id='session-b' AND owner_scan_id=?1",
+        "corrupt-document" => "UPDATE browser_auth_sessions SET session_json='{' WHERE id='session-b' AND owner_scan_id=?1",
+        "null-document" => "UPDATE browser_auth_sessions SET session_json='null' WHERE id='session-b' AND owner_scan_id=?1",
+        _ => panic!("unknown revocation fixture"),
+    };
+    // The original Root transport legitimately cancels an in-flight SDK call as
+    // soon as its authority is gone (100ms probe; outcome unknown, reserve held
+    // as indeterminate, reconciliation required). A withdrawal *committed* while
+    // the response is still on the wire therefore races that probe under load.
+    // This fixture exercises the other boundary, "bill received, response
+    // refused": the withdrawal is applied on a held write transaction before the
+    // response is written (invisible to the probe, which reads committed state)
+    // and committed only after the client has consumed the response and closed
+    // the connection; the original `received` bill write then waits for it, so
+    // the post-receipt authority recheck deterministically sees the withdrawal.
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    listener.set_nonblocking(true).unwrap();
+    let port = listener.local_addr().unwrap().port();
+    let seen: Arc<std::sync::Mutex<Vec<String>>> = Arc::default();
+    let stop = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let server = {
+        let (seen, stop) = (seen.clone(), stop.clone());
+        std::thread::spawn(move || {
+            use std::io::{Read, Write};
+            let respond = |stream: &mut std::net::TcpStream, body: String| {
+                stream.write_all(format!("HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{body}", body.len()).as_bytes()).unwrap();
+                stream.flush().unwrap();
+            };
+            let mut changed = 0;
+            while !stop.load(Ordering::SeqCst) {
+                let mut stream = match listener.accept() {
+                    Ok((stream, _)) => stream,
+                    Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                        std::thread::sleep(std::time::Duration::from_millis(5));
+                        continue;
+                    }
+                    Err(error) => panic!("model fixture: {error}"),
+                };
+                stream.set_nonblocking(false).unwrap();
+                let Some(request) = read_http_request(&mut stream) else { continue };
+                let first = seen.lock().unwrap().is_empty();
+                seen.lock().unwrap().push(request);
+                if !first {
+                    respond(&mut stream, model_round(&[], 10));
+                    continue;
+                }
+                // Actual SDK is already sent. Change only this temporary task's
+                // authority, retaining both original captured session rows.
+                let db = db::open(&path).unwrap();
+                let tx = rusqlite::Transaction::new_unchecked(&db, rusqlite::TransactionBehavior::Immediate).unwrap();
+                changed = tx.execute(revocation, [&scan]).unwrap();
+                assert_eq!(changed, 1);
+                assert_eq!(
+                    agent_authorize_tool_on(&tx, &live_context, "replay_http"),
+                    Err("tool_identity_binding_denied")
+                );
+                respond(&mut stream, model_round(
+                    &[(
+                        "replay_http",
+                        json!({"identity":"session-a","method":"GET","url":url,"family":"authorization"}),
+                    )],
+                    100,
+                ));
+                // The client closes only after it has consumed the whole response.
+                stream.set_read_timeout(Some(std::time::Duration::from_secs(20))).unwrap();
+                let mut rest = [0u8; 256];
+                while matches!(stream.read(&mut rest), Ok(n) if n > 0) {}
+                tx.commit().unwrap();
+            }
+            changed
+        })
+    };
     h.context.environment.api_base = format!("http://127.0.0.1:{port}/v1");
     h.model_seen = seen;
     let owned = execute_fresh_single_production_harness(&mut h);
     stop.store(true, Ordering::SeqCst);
+    assert_eq!(server.join().unwrap(), 1, "the withdrawal was committed exactly once");
     assert_eq!(
         h.site_seen.lock().unwrap().len(),
         0,

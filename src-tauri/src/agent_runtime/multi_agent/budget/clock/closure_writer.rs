@@ -25,6 +25,22 @@ pub(crate) fn source_pause_write<T>(
     write(db, actor, false, true, work)
 }
 
+/// Publish the terminal result of an explicitly issued financial assessment.
+/// The same finite status columns apply; no targets or execution grants arise.
+pub(crate) fn financial_assessment_write<T>(
+    db: &Connection,
+    actor: &CoordinatorLease,
+    work: impl FnOnce(&rusqlite::Transaction<'_>) -> Result<T, String>,
+) -> Result<T, String> {
+    write(db, actor, false, true, |tx| {
+        let birth = crate::commands::verify_financial_continuation_birth_on(tx, &actor.root_run_id)?;
+        if birth["scanId"] != actor.scan_id || birth["newAttemptNumber"] != actor.attempt_number {
+            return Err("financial_continuation_closure_scope_invalid".into());
+        }
+        work(tx)
+    })
+}
+
 fn write<T>(
     db: &Connection,
     actor: &CoordinatorLease,

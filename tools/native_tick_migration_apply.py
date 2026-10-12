@@ -2,9 +2,9 @@
 import json
 import hashlib
 from pathlib import Path
-from native_tick_migration_snapshot import file_hash, open_database, quote, snapshot
+from native_tick_migration_snapshot import file_hash, open_backup, open_database, quote, snapshot
 from native_tick_migration_writer import install
-from native_tick_migration_schema import TABLES, classify, require_scope, SCHEMA_PATH, statements
+from native_tick_migration_schema import TABLES, classify, require_scope, SCHEMA_PATH, managed_statements
 
 
 def postconditions(db, before):
@@ -28,7 +28,7 @@ def apply(inventory, expected_sha256):
         raise ValueError('native_tick_inventory_format')
     if file_hash(report['backup']) != report['backup_sha256']:
         raise ValueError('native_tick_backup_changed')
-    backup = open_database(report['backup'])
+    backup = open_backup(report['backup'])
     try:
         backup.execute('BEGIN')
         if snapshot(backup) != report['snapshot'] or backup.execute('PRAGMA integrity_check').fetchone()[0] != b'ok':
@@ -59,7 +59,7 @@ def apply(inventory, expected_sha256):
         for i, table in enumerate(TABLES):
             db.execute('CREATE TEMP TABLE migration_' + str(i) + ' AS SELECT rowid AS original_rowid,* FROM ' + quote(table))
             db.execute('DROP TABLE ' + quote(table))
-        for statement in statements(SCHEMA_PATH.read_text()):
+        for statement in managed_statements(SCHEMA_PATH.read_text()):
             db.execute(statement)
         for i, table in enumerate(TABLES):
             columns = before['tables'][table]['columns']

@@ -140,10 +140,15 @@ fn fresh_directive_closure_wire_response(request: &str) -> Option<String> {
 fn fresh_directive_closure_session(tag: &str) -> (AgentHarness, MultiAgentSession) {
     let mut h = fresh_multi_production_harness(tag);
     let (port, seen, _) = spawn_endpoint(std::sync::Arc::new(|request| {
+        if specialist_original_is_web_sdk(&request) {
+            return (200, "application/json", proposal_model_response("actual bounded Web exit; no target tool"));
+        }
         (200, "application/json", fresh_directive_closure_wire_response(&request)
             .expect("local closure fixture expects actual Root/Mapper/Reviewer requests"))
     }));
     h.context.environment.api_base = format!("http://127.0.0.1:{port}/v1");
+    h.model_seen = seen.clone();
+    h.context.execution_plan.max_turns = 1;
     freeze_fresh_multi_production_harness(&mut h);
     let session = multi_agent_prepare(&mut h.context).unwrap();
     assert_eq!(seen.lock().unwrap().len(), 3, "two Root and one actual Mapper");
@@ -161,8 +166,12 @@ fn directive_closure_review_success_is_not_an_applied_action_receipt() {
     directive::claim_pending_directives(&connection, &session.lease, 20).unwrap();
     directive::transition_directive(&connection, &session.lease, &id, "claimed", "accepted").unwrap();
     directive::transition_directive(&connection, &session.lease, &id, "accepted", "applied").unwrap();
-    let outcome = AgentTargetOutcome::BoundedCompleted(AgentCompletion::bounded("coverage fixture"));
+    let outcome = run_native_agent(context);
+    assert!(matches!(outcome, AgentTargetOutcome::BoundedCompleted(_) | AgentTargetOutcome::Incomplete(_)), "{outcome:?}");
+    assert_eq!(h.model_seen.lock().unwrap().iter().filter(|wire| specialist_original_is_web_sdk(wire)).count(),1);
     multi_agent_finish_execution(context, &mut session, &outcome).unwrap();
+    let usage: (i64,i64) = connection.query_row("SELECT used_tokens,used_requests FROM agent_runs WHERE id=?1", [&session.executor.run_id], |r| Ok((r.get(0)?,r.get(1)?))).unwrap();
+    assert_eq!(usage,(20,1), "actual Web invoice is settled before checking directive completion");
     let reviewed = multi_agent_review(context, &mut session, outcome.clone());
     assert_eq!(reviewed, outcome);
     finish_coordinator_run(&connection, &session.lease, &reviewed).unwrap();
@@ -182,9 +191,21 @@ fn directive_closure_executor_settlement_failure_retains_unsettled_budget() {
     let root_id = session.lease.root_run_id.clone();
     let before: (i64, i64) = connection.query_row("SELECT reserved_tokens,reserved_requests FROM agent_assignments WHERE id=?1", [&session.executor.assignment_id], |r| Ok((r.get(0)?, r.get(1)?))).unwrap();
     assert!(before.0 > 0 && before.1 > 0);
+    let original_web = run_native_agent(context);
+    assert!(matches!(original_web, AgentTargetOutcome::BoundedCompleted(_) | AgentTargetOutcome::Incomplete(_)), "{original_web:?}");
+    assert_eq!(h.model_seen.lock().unwrap().iter().filter(|wire| specialist_original_is_web_sdk(wire)).count(),1);
+    let usage = {
+        let tx = rusqlite::Transaction::new_unchecked(&connection, rusqlite::TransactionBehavior::Immediate).unwrap();
+        let usage = crate::agent_runtime::multi_agent::budget::web_lifetime::child_usage_original(
+            &tx, &session.lease, &session.executor.assignment_id, &session.executor.run_id,
+        ).unwrap();
+        tx.commit().unwrap();
+        usage
+    };
+    assert_eq!((usage.total_tokens,usage.model_requests),(20,1), "original receipt usage before coarse settlement: {original_web:?}");
     connection.execute_batch("CREATE TRIGGER fixture_settlement_failure BEFORE UPDATE OF spent_tokens ON agent_budget_ledger BEGIN SELECT RAISE(ABORT,'fixture_settlement_failure'); END;").unwrap();
-    let error = multi_agent_finish_execution(context, &mut session, &AgentTargetOutcome::incomplete("fixture provider outcome")).unwrap_err();
-    assert!(error.contains("fixture_settlement_failure"));
+    let error = multi_agent_finish_execution(context, &mut session, &original_web).unwrap_err();
+    assert!(error.contains("fixture_settlement_failure"), "{error}");
     let row: (String, i64, i64, String, String) = connection.query_row("SELECT a.state,a.reserved_tokens,a.reserved_requests,a.budget_settled_at,r.status FROM agent_assignments a JOIN agent_runs r ON r.id=a.child_run_id WHERE a.id=?1", [&session.executor.assignment_id], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?))).unwrap();
     assert_eq!(row, ("paused".into(), before.0, before.1, String::new(), "paused".into()));
     let caps: i64 = connection.query_row("SELECT COUNT(*) FROM agent_capability_leases WHERE child_run_id=?1 AND revoked_at=''", [&session.executor.run_id], |r| r.get(0)).unwrap();

@@ -239,6 +239,38 @@ fn verify_signed_tool_manifest(
 #[path = "tool_supply/cache.rs"]
 mod cache;
 
+#[path = "tool_supply/approval.rs"]
+mod approval;
+pub(crate) use approval::ToolAdministratorConfiguration;
+
+#[path = "tool_supply/approval_writer.rs"]
+mod approval_writer;
+
+#[path = "tool_supply/frozen_plan.rs"]
+pub(crate) mod frozen_plan;
+pub(crate) mod execution_readiness;
+pub(crate) mod package_format;
+pub(crate) mod approved_package_source;
+pub(crate) mod approved_package_publish;
+pub(crate) mod approved_bundle;
+pub(crate) mod approved_bundle_deploy;
+#[cfg(test)]
+mod approved_package_approval_tests;
+#[cfg(all(test, target_os = "macos"))]
+mod approved_bundle_deploy_review_tests;
+
+#[path = "tool_supply/selection.rs"]
+pub(crate) mod selection;
+
+#[path = "tool_supply/administrator_service.rs"]
+pub(crate) mod administrator_service;
+
+#[path = "tool_supply/sandbox/macos_static_parser.rs"]
+mod macos_static_parser;
+
+#[path = "tool_supply/sandbox/container_parser.rs"]
+pub(crate) mod container_parser;
+
 #[cfg(test)]
 #[path = "tool_supply/tests.rs"]
 mod tests;

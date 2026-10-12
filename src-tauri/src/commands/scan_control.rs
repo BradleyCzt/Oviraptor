@@ -32,6 +32,7 @@ fn start_web_scan(
     mode: WebStartMode,
 ) -> Result<SentinelScan, String> {
     let _owner = claim_scan_control(&state.db_path, &scan_id)?;
+    let tool_configuration = crate::tool_supply::ToolAdministratorConfiguration::from_app(&app)?;
     let mut database = db::open(&state.db_path)?;
     database.pragma_update(None, "synchronous", "FULL").map_err(|error| error.to_string())?;
     let connection = database.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
@@ -123,7 +124,7 @@ fn start_web_scan(
     // worker on error, and do not compensate by overwriting another attempt.
     startup.files.preserve = true;
     connection.commit().map_err(|error| format!("web_start_commit_unconfirmed:{error}"))?;
-    launch_sentinel_url_pipeline(
+    launch_sentinel_url_pipeline_with_tool_configuration(
         state.db_path.clone(),
         scan_id,
         attempt_number as i64,
@@ -138,6 +139,7 @@ fn start_web_scan(
         packet_budget,
         auth_session_path,
         Some(admission),
+        Some(tool_configuration),
     )?;
     Ok(result)
 }
@@ -205,6 +207,12 @@ fn cancel_draft_scan_in(database: &rusqlite::Connection, scan_id: &str) -> Resul
             |r| r.get(0),
         )
         .map_err(|_| "任务不存在".to_string())?;
+    if connection.query_row("SELECT EXISTS(SELECT 1 FROM main.native_protection_recovery_drafts WHERE scan_id=?1)",
+        [scan_id], |r|r.get::<_,bool>(0)).map_err(|e|e.to_string())? {
+        native_protection_recovery_cancel_draft_in(&connection, scan_id)?;
+        connection.commit().map_err(|e|format!("protection_recovery_cancel_commit_unconfirmed:{e}"))?;
+        return Ok(());
+    }
     if status != "draft" {
         return Err("只有未确认任务可以删除；已确认任务请保留审计记录".into());
     }

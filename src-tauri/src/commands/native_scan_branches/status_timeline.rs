@@ -8,10 +8,54 @@ fn native_status_timeline(
     administrative_closure: Option<&JsonValue>,
 ) -> Result<(Vec<JsonValue>, i64), String> {
     verify_request_review_timeline(transaction, scan_id, attempt)?;
+    let plaintext = crate::agent_runtime::multi_agent::homogeneous::material_policy::plaintext(transaction, scan_id, attempt)?;
     let root_decisions = native_root_decision_timeline(transaction, scan_id, attempt)?;
     let after_sequence = window.after;
     let before_sequence = window.before;
     let mut timeline = root_decisions;
+    let mut guidance=transaction.prepare("SELECT d.directive_id,d.updated_at,d.state,d.user_feedback_zh,d.raw_text_redacted,d.reason_zh,d.suggestion_zh,t.root_run_id,t.target_key,d.source_user_directive_id FROM agent_human_directive_gated d JOIN agent_homogeneous_tasks t ON t.task_id=d.parent_task_id WHERE t.scan_id=?1 AND t.attempt_number=?2").map_err(|e|e.to_string())?;
+    timeline.extend(guidance.query_map(params![scan_id,attempt],|r| {
+        let state:String=r.get(2)?;
+        let feedback:String=r.get(3)?;
+        let summary=if state=="awaiting_coordinator" {"用户引导已确认，等待主管处理。".into()} else if state=="applied" {"Worker 已读取主管批准的引导约束。".into()} else if matches!(state.as_str(),"relayed"|"rewritten") {format!("{feedback}；已投递，等待 Worker 读取。已发送的模型上下文保持原样。")} else {format!("{feedback} {} {}",r.get::<_,String>(5)?,r.get::<_,String>(6)?)};
+        let mut item=json!({"id":r.get::<_,String>(0)?,"timestamp":r.get::<_,String>(1)?,"eventType":"homogeneous_guidance","fromRole":"coordinator","fromRunId":r.get::<_,String>(7)?,"toRole":"operator","toRunId":"","messageKind":"homogeneous_guidance","correlationId":"","assignmentId":"","evidenceRevision":0,"threadKey":"team","deliveryState":"persisted","ackState":"n/a","status":state,"summary":crate::agent_runtime::secrets::redact_text_with(&summary,None),"targetKey":r.get::<_,String>(8)?});
+        let source:String=r.get(9)?;
+        if !source.is_empty() {
+            let bound:bool=transaction.query_row("SELECT EXISTS(SELECT 1 FROM agent_user_directives WHERE id=?1 AND scan_id=?2 AND attempt_number=?3 AND root_run_id=?4 AND source_draft_id<>'' AND confirmed_revision>0 AND confirmation_at<>'')",params![source,scan_id,attempt,r.get::<_,String>(7)?],|r|r.get(0))?;
+            if !bound {return Err(rusqlite::Error::InvalidQuery);}
+            item["sourceUserDirectiveId"]=json!(source);
+        }
+        Ok(item)
+    }).map_err(|e|e.to_string())?.collect::<Result<Vec<_>,_>>().map_err(|e|e.to_string())?);
+    let mut reports = transaction.prepare("SELECT p.report_id,p.created_at,p.worker_id,p.slice_id,p.assignment_id,p.terminal_hint,p.output_json,p.consumed_tokens,p.consumed_requests,a.child_run_id,t.root_run_id,t.target_key FROM agent_worker_reports p JOIN agent_assignments a ON a.id=p.assignment_id JOIN agent_homogeneous_tasks t ON t.root_run_id=a.coordinator_run_id WHERE t.scan_id=?1 AND t.attempt_number=?2 AND (?3=0 OR EXISTS(SELECT 1 FROM agent_collaboration_events e WHERE e.event_type='worker_report' AND e.entity_id=p.report_id AND e.sequence>?3 AND (?4 IS NULL OR e.sequence<?4)))").map_err(|e|e.to_string())?;
+    timeline.extend(reports.query_map(params![scan_id,attempt,after_sequence,before_sequence],|r| {
+        let output:JsonValue=serde_json::from_str(&r.get::<_,String>(6)?).map_err(|e|rusqlite::Error::FromSqlConversionFailure(6,rusqlite::types::Type::Text,Box::new(e)))?;
+        Ok(json!({"id":r.get::<_,String>(0)?,"timestamp":r.get::<_,String>(1)?,"eventType":"worker_report",
+            "fromRole":"homogeneous_worker","fromRunId":r.get::<_,String>(9)?,"toRole":"coordinator","toRunId":r.get::<_,String>(10)?,
+            "workerId":r.get::<_,String>(2)?,"sliceId":r.get::<_,String>(3)?,"assignmentId":r.get::<_,String>(4)?,
+            "messageKind":"homogeneous_worker_report","correlationId":"","evidenceRevision":0,"threadKey":"team","deliveryState":"persisted","ackState":"n/a",
+            "status":r.get::<_,String>(5)?,"summary":crate::agent_runtime::secrets::redact_text_with(output["summary_zh"].as_str().unwrap_or(""),None),
+            "targetKey":r.get::<_,String>(11)?,"modelRequests":r.get::<_,i64>(8)?,"totalTokens":r.get::<_,i64>(7)?}))
+    }).map_err(|e|e.to_string())?.collect::<Result<Vec<_>,_>>().map_err(|e|e.to_string())?);
+    // Retry changes the assignment's current carrier. Historical reports retain
+    // the original attempt sender rather than borrowing the replacement run.
+    for item in timeline.iter_mut().filter(|item| item["eventType"]=="worker_report") {
+        let mut attempts=transaction.prepare("SELECT child_run_id,lease_epoch FROM agent_assignment_attempts WHERE assignment_id=?1").map_err(|e|e.to_string())?;
+        let rows=attempts.query_map([item["assignmentId"].as_str().unwrap_or("")],|r|Ok((r.get::<_,String>(0)?,r.get::<_,i64>(1)?))).map_err(|e|e.to_string())?;
+        for row in rows {let (run,attempt)=row.map_err(|e|e.to_string())?;
+            if crate::agent_runtime::multi_agent::homogeneous::store::report_id_for(item["assignmentId"].as_str().unwrap_or(""),attempt)==item["id"].as_str().unwrap_or("") {item["fromRunId"]=json!(run);break;}
+        }
+    }
+    let mut decisions=transaction.prepare("SELECT d.audit_id,d.created_at,d.action,d.stop_reason,d.zero_intent_json,d.produced_intent,d.trigger_reason_code,t.root_run_id,t.target_key FROM agent_homogeneous_decision_audit d JOIN agent_homogeneous_tasks t ON t.task_id=d.parent_task_id WHERE t.scan_id=?1 AND t.attempt_number=?2 AND (?3=0 OR EXISTS(SELECT 1 FROM agent_collaboration_events e WHERE e.event_type='homogeneous_decision' AND e.entity_id=CAST(d.audit_id AS TEXT) AND e.sequence>?3 AND (?4 IS NULL OR e.sequence<?4)))").map_err(|e|e.to_string())?;
+    timeline.extend(decisions.query_map(params![scan_id,attempt,after_sequence,before_sequence],|r|{
+        let action:String=r.get(2)?; let stop:String=r.get(3)?;
+        let zero:JsonValue=serde_json::from_str(&r.get::<_,String>(4)?).unwrap_or(JsonValue::Null);
+        let summary=match action.as_str(){"decompose"=>"主管按目标分解了任务切片。".into(),"assign"=>"主管选定空闲 Worker 并分派切片。".into(),"accept"=>"主管核验汇报并接受切片。".into(),"reject_retry"=>"主管驳回汇报，切片等待重新分派。".into(),"stop"=>format!("主管收尾：{stop}。"),"relay_directive"=>"主管已处理用户引导并转发约束。".into(),"reject_directive"=>"主管拒绝了用户引导，原因见指令回执。".into(),_=>String::new()};
+        Ok(json!({"id":r.get::<_,i64>(0)?.to_string(),"timestamp":r.get::<_,String>(1)?,"eventType":"homogeneous_decision",
+            "fromRole":"coordinator","fromRunId":r.get::<_,String>(7)?,"toRole":"operator","toRunId":"","messageKind":action,"correlationId":"","assignmentId":"","evidenceRevision":0,
+            "threadKey":"team","deliveryState":"persisted","ackState":"n/a","status":action,"summary":summary,"targetKey":r.get::<_,String>(8)?,
+            "zeroIntent":zero,"producedIntent":r.get::<_,bool>(5)?,"triggerReasonCode":r.get::<_,String>(6)?}))
+    }).map_err(|e|e.to_string())?.collect::<Result<Vec<_>,_>>().map_err(|e|e.to_string())?);
     if let Some(receipt) = closure_handoff["successor"].as_object() {
         timeline.push(json!({"id":receipt["requestId"],"timestamp":receipt["createdAt"],
             "eventType":"closure_handoff","fromRole":"operator","fromRunId":"","toRole":"coordinator","toRunId":"",
@@ -206,10 +250,14 @@ fn native_status_timeline(
         let value = serde_json::from_str::<JsonValue>(&payload).unwrap_or(JsonValue::Null);
         let summary = value.get("summary").or_else(|| value.get("verdict")).or_else(|| value.get("text"))
             .and_then(JsonValue::as_str).unwrap_or("typed mailbox message");
-        let summary = crate::agent_runtime::secrets::redact_text_with(summary, None);
+        let summary = if plaintext { summary.to_string() } else { crate::agent_runtime::secrets::redact_text_with(summary, None) };
         let delivered: String = row.get(10)?;
         let acknowledged: String = row.get(11)?;
         let kind: String = row.get(6)?;
+        let summary = if kind == "homogeneous_guidance" {
+            let text = format!("主管引导：{}。{}",value["constraint"].as_str().unwrap_or(""),if acknowledged.is_empty(){"已投递，等待 Worker 读取。"}else{"Worker 已读取约束。"});
+            if plaintext { text } else { crate::agent_runtime::secrets::redact_text_with(&text, None) }
+        } else {summary};
         let mut event = json!({
             "id":row.get::<_,String>(0)?, "timestamp":row.get::<_,String>(1)?, "eventType":"mailbox_message",
             "fromRole":row.get::<_,String>(2)?, "fromRunId":row.get::<_,String>(3)?, "toRole":row.get::<_,String>(4)?,
@@ -322,6 +370,19 @@ fn native_status_timeline(
         sequence_by_entity.insert((event_type, entity_id), sequence);
     }
     for item in &mut timeline {
+        let run=item["fromRunId"].as_str().unwrap_or_default();
+        let assignment=item["assignmentId"].as_str().unwrap_or_default();
+        let homogeneous:Option<(String,String,String,String)>=transaction.query_row(
+            "SELECT homogeneous_worker_id,slice_id,json_extract(task_slice_json,'$.scope_kind'),json_extract(task_slice_json,'$.scope_value') FROM agent_assignments WHERE scheduling_model='homogeneous_workers' AND (id=?1 OR child_run_id=?2) ORDER BY created_at DESC LIMIT 1",
+            params![assignment,run],|r|Ok((r.get(0)?,r.get(1)?,r.get(2)?,r.get(3)?))).optional().map_err(|e|e.to_string())?;
+        if let Some((worker,slice,kind,value))=homogeneous {
+            if item.get("workerId").is_none() {item["workerId"]=json!(worker);} if item.get("sliceId").is_none() {item["sliceId"]=json!(slice);}
+            if item["fromRole"]=="deep_investigator" {item["fromRole"]=json!("homogeneous_worker");}
+            if item["toRole"]=="deep_investigator" {item["toRole"]=json!("homogeneous_worker");}
+            if item["messageKind"]=="homogeneous_slice_dispatch" || item["eventType"]=="assignment" {
+                item["summary"]=json!(format!("主管分派只读切片：{kind} = {value}。"));
+            }
+        }
         let event_type = item
             .get("eventType")
             .and_then(JsonValue::as_str)

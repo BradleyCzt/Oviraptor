@@ -156,9 +156,9 @@ pub(crate) fn prepare_next_authorized(
             "SELECT NOT EXISTS(SELECT 1 FROM agent_assignments a WHERE a.coordinator_run_id=?1 \
                AND a.role='web_executor' AND a.state IN ('leased','running','waiting_review')) \
              OR EXISTS(SELECT 1 FROM agent_budget_ledger b WHERE b.root_run_id=?1 \
-               AND (b.total_tokens=0 OR b.total_tokens-b.spent_tokens-b.reserved_tokens>=?2+8000) \
+               AND (b.total_tokens=0 OR b.total_tokens-b.spent_tokens-b.reserved_tokens>=?2+?3) \
                AND (b.total_requests=0 OR b.total_requests-b.spent_requests-b.reserved_requests>=2))",
-            params![lease.root_run_id,PROPOSAL_TOKENS],|r|r.get(0),
+            params![lease.root_run_id,PROPOSAL_TOKENS,crate::agent_runtime::multi_agent::client_side::REVIEWER_FLOOR_TOKENS],|r|r.get(0),
         ).map_err(|e|e.to_string())?;
         if !reviewer_room {
             defer(

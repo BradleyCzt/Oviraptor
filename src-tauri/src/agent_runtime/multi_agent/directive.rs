@@ -23,6 +23,28 @@ pub(crate) mod ordered_plan;
 pub(crate) mod ordered_execution;
 #[cfg(test)]
 pub use confirmation::confirm_draft;
+/// DESIGN §5.6：Phase 1 的引导闸门复用现状规则初筛，但不把 `DraftInterpretation`
+/// 这个内部结构外泄——只回传闸门需要的四个字段。
+pub(crate) fn screen_directive_text(
+    text: &str,
+    target_key: &str,
+) -> (String, String, Vec<String>, String) {
+    let interpreted = interpretation::interpret(text, target_key);
+    (
+        interpreted.status,
+        interpreted.coordinator_decision,
+        interpreted.reason_codes,
+        interpreted.safe_execution_text,
+    )
+}
+
+pub(crate) fn screen_directive_material(text: &str, target: &str, plaintext: bool)
+    -> (String, String, Vec<String>, String)
+{
+    if !plaintext { return screen_directive_text(text, target); }
+    let result = interpretation::interpret_with_material(text, target, true);
+    (result.status, result.coordinator_decision, result.reason_codes, result.safe_execution_text)
+}
 pub use confirmation::{cancel_draft, confirm_bound_draft};
 use delivery::prepare_model_context_in_transaction;
 pub use delivery::{prepare_model_context, record_model_delivery};

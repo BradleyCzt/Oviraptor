@@ -345,7 +345,6 @@ fn migrate_budget_defaults(connection: &mut Connection) -> Result<(), String> {
         .map_err(|error| error.to_string())?;
     if count == 0 {
         let defaults = json!({
-            "pythonExecutable": "python3",
             "modelProfiles": [],
             "activeModelProfileId": "",
             "modelDeployment": "cloud",

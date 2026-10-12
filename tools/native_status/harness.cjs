@@ -77,8 +77,10 @@ async function mount(getStatus, recover, close, administrative, options = {}) {
     // NativeRunStatus owns status actions; the on-demand budget panel has its
     // own lifecycle and must not issue IPC while these status tests mount it.
     if (name === './NativeBudgetDiagnostics.vue') return { default: { render: () => null } };
+    if (name === './NativeRootReconciliation.vue') return { default: { render: () => null } };
     // The new result-only panel is exercised by its own real SFC suite.
     if (name === './NativeSourcePauseRecovery.vue') return { default: { render: () => null } };
+    if (name === './NativeProtectionRecovery.vue') return { default: { render: () => null } };
     throw new Error(`Unexpected import: ${name}`);
   }, exports, (fn) => { timers.set(++timerSequence, fn); return timerSequence; }, (id) => timers.delete(id));
   let bindings;

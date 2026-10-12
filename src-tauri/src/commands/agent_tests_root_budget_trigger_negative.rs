@@ -1,3 +1,43 @@
+include!("agent_tests_supervision_capacity_concurrency.rs");
+
+#[test]
+fn root_budget_trigger_v9_insufficient_followup_capacity_refuses_new_executor() {
+    let _real = RealSpecialistTransport::enter();
+    let (port, seen, _) = spawn_endpoint(std::sync::Arc::new(|wire| {
+        (200,"application/json",changed_fact_response(&wire,true))
+    }));
+    let mut f = root_tick_fixture_protocol_limits("v9-low-followup-capacity",&format!("http://127.0.0.1:{port}/v1"),true,(60_000,6));
+    drop(f.parent.take());
+    assert_eq!(multi_agent_prepare(&mut f.context).err().unwrap(),"multi_agent_executor_budget_unavailable");
+    let db = db::open(&f.context.db_path).unwrap();
+    assert_eq!(seen.lock().unwrap().len(),3,"only original Root/Mapper/Root calls, no additional capacity bought");
+    assert_eq!(crate::agent_runtime::web_mode::root::read(&db,&f.actor.root_run_id).unwrap().unwrap().bootstrap_dispatch().unwrap()["schemaVersion"],9);
+    assert_eq!(db.query_row("SELECT count(*) FROM agent_assignments WHERE coordinator_run_id=?1 AND role='web_executor'",[&f.actor.root_run_id],|r|r.get::<_,i64>(0)).unwrap(),0);
+    assert_eq!(db.query_row("SELECT count(*) FROM agent_http_request_claims WHERE scan_id=?1",[&f.context.scan_id],|r|r.get::<_,i64>(0)).unwrap(),0);
+}
+
+#[test]
+fn root_budget_trigger_v6_missing_sidecar_cannot_downgrade_http_gate() {
+    let _real = RealSpecialistTransport::enter();
+    let f = budget_trigger_fixture(0);
+    let db = db::open(&f.h.db_path).unwrap();
+    let s = f.session.as_ref().unwrap();
+    let original = super::tests::application_table_snapshot(&db);
+    let tx = rusqlite::Transaction::new_unchecked(&db,rusqlite::TransactionBehavior::Immediate).unwrap();
+    // Simulate imported corruption only in this temporary transaction; rollback
+    // restores the original signed declaration and immutable trigger.
+    tx.execute_batch("DROP TRIGGER root_mode_immutable_delete").unwrap();
+    assert_eq!(tx.execute("DELETE FROM agent_root_mode_definitions WHERE root_run_id=?1",[&s.lease.root_run_id]).unwrap(),1);
+    let broken = super::tests::application_table_snapshot(&tx);
+    assert_eq!(crate::agent_runtime::multi_agent::budget::supervision_capacity::require_http_headroom(&tx,&s.lease,&s.executor.assignment_id,&s.executor.run_id).unwrap_err(),"web_mode_root_missing");
+    assert_eq!(crate::agent_runtime::multi_agent::budget::supervision_capacity::diagnostic(&tx,&s.lease.root_run_id).unwrap_err(),"web_mode_root_missing");
+    assert!(super::tests::application_table_snapshot(&tx)==broken);
+    tx.rollback().unwrap();
+    assert!(super::tests::application_table_snapshot(&db)==original);
+    assert_eq!(f.h.model_seen.lock().unwrap().len(),3);
+    assert!(f.h.site_seen.lock().unwrap().is_empty());
+}
+
 #[test]
 fn root_budget_trigger_actual_entry_defer_and_forbidden_advisory_stop_before_web_sdk_or_target() {
     let _real = RealSpecialistTransport::enter();

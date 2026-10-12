@@ -302,6 +302,37 @@ fn agent_http_observations(
                 }
             }
         }
+        // U98: click-explore entry is called so mode flips later without a new call site.
+        // string_only → surface_click_explore_not_ready (expected, not a fault).
+        match native_surface_click_explore_candidates(text, url) {
+            Ok(extra) => {
+                for (method, path) in extra {
+                    if runtime.discovered_api_keys.len() >= 80 || added >= 40 {
+                        break;
+                    }
+                    match persist_agent_surface_api(context, runtime, &method, &path, url) {
+                        Ok(true) => {
+                            added += 1;
+                            emitted.push(format!("surface-click:{method}:{path}"));
+                        }
+                        Ok(false) => {}
+                        Err(error) => {
+                            return Err(serde_json::json!({
+                                "error": error,
+                                "code": "finding_persist_failed",
+                            }));
+                        }
+                    }
+                }
+            }
+            Err(code) if code == "surface_click_explore_not_ready" => {}
+            Err(error) => {
+                return Err(serde_json::json!({
+                    "error": error,
+                    "code": "surface_click_explore_failed",
+                }));
+            }
+        }
     }
     // Also register the current non-static request itself as surface inventory.
     {

@@ -70,7 +70,7 @@ fn client_root_fixture(tag: &str, forbidden: bool) -> ClientRootFixture {
     h.context.execution_plan.hard_model_requests = 20;
     h.context.execution_plan.soft_model_requests = 10;
     h.context.execution_plan.max_turns = 8;
-    freeze_fresh_multi_production_harness(&mut h);
+    freeze_fresh_multi_production_harness_original_v6(&mut h);
     let root = h.context.run.as_ref().unwrap().run_id.clone();
     let session = multi_agent_prepare(&mut h.context).unwrap();
     let outcome = run_native_agent(&h.context);

@@ -3,9 +3,13 @@ use super::rows::{quote, Table};
 use rusqlite::Connection;
 use std::collections::{BTreeMap, BTreeSet};
 pub(super) const RETAINED: &[&str] = &[
+    "agent_frozen_tool_supply_plans",
+    "native_tool_selection_requests",
     "agent_budget_entries",
     "agent_root_budget_attempts",
     "agent_root_model_journal",
+    "agent_root_model_cache_provenance",
+    "agent_root_model_cache_capture",
     "agent_budget_limits",
     "agent_budget_clock_origins",
     "agent_single_exit_receipts",
@@ -18,6 +22,7 @@ pub(super) const RETAINED: &[&str] = &[
     "native_sdk_log_owners",
     "native_sdk_log_rows",
     "native_sdk_log_gaps",
+    "native_sdk_log_mapper_owners",
 ];
 pub(super) const MULTI_RETAINED: &[&str] = &[
     "agent_root_tick_receipts",
@@ -28,6 +33,9 @@ pub(super) const MULTI_RETAINED: &[&str] = &[
     "agent_assignment_attempts",
     "agent_assignment_replacements",
     "agent_root_elapsed_facts",
+    "agent_mapper_loop_journal",
+    "agent_mapper_loop_final_receipts",
+    "agent_mapper_loop_expired_receipts",
 ];
 // Finite Source material names; no generic source/import/asset/CAS wildcard.
 pub(super) const SOURCE_RETAINED: &[&str] = &[
@@ -50,6 +58,31 @@ pub(super) fn native(name: &str) -> bool {
         || matches!(name, "tool_invocations" | "browser_auth_sessions")
         || SOURCE_RETAINED.contains(&name)
         || SOURCE_ARCHIVED.contains(&name)
+}
+
+/// Historical provenance only. Never consult mutable approval or issue a grant.
+pub(super) fn verify_original_tool_supply(db: &Connection, root: &str) -> Result<(), String> {
+    let (scan, attempt, text): (String, i64, String) = db.query_row(
+        "SELECT scan_id,attempt_number,plan_json FROM agent_runs WHERE id=?1",
+        [root], |r| Ok((r.get(0)?,r.get(1)?,r.get(2)?)),
+    ).map_err(|e| e.to_string())?;
+    let plan: serde_json::Value = serde_json::from_str(&text).map_err(|e| e.to_string())?;
+    let selection = crate::tool_supply::selection::FrozenToolSelection::from_plan_value(plan.get("toolSupply"))?;
+    let Some(selection) = selection else { return Ok(()); };
+    let sealed = crate::tool_supply::frozen_plan::read_original_seal_on(db, root)?
+        .ok_or("deleted_audit_original_tool_supply_missing")?;
+    let policy = crate::commands::capture_original_tool_selection_policy_on(db, &scan, attempt)?;
+    let policy: serde_json::Value = serde_json::from_str(policy.canonical_policy()).map_err(|e| e.to_string())?;
+    let request = policy["toolSupplySelection"]["prepared"]["request"]["requestId"]
+        .as_str().ok_or("deleted_audit_original_tool_selection_missing")?;
+    let source = crate::tool_supply::selection::OriginalSignedToolSelectionPolicy::capture_original_on(db, &scan, attempt)?;
+    let original = crate::tool_supply::selection::verify_signed_request_on(db, &source, request)?;
+    let prepared = &original.fact()["snapshot"]["prepared"];
+    if original.selection() != &selection
+        || sealed.historical_fact()["tools"] != prepared["inventory"]
+        || sealed.historical_fact()["configurationDigest"] != prepared["configurationDigest"]
+    { return Err("deleted_audit_original_tool_supply_changed".into()); }
+    Ok(())
 }
 type Foreign = BTreeMap<i64, Vec<(String, String, String, String)>>;
 struct Meta {
@@ -156,12 +189,22 @@ impl Catalogue {
                 terms.push(format!("{} IN({})", quote(c), self.roots));
             }
         }
+        // The capture seal is keyed by the original call, without a synthetic
+        // foreign key to a journal which has multiple phases per call.
+        if name == "agent_root_model_cache_capture" {
+            terms.push(format!(
+                "call_id IN(SELECT call_id FROM agent_root_model_journal WHERE root_run_id IN({}))",
+                self.roots
+            ));
+        }
         for edge in meta.foreign.values() {
             let parent = &edge[0].0;
             if !native(parent)
                 || matches!(
                     parent.as_str(),
-                    "native_deleted_scan_audits" | "native_deleted_scan_anchors"
+                    "native_deleted_scan_audits"
+                        | "native_deleted_scan_audits_v2"
+                        | "native_deleted_scan_anchors"
                 )
             {
                 continue;
@@ -217,7 +260,9 @@ impl Catalogue {
             native(n)
                 && !matches!(
                     n.as_str(),
-                    "native_deleted_scan_audits" | "native_deleted_scan_anchors"
+                    "native_deleted_scan_audits"
+                        | "native_deleted_scan_audits_v2"
+                        | "native_deleted_scan_anchors"
                 )
         }) {
             let filter = self.filter(name)?;

@@ -1,6 +1,9 @@
 // The provider is real local HTTP. Only its bounded public answer is scripted;
 // creator, parent, Mapper, Reviewer, Investigator, costs and mailbox are real.
 fn paid_proposal_response(request: &str, invalid: bool) -> String {
+    if specialist_original_is_web_sdk(request) {
+        return proposal_model_response("actual bounded original Web exit; no target tool");
+    }
     if request.contains("You are the Root Coordinator") && request.contains("investigator-proposal")
     {
         return proposal_model_response(
@@ -41,8 +44,14 @@ fn paid_proposal_review(f: &mut RootTickFixture) -> MultiAgentSession {
         &json!({"claim":"independent evidence absent"}),
     )
     .unwrap();
-    let outcome = AgentTargetOutcome::incomplete("no verified target control");
-    multi_agent_finish_execution(&f.context, &mut session, &outcome).unwrap();
+    let original_web=run_native_agent(&f.context);
+    assert!(matches!(original_web,AgentTargetOutcome::BoundedCompleted(_) | AgentTargetOutcome::Incomplete(_)),"{original_web:?}");
+    multi_agent_finish_execution(&f.context, &mut session, &original_web).unwrap();
+    let db=db::open(&f.context.db_path).unwrap();
+    let usage:(i64,i64,i64)=db.query_row("SELECT used_tokens,used_cached_tokens,used_requests FROM agent_runs WHERE id=?1",
+        [&session.executor.run_id],|r|Ok((r.get(0)?,r.get(1)?,r.get(2)?))).unwrap();
+    assert_eq!(usage,(20,0,1),"the original Web fee is real and settled exactly once");
+    let outcome=AgentTargetOutcome::incomplete("no verified target control");
     let reviewed = multi_agent_review(&f.context, &mut session, outcome);
     assert!(
         !matches!(reviewed, AgentTargetOutcome::Completed(_)),
@@ -71,20 +80,22 @@ fn coordinator_actual_closed_paid_proposal_returns_to_root_and_replay_spends_zer
             paid_proposal_response(&request, false),
         )
     }));
-    let mut f = root_tick_fixture(
-        "paid-proposal-feedback",
-        &format!("http://127.0.0.1:{port}/v1"),
+    let mut f = root_tick_fixture_from_web_mode_turns(
+        "paid-proposal-feedback", &format!("http://127.0.0.1:{port}/v1"),
+        true,(60_000,20),None,web_mode_fixture("multi","https://authorized.example.test"),Some(1),
     );
     let session = paid_proposal_review(&mut f);
+    assert_eq!(seen.lock().unwrap().iter().filter(|wire| specialist_original_is_web_sdk(wire)).count(),1,
+        "exactly one real original Web request, never a fabricated completion");
     let db = db::open(&f.context.db_path).unwrap();
     assert_eq!(
         seen.lock().unwrap().len(),
-        7,
-        "four actual Root SDK plus Mapper/Reviewer/Investigator"
+        9,
+        "five actual Root SDK plus Mapper/Web/Reviewer/Investigator"
     );
     assert_eq!(
         root_tick_count(&db, &session.lease.root_run_id, "publication"),
-        4
+        5
     );
     assert_eq!(
         crate::agent_runtime::multi_agent::budget::balance(
@@ -95,7 +106,7 @@ fn coordinator_actual_closed_paid_proposal_returns_to_root_and_replay_spends_zer
         )
         .unwrap()
         .consumed,
-        4
+        5
     );
     assert_eq!(
         crate::agent_runtime::multi_agent::budget::balance(
@@ -106,7 +117,7 @@ fn coordinator_actual_closed_paid_proposal_returns_to_root_and_replay_spends_zer
         )
         .unwrap()
         .consumed,
-        7
+        9
     );
     let assessment: String = db
         .query_row(
@@ -126,7 +137,7 @@ fn coordinator_actual_closed_paid_proposal_returns_to_root_and_replay_spends_zer
     let (candidate, revision, missing) = paid_proposal_candidate(&db);
     multi_agent_investigate_review_gap(&f.context, &session, &candidate, revision, &missing)
         .unwrap();
-    assert_eq!(seen.lock().unwrap().len(), 7);
+    assert_eq!(seen.lock().unwrap().len(), 9);
     web_mode_assert_rows(&db, &physical);
     let requests = seen.lock().unwrap();
     let last = requests.last().unwrap();
@@ -148,7 +159,7 @@ fn coordinator_actual_closed_paid_proposal_returns_to_root_and_replay_spends_zer
     }
     assert_eq!(body["tool_choice"],"auto");
     let original: String = db.query_row(
-        "SELECT fact_json FROM agent_root_tick_receipts WHERE root_run_id=?1 AND round=4 AND phase='request'",
+        "SELECT fact_json FROM agent_root_tick_receipts WHERE root_run_id=?1 AND round=5 AND phase='request'",
         [&session.lease.root_run_id], |r| r.get(0),
     ).unwrap();
     let original: JsonValue = serde_json::from_str(&original).unwrap();
@@ -208,21 +219,23 @@ fn coordinator_proposal_paid_worker_mutation_rejects_publication_then_exact_rest
             paid_proposal_response(&request, false),
         )
     }));
-    let mut f = root_tick_fixture(
-        "paid-proposal-mutated",
-        &format!("http://127.0.0.1:{port}/v1"),
+    let mut f = root_tick_fixture_from_web_mode_turns(
+        "paid-proposal-mutated", &format!("http://127.0.0.1:{port}/v1"),
+        true,(60_000,20),None,web_mode_fixture("multi","https://authorized.example.test"),Some(1),
     );
     *path.lock().unwrap() = Some(f.context.db_path.clone());
     let session = paid_proposal_review(&mut f);
+    assert_eq!(seen.lock().unwrap().iter().filter(|wire| specialist_original_is_web_sdk(wire)).count(),1,
+        "exactly one real original Web request, never a fabricated completion");
     let db = db::open(&f.context.db_path).unwrap();
     assert_eq!(
         seen.lock().unwrap().len(),
-        7,
-        "actual seventh provider response must be paid"
+        9,
+        "actual ninth provider response must be paid"
     );
     assert_eq!(
         root_tick_count(&db, &session.lease.root_run_id, "publication"),
-        3,
+        4,
         "original closed worker changed before local publication"
     );
     assert_eq!(
@@ -234,7 +247,7 @@ fn coordinator_proposal_paid_worker_mutation_rejects_publication_then_exact_rest
         )
         .unwrap()
         .consumed,
-        4
+        5
     );
     let (id, finished) = saved.lock().unwrap().take().unwrap();
     db.execute(
@@ -247,12 +260,12 @@ fn coordinator_proposal_paid_worker_mutation_rejects_publication_then_exact_rest
         .unwrap();
     assert_eq!(
         seen.lock().unwrap().len(),
-        7,
+        9,
         "exact original restoration recovers local publication without SDK retry"
     );
     assert_eq!(
         root_tick_count(&db, &session.lease.root_run_id, "publication"),
-        4
+        5
     );
     assert_eq!(
         crate::agent_runtime::multi_agent::budget::balance(
@@ -263,7 +276,7 @@ fn coordinator_proposal_paid_worker_mutation_rejects_publication_then_exact_rest
         )
         .unwrap()
         .consumed,
-        4
+        5
     );
     drop(session);
 }
@@ -277,13 +290,15 @@ fn coordinator_proposal_root_advisory_web_step_cannot_issue_another_target_grant
             paid_proposal_response(&request, true),
         )
     }));
-    let mut f = root_tick_fixture(
-        "paid-proposal-forbidden-step",
-        &format!("http://127.0.0.1:{port}/v1"),
+    let mut f = root_tick_fixture_from_web_mode_turns(
+        "paid-proposal-forbidden-step", &format!("http://127.0.0.1:{port}/v1"),
+        true,(60_000,20),None,web_mode_fixture("multi","https://authorized.example.test"),Some(1),
     );
     let session = paid_proposal_review(&mut f);
+    assert_eq!(seen.lock().unwrap().iter().filter(|wire| specialist_original_is_web_sdk(wire)).count(),1,
+        "exactly one real original Web request, never a fabricated completion");
     let db = db::open(&f.context.db_path).unwrap();
-    assert_eq!(seen.lock().unwrap().len(), 7);
+    assert_eq!(seen.lock().unwrap().len(), 9);
     let before = web_mode_test_rows(&db);
     let (candidate, revision, missing) = paid_proposal_candidate(&db);
     assert_eq!(
@@ -292,7 +307,7 @@ fn coordinator_proposal_root_advisory_web_step_cannot_issue_another_target_grant
         "root_proposal_step_not_bounded"
     );
     web_mode_assert_rows(&db, &before);
-    assert_eq!(seen.lock().unwrap().len(), 7);
+    assert_eq!(seen.lock().unwrap().len(), 9);
     assert_eq!(
         db.query_row(
             "SELECT count(*) FROM agent_assignments WHERE role='web_executor'",

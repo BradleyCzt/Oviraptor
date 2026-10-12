@@ -293,9 +293,9 @@
     },
     "src-tauri/src/db_tests.rs": {
       "category": "fixture",
-      "reason": "Temporary-database tests preserve retired raw credentials across restarts without activating Native. Current flat fields normalize only in memory. The former cleanup rollback test is replaced by startup preservation coverage; historical attempt fixtures remain test-only.",
+      "reason": "Temporary-database tests preserve retired raw credentials across restarts without activating Native. Current flat fields normalize only in memory. The former cleanup rollback test is replaced by startup preservation coverage; historical attempt fixtures remain test-only. Phase 1 added a homogeneous control-plane schema assertion to this same temporary-database file; no retired literal was added or removed, occurrences stay 12.",
       "evidence": {
-        "sha256": "ed758c0bbaf4f04c6d36a702476024ca1aac7ff3541e47a7db4b42cc1fd846e0",
+        "sha256": "dde4218046f28f479ac9aeca829e93785e617c4b96bb30e6481671b99929c0f5",
         "literalOccurrences": 12,
         "pathMatch": false
       }

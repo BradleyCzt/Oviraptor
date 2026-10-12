@@ -35,6 +35,33 @@ CREATE TABLE IF NOT EXISTS agent_collaboration_events (
     payload_json TEXT NOT NULL DEFAULT '{}',
     created_at TEXT NOT NULL DEFAULT (datetime('now','localtime'))
 );
+CREATE TRIGGER IF NOT EXISTS agent_collaboration_homogeneous_guidance_insert
+AFTER INSERT ON agent_human_directive_gated BEGIN
+  INSERT INTO agent_collaboration_events(scan_id,attempt_number,entity_type,entity_id,event_type,payload_json)
+  SELECT scan_id,attempt_number,'homogeneous_guidance',NEW.directive_id,'homogeneous_guidance',json_object('state',NEW.state)
+  FROM agent_homogeneous_tasks WHERE task_id=NEW.parent_task_id;
+END;
+CREATE TRIGGER IF NOT EXISTS agent_collaboration_homogeneous_guidance_update
+AFTER UPDATE ON agent_human_directive_gated WHEN OLD.state<>NEW.state OR OLD.user_feedback_zh<>NEW.user_feedback_zh BEGIN
+  INSERT INTO agent_collaboration_events(scan_id,attempt_number,entity_type,entity_id,event_type,payload_json)
+  SELECT scan_id,attempt_number,'homogeneous_guidance',NEW.directive_id,'homogeneous_guidance',json_object('state',NEW.state)
+  FROM agent_homogeneous_tasks WHERE task_id=NEW.parent_task_id;
+END;
+CREATE TRIGGER IF NOT EXISTS agent_collaboration_homogeneous_report
+AFTER INSERT ON agent_worker_reports BEGIN
+  INSERT INTO agent_collaboration_events(scan_id,attempt_number,entity_type,entity_id,event_type,payload_json)
+  SELECT t.scan_id,t.attempt_number,'worker_report',NEW.report_id,'worker_report',
+    json_object('assignmentId',NEW.assignment_id,'sliceId',NEW.slice_id,'workerId',NEW.worker_id)
+  FROM agent_assignments a JOIN agent_homogeneous_tasks t ON t.root_run_id=a.coordinator_run_id
+  WHERE a.id=NEW.assignment_id AND a.scheduling_model='homogeneous_workers';
+END;
+CREATE TRIGGER IF NOT EXISTS agent_collaboration_homogeneous_decision
+AFTER INSERT ON agent_homogeneous_decision_audit BEGIN
+  INSERT INTO agent_collaboration_events(scan_id,attempt_number,entity_type,entity_id,event_type,payload_json)
+  SELECT scan_id,attempt_number,'homogeneous_decision',CAST(NEW.audit_id AS TEXT),'homogeneous_decision',
+    json_object('decisionId',NEW.decision_id,'action',NEW.action,'stopReason',NEW.stop_reason)
+  FROM agent_homogeneous_tasks WHERE task_id=NEW.parent_task_id;
+END;
 CREATE INDEX IF NOT EXISTS idx_agent_collaboration_events_scan
     ON agent_collaboration_events(scan_id,attempt_number,sequence);
 CREATE INDEX IF NOT EXISTS idx_agent_collaboration_events_entity

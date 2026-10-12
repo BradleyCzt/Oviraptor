@@ -4,6 +4,7 @@ export function agentDialogLabels(tr: (zh: string, en: string) => string) {
   const roleLabel = (role: string) => ({
     operator: tr("你", "You"),
     coordinator: "调查",
+    homogeneous_worker: tr("同质 Worker", "Worker"),
     spa_api_mapper: "采集",
     identity_session: tr("身份会话", "Identity & session"),
     web_executor: tr("Web 执行", "Web executor"),
@@ -14,6 +15,9 @@ export function agentDialogLabels(tr: (zh: string, en: string) => string) {
   }[role] ?? role);
   const eventLabel = (eventType: string) => ({
     root_decision: tr("决策摘要", "Decision summary"),
+    homogeneous_guidance: tr("引导回执", "Guidance receipt"),
+    homogeneous_decision: tr("主管裁决", "Coordinator decision"),
+    worker_report: tr("Worker 汇报", "Worker report"),
     directive_draft: tr("指令草案", "Directive draft"),
     user_directive: tr("用户指令", "User directive"),
     mailbox_message: tr("智能体通信", "Agent message"),

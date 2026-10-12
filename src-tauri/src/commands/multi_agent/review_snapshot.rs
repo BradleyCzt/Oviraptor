@@ -103,13 +103,14 @@ fn sealed_gap_review_candidate(
 }
 
 fn sealed_gap_review_candidate_in_transaction(
-    transaction: &rusqlite::Transaction<'_>,
+    transaction: &rusqlite::Connection,
     root_run_id: &str,
     candidate_id: &str,
     revision: i64,
     missing_evidence: &JsonValue,
     target_dir: &Path,
 ) -> Result<(JsonValue, JsonValue, Vec<String>), String> {
+    if transaction.is_autocommit() { return Err("gap_original_snapshot_required".into()); }
     let stored: Option<(String, String, String)> = transaction.query_row(
         "SELECT q.candidate_json,d.missing_evidence_json,m.payload_json \
          FROM agent_review_requests q \

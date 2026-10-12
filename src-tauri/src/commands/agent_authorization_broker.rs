@@ -1,14 +1,96 @@
+use super::*;
+
+/// The run context carries the scan's validated captured accounts plus, when
+/// any account exists, the single fixed credential-free control that
+/// `multi_agent_prepare` / `agent_backend` append (`AgentIdentity::anonymous`).
+/// That control is not a captured account, never changes the identity policy
+/// and can never be an Authorization side. Everything else stays exact: the
+/// captured identities must equal the scan's validated set, the side identity
+/// must be one of them, and any other "anonymous"-looking or extra identity is
+/// denied.
+pub(super) fn authorization_identity_binding(
+    bound: &[AgentIdentity],
+    validated: Vec<String>,
+    identity: &str,
+) -> Result<(), String> {
+    let denied = || "authorization_identity_binding_denied".to_string();
+    let mut controls = 0usize;
+    let mut captured = Vec::with_capacity(bound.len());
+    for item in bound {
+        if item.anonymous || item.key == "anonymous" {
+            if !(item.anonymous && item.key == "anonymous" && item.session_id.is_none()) {
+                return Err(denied());
+            }
+            controls += 1;
+        } else if item.session_id.as_deref() != Some(item.key.as_str()) {
+            return Err(denied());
+        } else {
+            captured.push(item.key.clone());
+        }
+    }
+    let mut validated = validated;
+    validated.sort();
+    captured.sort();
+    if controls > 1
+        || (controls == 1 && validated.is_empty())
+        || captured != validated
+        || !validated.iter().any(|known| known == identity)
+    {
+        return Err(denied());
+    }
+    Ok(())
+}
+
+// Construction remains inside the actual broker. Existing claims cannot be
+// read back into this token after a crash or an attempted side replay.
+struct ClaimedAuthorizationSide {
+    rowid: i64,
+    created_at: String,
+    actor: crate::agent_runtime::multi_agent::lease::CoordinatorLease,
+    worker: String,
+    originals: Vec<NativeCoordinatorFrozenRows>,
+}
+
+// Only the actual fresh claim + completed original writer can construct this
+// envelope, inside the final response transaction. No reader/backfill API.
+pub(crate) struct FreshAuthorizationSideReceipt {
+    actor: crate::agent_runtime::multi_agent::lease::CoordinatorLease,
+    raw: String,
+    connection: *const rusqlite::Connection,
+    originals: Vec<NativeCoordinatorFrozenRows>,
+}
+impl FreshAuthorizationSideReceipt {
+    pub(crate) fn require_on<'a>(&'a self, db: &rusqlite::Connection)
+        -> Result<(&'a crate::agent_runtime::multi_agent::lease::CoordinatorLease, &'a str), String> {
+        if db.is_autocommit() || !std::ptr::eq(self.connection, db) {
+            return Err("authorization_fresh_receipt_writer_required".into());
+        }
+        for row in &self.originals { row.verify(db)?; }
+        Ok((&self.actor, &self.raw))
+    }
+}
+
+#[cfg(test)]
+pub(super) fn claim_authorization_probe(
+    context: &AgentRunContext,
+    child: &crate::agent_runtime::multi_agent::scheduler::ScheduledChild,
+    control: &SaveAuthorizationControlInput,
+    side: &str, identity: &str, url: &str,
+) -> Result<(), String> {
+    claim_authorization_probe_fresh(context, child, control, side, identity, url).map(|_| ())
+}
+
 /// Atomic broker decision and durable, non-replayable side reservation. The
 /// model cannot invoke this function, and a request is never sent before its
 /// exact method, URL, identity, contract, lease, lane and budget are checked.
-fn claim_authorization_probe(
+fn claim_authorization_probe_fresh(
     context: &AgentRunContext,
     child: &crate::agent_runtime::multi_agent::scheduler::ScheduledChild,
     control: &SaveAuthorizationControlInput,
     side: &str,
     identity: &str,
     url: &str,
-) -> Result<(), String> {
+) -> Result<ClaimedAuthorizationSide, String> {
     let expected = match side {
         "owner" => (&control.owner_identity, &control.owner_object_url),
         "cross" => (&control.tester_identity, &control.owner_object_url),
@@ -33,13 +115,7 @@ fn claim_authorization_probe(
     let (_, identities) = crate::auth_session::validated_scan_identities(
         &tx, &context.scan_id, &context.target_url,
     ).map_err(|_| "authorization_identity_binding_denied".to_string())?;
-    let mut bound = context.identities.iter().map(|item| item.key.clone()).collect::<Vec<_>>();
-    bound.sort();
-    let mut identities = identities;
-    identities.sort();
-    if identities != bound || !identities.contains(&identity.to_string()) {
-        return Err("authorization_identity_binding_denied".into());
-    }
+    authorization_identity_binding(&context.identities, identities, identity)?;
     let authorized=authorization_probe_authority(&tx,context,child,control,side,identity,url)?;
     let Some(budget) = authorized else { return Err("authorization_capability_or_fencing_denied".into()) };
     let spent: i64 = tx.query_row(
@@ -54,6 +130,20 @@ fn claim_authorization_probe(
     if usage.budget_committed >= ceiling {
         return Err("authorization_request_budget_exhausted".into());
     }
+    // A damaged/deleted mutable claim is never permission to send again.
+    // Original financial dispatch and first-response seals survive separately.
+    let previously_dispatched:bool=tx.query_row(
+        "SELECT EXISTS(SELECT 1 FROM main.agent_authorization_side_receipts WHERE scan_id=?1 AND attempt_number=?2 AND target_url=?3 AND contract_key=?4 AND side=?5)
+         OR EXISTS(SELECT 1 FROM agent_budget_entries e JOIN agent_runs r ON r.assignment_id=e.assignment_id AND r.root_run_id=e.root_run_id
+            WHERE r.scan_id=?1 AND r.attempt_number=?2 AND r.target_url=?3 AND r.role='authorization' AND e.dimension='target_requests'
+              AND e.source_id='authorization:'||e.assignment_id||':'||?6||':'||?5)",
+        params![context.scan_id,context.attempt_number,context.target_url,control.contract_key,side,
+            crate::agent_runtime::store::stable_hash(&control.contract_key)],|r|r.get(0),
+    ).map_err(|_|"authorization_original_dispatch_unavailable")?;
+    if previously_dispatched {return Err("authorization_side_already_claimed".into());}
+    let (lease,assignment)=crate::agent_runtime::multi_agent::budget::target::child_owner(&tx,&child.run_id)?
+        .ok_or("authorization_budget_owner_missing")?;
+    crate::agent_runtime::multi_agent::budget::supervision_capacity::require_authorization_probe_headroom_on(&tx, &lease)?;
     let changed=tx.execute(
         "INSERT INTO agent_authorization_probe_claims(scan_id,attempt_number,target_url,contract_key,side,child_run_id,assignment_id) \
          VALUES(?1,?2,?3,?4,?5,?6,?7)",
@@ -64,23 +154,44 @@ fn claim_authorization_probe(
         AND target_url=?3 AND contract_key=?4 AND side=?5 AND child_run_id=?6 AND assignment_id=?7 AND artifact_id='')",
         params![context.scan_id,context.attempt_number,context.target_url,control.contract_key,side,child.run_id,child.assignment_id],|r|r.get(0)).map_err(|e|e.to_string())?;
     if changed!=1 || !exact { return Err("authorization_claim_postcondition".into()); }
-    let (lease,assignment)=crate::agent_runtime::multi_agent::budget::target::child_owner(&tx,&child.run_id)?
-        .ok_or("authorization_budget_owner_missing")?;
+
     crate::agent_runtime::multi_agent::budget::target::claim(&tx,&lease,&assignment,
         &authorization_budget_source(child,control,side))?;
     agent_require_frozen_web_plan(&tx,context).map_err(str::to_string)?;
     if authorization_probe_authority(&tx,context,child,control,side,identity,url)?!=Some(budget) {
         return Err("authorization_capability_or_fencing_denied".into());
     }
-    tx.commit().map_err(|_| "authorization_claim_commit_failed".to_string())
+    let (rowid, created_at): (i64, String) = tx.query_row(
+        "SELECT rowid,created_at FROM agent_authorization_probe_claims WHERE scan_id=?1 AND attempt_number=?2 AND target_url=?3 AND contract_key=?4 AND side=?5 AND child_run_id=?6 AND assignment_id=?7 AND artifact_id=''",
+        params![context.scan_id,context.attempt_number,context.target_url,control.contract_key,side,child.run_id,child.assignment_id],
+        |row| Ok((row.get(0)?,row.get(1)?)),
+    ).map_err(|_| "authorization_fresh_claim_missing")?;
+    let worker: String = tx.query_row("SELECT id FROM agent_assignment_attempts WHERE child_run_id=?1 AND assignment_id=?2 AND root_run_id=?3 AND coordinator_epoch=?4 AND coordinator_fencing_token=?5 AND state='running'",params![child.run_id,child.assignment_id,lease.root_run_id,lease.lease_epoch,lease.fencing_token],|r|r.get(0)).map_err(|_|"authorization_fresh_worker_missing")?;
+    let attempt = context.attempt_number.to_string();
+    let source = authorization_budget_source(child,control,side);
+    let mut originals = Vec::new();
+    for (sql, keys) in [
+        ("SELECT rowid,* FROM agent_authorization_controls WHERE scan_id=?1 AND attempt_number=CAST(?2 AS INTEGER) AND target_url=?3 AND contract_key=?4",vec![context.scan_id.as_str(),attempt.as_str(),context.target_url.as_str(),control.contract_key.as_str()]),
+        ("SELECT rowid,id,root_run_id,assignment_id,child_run_id,coordinator_epoch,coordinator_fencing_token,lease_epoch,fencing_token,worker_id,leased_at FROM agent_assignment_attempts WHERE id=?1",vec![worker.as_str()]),
+        ("SELECT rowid,id,coordinator_run_id,child_run_id,role,lane,target_key,task_slice_json,evidence_revision,lease_epoch,fencing_token,reserved_tokens,reserved_requests,capability_lease_json,contract_keys_json,identity_handles_json FROM agent_assignments WHERE id=?1",vec![child.assignment_id.as_str()]),
+        ("SELECT rowid,* FROM agent_budget_entries WHERE root_run_id=?1 AND assignment_id=?2 AND lease_attempt_id=?3 AND source_id=?4 AND dimension='target_requests' AND kind IN ('reserve','forfeit') ORDER BY rowid",vec![lease.root_run_id.as_str(),child.assignment_id.as_str(),worker.as_str(),source.as_str()]),
+    ] { originals.push(NativeCoordinatorFrozenRows::capture(&tx,sql,&keys)?); }
+    tx.commit().map_err(|_| "authorization_claim_commit_failed".to_string())?;
+    Ok(ClaimedAuthorizationSide { rowid, created_at, actor: lease, worker, originals })
 }
 
-fn authorization_probe_authority(connection: &rusqlite::Connection, context: &AgentRunContext,
+pub(super) fn authorization_probe_authority(connection: &rusqlite::Connection, context: &AgentRunContext,
     child: &crate::agent_runtime::multi_agent::scheduler::ScheduledChild,
     control: &SaveAuthorizationControlInput, side: &str, identity: &str, url: &str)
     -> Result<Option<i64>,String> {
     crate::agent_runtime::multi_agent::attempts::require_live_for_run(connection,&child.run_id)
         .map_err(|_| "authorization_capability_or_fencing_denied".to_string())?;
+    let homogeneous:bool=connection.query_row("SELECT scheduling_model='homogeneous_workers' FROM agent_assignments WHERE id=?1",[&child.assignment_id],|r|r.get(0)).map_err(|e|e.to_string())?;
+    if homogeneous {
+        let root:String=connection.query_row("SELECT coordinator_run_id FROM agent_assignments WHERE id=?1",[&child.assignment_id],|r|r.get(0)).map_err(|e|e.to_string())?;
+        let actor=crate::commands::homogeneous_execution::actor_for_root(connection,&root)?;
+        crate::commands::homogeneous_execution::check_target_scope(connection,&actor,&child.assignment_id,&control.contract_key)?;
+    }
     connection.query_row(
         "SELECT (SELECT COUNT(*)*3 FROM agent_authorization_controls scope \
            WHERE scope.scan_id=r.scan_id AND scope.attempt_number=r.attempt_number AND scope.target_url=r.target_url) FROM agent_runs r \
@@ -126,7 +237,7 @@ fn authorization_budget_source(child: &crate::agent_runtime::multi_agent::schedu
 /// three-side driver can reach the dedicated broker above. It intentionally
 /// does not run the generic replay/discovery pipeline (CORS and enumeration
 /// probes would violate the exact three-request control group).
-fn execute_authorization_side(
+pub(super) fn execute_authorization_side(
     context: &AgentRunContext,
     child: &crate::agent_runtime::multi_agent::scheduler::ScheduledChild,
     control: &SaveAuthorizationControlInput,
@@ -160,7 +271,7 @@ fn execute_authorization_side(
         request = request.header(name, value);
     }
     if cancel.is_cancelled() { return Err("authorization_attempt_cancelled".into()); }
-    claim_authorization_probe(context, child, control, side, identity_key, url)?;
+    let fresh_claim = claim_authorization_probe_fresh(context, child, control, side, identity_key, url)?;
     let connection = db::open(&context.db_path)?;
     agent_require_frozen_web_plan(&connection, context).map_err(str::to_string)?;
     if cancel.is_cancelled() { return Err("authorization_attempt_cancelled".into()); }
@@ -195,7 +306,7 @@ fn execute_authorization_side(
         content_type: content_type.clone(), redirect_code: redirect_code.clone(),
         cache_state: cache_state.clone(), truncated, body,
     };
-    let artifact_id = agent_write_http_record(
+    let written = agent_write_http_record_fresh(
         context, 1,
         &serde_json::json!({"identity": identity_key,"method":"GET","url":url,
             "headers":headers.iter().map(|(name,value)| serde_json::json!({"name":name,"value":value})).collect::<Vec<_>>(),
@@ -205,13 +316,22 @@ fn execute_authorization_side(
             "authorizationSide":side,"rawBodyPrivate":true}),
         record.body.as_bytes(),
     ).map_err(|_| "authorization_evidence_write_failed".to_string())?;
+    if written.scan_id() != context.scan_id || written.attempt_number() != context.attempt_number
+        || written.target_url() != context.target_url || written.run_id() != Some(child.run_id.as_str())
+        || written.directory() != context.target_dir.join(AGENT_HTTP_DIRECTORY).as_path()
+    { return Err("authorization_fresh_artifact_scope_invalid".into()); }
+    let artifact_id = written.artifact_id().to_string();
     let connection=db::open(&context.db_path)?;
-    let tx=connection.unchecked_transaction().map_err(|e|e.to_string())?;
+    let tx=rusqlite::Transaction::new_unchecked(&connection,rusqlite::TransactionBehavior::Immediate).map_err(|e|e.to_string())?;
+    for row in &fresh_claim.originals { row.verify(&tx)?; }
+    if authorization_probe_authority(&tx,context,child,control,side,identity_key,url)?.is_none() {
+        return Err("authorization_capability_or_fencing_denied".into());
+    }
     let updated = tx.execute(
         "UPDATE agent_authorization_probe_claims SET artifact_id=?1 WHERE scan_id=?2 AND attempt_number=?3 \
-         AND target_url=?4 AND contract_key=?5 AND side=?6 AND child_run_id=?7 AND artifact_id=''",
+         AND target_url=?4 AND contract_key=?5 AND side=?6 AND child_run_id=?7 AND artifact_id='' AND rowid=?8 AND created_at=?9",
         params![artifact_id, context.scan_id, context.attempt_number, context.target_url,
-            control.contract_key, side, child.run_id],
+            control.contract_key, side, child.run_id, fresh_claim.rowid, fresh_claim.created_at],
     ).map_err(|_| "authorization_claim_artifact_failed".to_string())?;
     if updated != 1 { return Err("authorization_claim_artifact_fenced".into()); }
     let exact:bool=tx.query_row("SELECT EXISTS(SELECT 1 FROM agent_authorization_probe_claims WHERE scan_id=?1 AND attempt_number=?2
@@ -222,6 +342,33 @@ fn execute_authorization_side(
         .ok_or("authorization_budget_owner_missing")?;
     crate::agent_runtime::multi_agent::budget::target::receive(&tx,&lease,&assignment,
         &authorization_budget_source(child,control,side))?;
+    if lease.root_run_id != fresh_claim.actor.root_run_id || lease.lease_epoch != fresh_claim.actor.lease_epoch
+        || lease.fencing_token != fresh_claim.actor.fencing_token { return Err("authorization_original_actor_changed".into()); }
+    crate::agent_runtime::multi_agent::budget::target::original_target_receipt(&tx,&lease,&child.run_id,
+        &authorization_budget_source(child,control,side))?;
+    if let Some(issuer) = original_withdrawal_issuer_on(&tx,&lease)? {
+        let storage_id: i64 = tx.query_row("SELECT coalesce(max(storage_id),0)+1 FROM agent_authorization_side_receipts",[],|r|r.get(0)).map_err(|e|e.to_string())?;
+        let created: String = tx.query_row("SELECT datetime('now','localtime')",[],|r|r.get(0)).map_err(|e|e.to_string())?;
+        let receipt_id = uuid::Uuid::new_v4().to_string();
+        let mut originals = fresh_claim.originals;
+        let attempt=context.attempt_number.to_string();
+        let source=authorization_budget_source(child,control,side);
+        for (sql,keys) in [
+            ("SELECT rowid,* FROM agent_authorization_probe_claims WHERE scan_id=?1 AND attempt_number=CAST(?2 AS INTEGER) AND target_url=?3 AND contract_key=?4 AND side=?5",vec![context.scan_id.as_str(),attempt.as_str(),context.target_url.as_str(),control.contract_key.as_str(),side]),
+            ("SELECT rowid,* FROM agent_budget_entries WHERE root_run_id=?1 AND assignment_id=?2 AND lease_attempt_id=?3 AND source_id=?4 AND dimension='target_requests' ORDER BY rowid",vec![lease.root_run_id.as_str(),child.assignment_id.as_str(),fresh_claim.worker.as_str(),source.as_str()]),
+        ] { originals.push(NativeCoordinatorFrozenRows::capture(&tx,sql,&keys)?); }
+        let original_rows: Vec<JsonValue> = originals.iter().map(|r|serde_json::json!({"sql":r.sql,"keys":r.keys,"hash":r.hash})).collect();
+        let raw=serde_json::json!({"receiptId":receipt_id,"storageId":storage_id,"createdAt":created,
+            "rootRunId":lease.root_run_id,"scanId":context.scan_id,"attemptNumber":context.attempt_number,
+            "targetUrl":context.target_url,"contractKey":control.contract_key,"side":side,
+            "claimRowid":fresh_claim.rowid,"assignmentId":child.assignment_id,"childRunId":child.run_id,
+            "workerAttemptId":fresh_claim.worker,"artifactId":artifact_id,
+            "coordinatorEpoch":lease.lease_epoch,"coordinatorFence":lease.fencing_token,
+            "originalRows":original_rows,"recordSha256":written.record_sha256(),"bodySha256":written.body_sha256(),
+            "recordBytes":written.record_bytes(),"bodyBytes":written.body_bytes()}).to_string();
+        let fresh=FreshAuthorizationSideReceipt {actor:lease,raw,connection:&*tx,originals};
+        issuer.issue_authorization_side_on(&tx,&fresh)?;
+    }
     tx.commit().map_err(|_|"authorization_claim_artifact_commit_failed")?;
     Ok((record, artifact_id))
 }

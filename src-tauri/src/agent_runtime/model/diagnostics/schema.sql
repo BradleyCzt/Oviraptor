@@ -55,3 +55,13 @@ CREATE TRIGGER IF NOT EXISTS native_sdk_log_gap_no_delete BEFORE DELETE ON nativ
 CREATE TRIGGER IF NOT EXISTS native_sdk_log_gap_no_replace BEFORE INSERT ON native_sdk_log_gaps
  WHEN EXISTS(SELECT 1 FROM native_sdk_log_gaps WHERE gap_id=NEW.gap_id OR owner_id=NEW.owner_id)
  BEGIN SELECT RAISE(ABORT,'native_sdk_log_gap_immutable'); END;
+
+-- Additive logical Mapper ownership; original owner family/cursors stay unchanged.
+CREATE TABLE IF NOT EXISTS native_sdk_log_mapper_owners (
+ owner_id TEXT PRIMARY KEY REFERENCES native_sdk_log_owners(owner_id),
+ logical_domain TEXT NOT NULL CHECK(logical_domain='mapper_loop'),
+ identity_hash TEXT NOT NULL CHECK(length(identity_hash)=64)
+) WITHOUT ROWID;
+CREATE TRIGGER IF NOT EXISTS native_sdk_log_mapper_no_update BEFORE UPDATE ON native_sdk_log_mapper_owners BEGIN SELECT RAISE(ABORT,'native_sdk_log_mapper_immutable'); END;
+CREATE TRIGGER IF NOT EXISTS native_sdk_log_mapper_no_delete BEFORE DELETE ON native_sdk_log_mapper_owners BEGIN SELECT RAISE(ABORT,'native_sdk_log_mapper_immutable'); END;
+CREATE TRIGGER IF NOT EXISTS native_sdk_log_mapper_no_replace BEFORE INSERT ON native_sdk_log_mapper_owners WHEN EXISTS(SELECT 1 FROM native_sdk_log_mapper_owners WHERE owner_id=NEW.owner_id) BEGIN SELECT RAISE(ABORT,'native_sdk_log_mapper_immutable'); END;

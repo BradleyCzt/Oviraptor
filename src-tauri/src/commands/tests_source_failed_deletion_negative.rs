@@ -73,10 +73,28 @@ fn source_failed_deletion_original_damage_unknown_and_busy_preserve_every_row() 
     let files = source_failed_deletion_cas_files(&root);
     delete_sentinel_scan_inner(&path, &actor.scan_id).unwrap();
     assert!(deleted_scan_audit::verify_deleted(&db, &actor.scan_id).unwrap());
+    assert_eq!(
+        db.query_row(
+            "SELECT version FROM native_deleted_scan_audits_v2 WHERE scan_id=?1",
+            [&actor.scan_id],
+            |r| r.get::<_, i64>(0)
+        )
+        .unwrap(),
+        2
+    );
+    assert_eq!(
+        db.query_row(
+            "SELECT count(*) FROM native_deleted_scan_audits WHERE scan_id=?1",
+            [&actor.scan_id],
+            |r| r.get::<_, i64>(0)
+        )
+        .unwrap(),
+        0
+    );
     let cold = source_exit_snapshot(&db);
     for sql in [
         "DROP TRIGGER budget_entry_no_update; UPDATE agent_budget_entries SET amount=amount+1 WHERE dimension='model_requests' AND kind='consume'",
-        "DROP TRIGGER deleted_audit_no_update; UPDATE native_deleted_scan_audits SET audit_json='{}'",
+        "DROP TRIGGER deleted_audit_v2_no_update; UPDATE native_deleted_scan_audits_v2 SET audit_json='{}'",
     ] {
         db.execute_batch("SAVEPOINT failed_cold_fault").unwrap();db.execute_batch(sql).unwrap();assert!(db.changes()>0,"{sql}");let before=source_exit_snapshot(&db);
         assert!(deleted_scan_audit::verify_deleted(&db,&actor.scan_id).is_err(),"{sql}");assert_eq!(source_exit_snapshot(&db),before);
@@ -109,11 +127,11 @@ fn source_failed_deletion_original_protected_business_and_write_faults_preserve_
     db.execute_batch("DROP TABLE failed_source_business; CREATE TABLE failed_private_business(payload TEXT);INSERT INTO failed_private_business VALUES('preserve');
         INSERT INTO assets(id,asset_key) VALUES(987654322,'failed-source-preserve')").unwrap();
     for sql in [
-        "CREATE TRIGGER failed_delete_fault BEFORE INSERT ON native_deleted_scan_audits BEGIN SELECT RAISE(IGNORE); END",
+        "CREATE TRIGGER failed_delete_fault BEFORE INSERT ON native_deleted_scan_audits_v2 BEGIN SELECT RAISE(IGNORE); END",
         "CREATE TRIGGER failed_delete_fault BEFORE INSERT ON native_deleted_scan_anchors BEGIN SELECT RAISE(IGNORE); END",
         "CREATE TRIGGER failed_delete_fault BEFORE DELETE ON sentinel_scans BEGIN SELECT RAISE(IGNORE); END",
         "CREATE TRIGGER failed_delete_fault AFTER DELETE ON sentinel_scans BEGIN UPDATE failed_private_business SET payload='changed'; END",
-        "CREATE TRIGGER failed_delete_fault AFTER INSERT ON native_deleted_scan_audits BEGIN DELETE FROM assets; END",
+        "CREATE TRIGGER failed_delete_fault AFTER INSERT ON native_deleted_scan_audits_v2 BEGIN DELETE FROM assets; END",
     ] {
         db.execute_batch(sql).unwrap();let before=source_exit_snapshot(&db);assert!(delete_sentinel_scan_inner(&path,&actor.scan_id).is_err(),"{sql}");
         assert_eq!(source_exit_snapshot(&db),before,"{sql}");assert_eq!(source_failed_deletion_cas_files(&root),files);

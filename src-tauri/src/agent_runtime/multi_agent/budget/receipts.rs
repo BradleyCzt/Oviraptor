@@ -138,6 +138,14 @@ use owner::ReceiptOwner;
 pub(crate) struct OriginalReceiptOwner(ReceiptOwner);
 
 impl OriginalReceiptOwner {
+    pub(crate) fn is_settled(&self, db: &Connection) -> Result<bool, String> {
+        self.verify(db)?;
+        for dimension in &DIMENSIONS[..4] {
+            let balance=self.0.balance(db,dimension)?;
+            if balance.reserved != 0 || balance.indeterminate != 0 { return Ok(false); }
+        }
+        Ok(true)
+    }
     pub(crate) fn attempt_id(&self) -> &str {
         &self.0.attempt
     }
@@ -155,6 +163,14 @@ impl OriginalReceiptOwner {
         }
         Ok(false)
     }
+}
+
+pub(crate) fn verify_original_received(
+    db: &Connection, owner: &OriginalReceiptOwner, call_source: &str,
+    receipt_hash: &str, usage: &UsageDelta,
+) -> Result<(), String> {
+    owner.verify(db)?;
+    verify_for_attempt(db,&owner.0.lease,&owner.0.assignment,call_source,receipt_hash,usage,owner.attempt_id())
 }
 
 pub(crate) fn original_owner(

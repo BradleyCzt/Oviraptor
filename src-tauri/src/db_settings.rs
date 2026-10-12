@@ -13,7 +13,9 @@ pub fn normalize_settings(raw: &Value) -> Value {
         !key.to_ascii_lowercase().starts_with("strix")
             && !matches!(
                 key.as_str(),
-                "modelLocalFullPower"
+                "pythonExecutable"
+                    | "redisCliExecutable"
+                    | "modelLocalFullPower"
                     | "modelPromptAuditMode"
                     | "legacyArtifactDirectories"
                     | "historicalImportDirectories"

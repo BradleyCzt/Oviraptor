@@ -7,8 +7,8 @@ fn client_root_feedback_actual_production_chain_returns_closed_readonly_output_t
     let db = db::open(&f.h.db_path).unwrap();
     assert_eq!(f.h.site_seen.lock().unwrap().len(), 1);
     assert_eq!(db.query_row("SELECT count(*) FROM agent_assignments WHERE coordinator_run_id=?1 AND role='client_side' AND state='completed'", [&f.root], |r|r.get::<_,i64>(0)).unwrap(), 1);
-    assert_eq!(root_tick_count(&db, &f.root, "publication"), 4);
-    assert_eq!(f.root_cost(&db), 4);
+    assert_eq!(root_tick_count(&db, &f.root, "publication"), 5);
+    assert_eq!(f.root_cost(&db), 5);
     let wires = f.h.model_seen.lock().unwrap();
     let last = wires.last().unwrap();
     let body: JsonValue = serde_json::from_str(last.split_once("\r\n\r\n").unwrap().1).unwrap();
@@ -22,7 +22,7 @@ fn client_root_feedback_actual_production_chain_returns_closed_readonly_output_t
     assert_eq!(semantic["output"]["candidates"], json!([]));
     assert_eq!(semantic["output"]["gaps"], json!(["missing_browser_validation"]));
     assert!(!semantic["observations"].as_array().unwrap().is_empty());
-    assert_eq!(wires.iter().filter(|w|w.contains("You are the Root Coordinator")).count(), 4);
+    assert_eq!(wires.iter().filter(|w|w.contains("You are the Root Coordinator")).count(), 5);
     drop(wires);
     let paid_calls = f.h.model_seen.lock().unwrap().len();
     let costs = client_hook_target_costs(&db);
@@ -41,10 +41,10 @@ fn client_root_feedback_actual_production_chain_returns_closed_readonly_output_t
 fn client_root_feedback_paid_advisory_cannot_issue_another_target_grant() {
     let _real = RealSpecialistTransport::enter();
     let mut f = client_root_fixture("client-root-forbidden", true);
-    assert_eq!(f.finish().unwrap_err(), "root_client_step_not_bounded");
+    assert_eq!(f.finish().unwrap_err(), "executor_followup_failed:client_side:root_client_step_not_bounded");
     let db = db::open(&f.h.db_path).unwrap();
-    assert_eq!(f.root_cost(&db), 4);
-    assert_eq!(root_tick_count(&db,&f.root,"publication"),4);
+    assert_eq!(f.root_cost(&db), 5);
+    assert_eq!(root_tick_count(&db,&f.root,"publication"),5);
     assert_eq!(db.query_row("SELECT count(*) FROM agent_assignments WHERE role='web_executor'", [], |r|r.get::<_,i64>(0)).unwrap(), 1);
     assert_eq!(db.query_row("SELECT count(*) FROM sentinel_findings WHERE kind='vulnerability'", [], |r|r.get::<_,i64>(0)).unwrap(), 0);
     let calls = f.h.model_seen.lock().unwrap().len();
@@ -80,10 +80,10 @@ fn client_root_feedback_paid_worker_changed_before_response_retains_fee_and_rest
         *restore.lock().unwrap() = Some(original);
     }));
     let code = f.finish().unwrap_err();
-    assert_eq!(code,"root_frame_original_fact_changed");
+    assert_eq!(code,"executor_followup_failed:client_side:root_frame_original_fact_changed");
     let db = db::open(&f.h.db_path).unwrap();
-    assert_eq!(f.root_cost(&db),4);
-    assert_eq!(root_tick_count(&db,&f.root,"publication"),3);
+    assert_eq!(f.root_cost(&db),5);
+    assert_eq!(root_tick_count(&db,&f.root,"publication"),4);
     let calls = f.h.model_seen.lock().unwrap().len();
     let costs = client_hook_target_costs(&db);
     let (id,finished) = saved.lock().unwrap().take().unwrap();
@@ -91,8 +91,8 @@ fn client_root_feedback_paid_worker_changed_before_response_retains_fee_and_rest
     f.finish().unwrap();
     assert_eq!(f.h.model_seen.lock().unwrap().len(),calls);
     assert_eq!(f.h.site_seen.lock().unwrap().len(),1);
-    assert_eq!(f.root_cost(&db),4);
-    assert_eq!(root_tick_count(&db,&f.root,"publication"),4);
+    assert_eq!(f.root_cost(&db),5);
+    assert_eq!(root_tick_count(&db,&f.root,"publication"),5);
     assert_eq!(client_hook_target_costs(&db),costs);
 }
 #[test]
@@ -111,10 +111,10 @@ fn client_root_feedback_paid_original_source_changed_blocks_publication_and_zero
         *restore.lock().unwrap() = Some((path,original));
     }));
     let code = f.finish().unwrap_err();
-    assert_eq!(code,"client_side_original_http_fact_invalid");
+    assert_eq!(code,"executor_followup_failed:client_side:client_side_original_http_fact_invalid");
     let db = db::open(&f.h.db_path).unwrap();
-    assert_eq!(f.root_cost(&db),4);
-    assert_eq!(root_tick_count(&db,&f.root,"publication"),3);
+    assert_eq!(f.root_cost(&db),5);
+    assert_eq!(root_tick_count(&db,&f.root,"publication"),4);
     let calls = f.h.model_seen.lock().unwrap().len();
     let physical = web_mode_test_rows(&db);
     assert!(f.feedback(&db).is_err());
@@ -123,8 +123,8 @@ fn client_root_feedback_paid_original_source_changed_blocks_publication_and_zero
     let (path,original) = saved.lock().unwrap().take().unwrap();
     fs::write(path,original).unwrap();
     f.finish().unwrap();
-    assert_eq!(root_tick_count(&db,&f.root,"publication"),4);
-    assert_eq!(f.root_cost(&db),4);
+    assert_eq!(root_tick_count(&db,&f.root,"publication"),5);
+    assert_eq!(f.root_cost(&db),5);
     assert_eq!(f.h.model_seen.lock().unwrap().len(),calls);
     assert_eq!(f.h.site_seen.lock().unwrap().len(),1);
 }
@@ -141,8 +141,8 @@ fn client_root_feedback_paid_publication_fault_keeps_client_and_root_bills_for_l
         let db = db::open(&f.h.db_path).unwrap();
         let projects = crate::agent_runtime::multi_agent::attempts::audit_rows::Rows::read(&db,"SELECT rowid,* FROM projects ORDER BY rowid",[]).unwrap();
         assert!(f.finish().is_err());
-        assert_eq!(f.root_cost(&db),4);
-        assert_eq!(root_tick_count(&db,&f.root,"publication"),3);
+        assert_eq!(f.root_cost(&db),5);
+        assert_eq!(root_tick_count(&db,&f.root,"publication"),4);
         assert_eq!(db.query_row("SELECT count(*) FROM agent_assignments WHERE role='client_side' AND state='completed'",[],|r|r.get::<_,i64>(0)).unwrap(),1);
         assert_eq!(db.query_row("SELECT count(*) FROM agent_collaboration_events WHERE scan_id='foreign'",[],|r|r.get::<_,i64>(0)).unwrap(),0);
         assert!(crate::agent_runtime::multi_agent::attempts::audit_rows::Rows::read(&db,"SELECT rowid,* FROM projects ORDER BY rowid",[]).unwrap()==projects);
@@ -154,8 +154,8 @@ fn client_root_feedback_paid_publication_fault_keeps_client_and_root_bills_for_l
         assert_eq!(f.h.model_seen.lock().unwrap().len(),calls);
         db.execute_batch("DROP TRIGGER client_root_publication_fault").unwrap();
         f.finish().unwrap();
-        assert_eq!(root_tick_count(&db,&f.root,"publication"),4);
-        assert_eq!(f.root_cost(&db),4);
+        assert_eq!(root_tick_count(&db,&f.root,"publication"),5);
+        assert_eq!(f.root_cost(&db),5);
         assert!(crate::agent_runtime::multi_agent::attempts::audit_rows::Rows::read(&db,"SELECT rowid,* FROM agent_budget_entries ORDER BY rowid",[]).unwrap()==budget);
         assert_eq!(f.h.model_seen.lock().unwrap().len(),calls);
         assert_eq!(f.h.site_seen.lock().unwrap().len(),1);
@@ -175,6 +175,6 @@ fn client_root_feedback_original_consumed_message_tampering_refuses_before_sdk_a
         web_mode_assert_rows(&db,&physical);
         assert_eq!(f.h.model_seen.lock().unwrap().len(),calls);
         assert_eq!(f.h.site_seen.lock().unwrap().len(),1);
-        assert_eq!(f.root_cost(&db),4);
+        assert_eq!(f.root_cost(&db),5);
     }
 }

@@ -72,6 +72,8 @@ struct AgentExecutionPlan {
     /// Registrable domains this attempt may be probed. Frozen with the plan so a
     /// later evidence refresh can never widen the authorized scope (§13).
     allowed_origins: Vec<String>,
+    tool_supply: Option<crate::tool_supply::selection::FrozenToolSelection>,
+    homogeneous_execution: Option<crate::agent_runtime::multi_agent::homogeneous::execution_policy::Binding>,
 }
 
 impl AgentExecutionPlan {
@@ -123,6 +125,12 @@ impl AgentExecutionPlan {
         if self.schema_version == 2 {
             plan["executionSurface"] = serde_json::json!("web_only");
         }
+        if let Some(selection) = &self.tool_supply {
+            plan["toolSupply"] = selection.as_plan_value();
+        }
+        if let Some(binding) = &self.homogeneous_execution {
+            plan["homogeneousExecution"] = binding.as_value();
+        }
         plan
     }
 
@@ -162,6 +170,8 @@ impl AgentExecutionPlan {
         let stopping = value.get("stopping")?;
         Some(Self {
             schema_version: schema_version as u8,
+            tool_supply: crate::tool_supply::selection::FrozenToolSelection::parse_preserving_empty(value.get("toolSupply")).ok()?,
+            homogeneous_execution: crate::agent_runtime::multi_agent::homogeneous::execution_policy::Binding::parse(value.get("homogeneousExecution")).ok()?,
             backend: AgentBackendKind::parse(&text("backend")?)?,
             mode: text("mode")?,
             surface: text("surface")?,
@@ -291,6 +301,9 @@ fn build_agent_execution_plan(
     // inherit all of it instead of recomputing from today's settings.
     let frozen = AgentExecutionPlan {
         schema_version: 2,
+        tool_supply: None,
+        homogeneous_execution: db::open(db_path).and_then(|db|
+            crate::agent_runtime::multi_agent::homogeneous::execution_policy::Binding::capture(&db,scan_id,agent_attempt_number(db_path,scan_id))).ok().flatten(),
         backend,
         mode: route.mode.clone(),
         surface: route.surface.clone(),
@@ -397,6 +410,7 @@ fn build_agent_execution_plan(
 /// snapshot and refreshes only the attempt identity; rebuilding from today's
 /// settings is what "重新执行" is for (§3.4, §3.5).
 #[allow(clippy::too_many_arguments)]
+#[cfg(test)]
 fn agent_frozen_plan(
     db_path: &Path,
     scan_id: &str,
@@ -407,6 +421,21 @@ fn agent_frozen_plan(
     backend: AgentBackendKind,
     attempt_number: i64,
 ) -> Result<AgentExecutionPlan, NativeStateRejection> {
+    agent_frozen_plan_with_tool_configuration(db_path, scan_id, url, route, environment, adaptive, backend, attempt_number, None)
+}
+
+#[allow(clippy::too_many_arguments)]
+fn agent_frozen_plan_with_tool_configuration(
+    db_path: &Path,
+    scan_id: &str,
+    url: &str,
+    route: &FrontendRoute,
+    environment: &ModelRuntimeEnv,
+    adaptive: &AgentBudgetSettings,
+    backend: AgentBackendKind,
+    attempt_number: i64,
+    tool_configuration: Option<&crate::tool_supply::ToolAdministratorConfiguration>,
+) -> Result<AgentExecutionPlan, NativeStateRejection> {
     let lineage = agent_attempt_lineage(db_path, scan_id, attempt_number);
     if lineage.resume_kind == AgentResumeKind::ContinueIncomplete {
         // Only a continuation reads another attempt's record, and only its parent's.
@@ -414,7 +443,7 @@ fn agent_frozen_plan(
         let stored = frozen_plan_of(db_path, scan_id, parent, url);
         if let Some(inherited) = AgentExecutionPlan::from_json(&stored) {
             let plan = inherited.with_attempt(attempt_number);
-            persist_frozen_web_execution_plan(db_path, scan_id, attempt_number, url, &plan).map_err(
+            persist_frozen_web_execution_plan_with_tool_configuration(db_path, scan_id, attempt_number, url, &plan, tool_configuration).map_err(
                 |error| NativeStateRejection {
                     kind: NativeStateRejectionKind::PersistenceFailed,
                     parent_attempt_number: lineage.parent_attempt_number,
@@ -433,9 +462,25 @@ fn agent_frozen_plan(
     }
     // initial / fresh: today's settings decide, and the plan is frozen for this
     // attempt only. Nothing from the previous attempt is read here (Phase 2 §2.2).
+    // Reentry of this same attempt preserves only its original signed supply;
+    // all other candidate fields must still match the original plan exactly.
     let plan = build_agent_execution_plan(adaptive, route, environment, backend, db_path, scan_id)
         .with_attempt(attempt_number);
-    persist_frozen_web_execution_plan(db_path, scan_id, attempt_number, url, &plan).map_err(
+    let plan = native_same_attempt_tool_supply_reentry(db_path, scan_id, attempt_number, url, &plan)
+        .map_err(|error| NativeStateRejection {
+            kind: NativeStateRejectionKind::PersistenceFailed,
+            parent_attempt_number: lineage.parent_attempt_number,
+            current_attempt_number: attempt_number,
+            detail: error,
+        })?;
+    let plan = native_tool_selection_for_original_startup(db_path, scan_id, attempt_number, url, &plan, tool_configuration)
+        .map_err(|error| NativeStateRejection {
+            kind: NativeStateRejectionKind::PersistenceFailed,
+            parent_attempt_number: lineage.parent_attempt_number,
+            current_attempt_number: attempt_number,
+            detail: error,
+        })?;
+    persist_frozen_web_execution_plan_with_tool_configuration(db_path, scan_id, attempt_number, url, &plan, tool_configuration).map_err(
         |error| NativeStateRejection {
             kind: NativeStateRejectionKind::PersistenceFailed,
             parent_attempt_number: lineage.parent_attempt_number,

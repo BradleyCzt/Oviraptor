@@ -48,7 +48,12 @@ CREATE TRIGGER IF NOT EXISTS budget_limit_no_delete BEFORE DELETE ON agent_budge
     include_str!("immutable_unique_guards.sql"),
     include_str!("web_model_schema.sql"),
     include_str!("root_schema.sql"),
+    include_str!("root_cache_provenance_schema.sql"),
+    include_str!("root_cache_capture_schema.sql"),
+    include_str!("root_paid_run_retention_schema.sql"),
     include_str!("root_definition_schema.sql"),
+    include_str!("financial_root_definition_schema.sql"),
+    include_str!("financial_continuation_schema.sql"),
     include_str!("model_facts_schema.sql"),
     include_str!("single_exit_schema.sql"),
     include_str!("single_projection_schema.sql")

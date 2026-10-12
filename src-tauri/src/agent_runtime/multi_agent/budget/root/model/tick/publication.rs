@@ -96,7 +96,9 @@ impl Tick {
                 "responseHash":saved.invoice["responseHash"],"usage":saved.invoice["usage"],
                 "modelRequests":1,"totalTokens":saved.invoice["usage"]["totalTokens"],
                 "toolCalls":[],"advisoryOnly":true,"decisionSummary":saved.summary.as_json()}});
-        if let Some(step) = &saved.local_step { value["event"]["localStep"] = step.as_json(); }
+        if let Some(step) = &saved.local_step {
+            value["event"]["localStep"] = step.as_json();
+        }
         value
     }
 }
@@ -106,8 +108,13 @@ fn protect<T>(tx: &Transaction<'_>, work: impl FnOnce() -> Result<T, String>) ->
         AuthAction::Insert { table_name }
             if c.database_name == Some("main")
                 && c.accessor.is_none()
-                && matches!(table_name, "agent_root_tick_receipts" | "agent_events"
-                    | "agent_collaboration_events" | "agent_root_tick_timeline_receipts") =>
+                && matches!(
+                    table_name,
+                    "agent_root_tick_receipts"
+                        | "agent_events"
+                        | "agent_collaboration_events"
+                        | "agent_root_tick_timeline_receipts"
+                ) =>
         {
             Authorization::Allow
         }

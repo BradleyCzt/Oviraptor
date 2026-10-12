@@ -150,16 +150,6 @@
         .expect("a plan must resolve for this attempt")
     }
 
-    fn set_scan_status(db_path: &Path, status: &str) {
-        let connection = db::open(db_path).unwrap();
-        connection
-            .execute(
-                "UPDATE sentinel_scans SET status=?1 WHERE id='agent-scan'",
-                params![status],
-            )
-            .unwrap();
-    }
-
     /// Regression for the queue bug: a call that carries no path, url, actionKey
     /// or family must not consume anything, and a full URL must still match the
     /// queued `/path`.

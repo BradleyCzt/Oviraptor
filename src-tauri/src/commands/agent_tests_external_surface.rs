@@ -227,6 +227,22 @@ fn public_surface_invalid_model_output_cannot_complete_or_confirm_findings() {
 }
 
 #[test]
+fn public_surface_preserves_reviewer_floor_15000_when_tokens_tight() {
+    let (port,seen,stop) = spawn_endpoint(std::sync::Arc::new(|_| (200,"text/plain","unexpected".into())));
+    let (_root,context,lease) = public_surface_fixture(&format!("http://127.0.0.1:{port}/"));
+    let connection = db::open(&context.db_path).unwrap();
+    // 16k free < 2k surface grant + 15k Reviewer floor.
+    connection.execute("UPDATE agent_budget_ledger SET total_tokens=16000",[]).unwrap();
+    let result = multi_agent_external_surface(&context,&lease).unwrap();
+    assert_eq!(result["state"],"not_scheduled");
+    assert_eq!(result["reason"],"insufficient_budget_for_surface_executor_and_review");
+    assert_eq!(seen.lock().unwrap().len(),0);
+    let count:i64 = connection.query_row("SELECT COUNT(*) FROM agent_assignments",[],|r|r.get(0)).unwrap();
+    assert_eq!(count,0);
+    stop.store(true,std::sync::atomic::Ordering::SeqCst);
+}
+
+#[test]
 fn public_surface_insufficient_budget_does_not_claim_or_call_target() {
     let (port,seen,stop) = spawn_endpoint(std::sync::Arc::new(|_| (200,"text/plain","unexpected".into())));
     let (_root,context,lease) = public_surface_fixture(&format!("http://127.0.0.1:{port}/"));

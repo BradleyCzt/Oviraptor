@@ -11,10 +11,11 @@ const labels: Record<string, [string, string]> = {
   concurrency_batches: ['并发槽位', 'Concurrency slots'], wall_time_ms: ['根任务耗时（毫秒）', 'Root elapsed (ms)'],
 };
 const coverage: Record<NativeBudgetDimension['coverage'], [string, string]> = {
-  assignment_settlement: ['联合子任务逐轮回执；单智能体及根自身未覆盖', 'Per-call joint child receipts; single mode and root work uncovered'],
-  multi_agent_broker: ['多智能体请求；单智能体未接入', 'Multi-agent requests; single mode not integrated'],
+  assignment_settlement: ['已接入的原模型费用账目；仍有覆盖缺口', 'Integrated original model cost entries; coverage gaps remain'],
+  multi_agent_broker: ['已接入的目标请求账目；不代表全部通道均已覆盖', 'Integrated target request entries; coverage of every channel is not implied'],
   multi_agent_lane: ['多智能体槽位', 'Multi-agent slots'],
-  admission_samples: ['联合任务采样/限时；单智能体及启动侦察未覆盖', 'Multi-agent samples/deadlines; single mode and preflight uncovered'],
+  race_batch_dispatch_unimplemented: ['并发批次派发未接入；此记录不授予执行权限', 'Race batch dispatch is not integrated; this record grants no execution permission'],
+  admission_samples: ['已接入的根任务采样/耗时；不包含启动前准备', 'Integrated root samples and elapsed time; pre-start preparation is excluded'],
   denied_by_contract: ['未获执行授权', 'Execution not granted'],
 };
 </script>

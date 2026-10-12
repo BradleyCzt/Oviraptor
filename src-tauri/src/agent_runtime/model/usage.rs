@@ -2,6 +2,8 @@
 pub use super::super::store::UsageDelta;
 use serde_json::Value as JsonValue;
 use sha2::{Digest, Sha256};
+mod wire;
+pub(crate) use wire::usage_wire_is_unambiguous;
 
 /// Estimated characters per token, matching the LLM hook's fallback so historic
 /// and native numbers stay comparable.
@@ -53,6 +55,7 @@ pub fn usage_from_response(
         .and_then(|value| {
             value
                 .pointer("/prompt_tokens_details/cached_tokens")
+                .or_else(|| value.pointer("/input_tokens_details/cached_tokens"))
                 .or_else(|| value.get("cached_tokens"))
                 .or_else(|| value.get("prompt_cache_hit_tokens"))
         })
@@ -76,38 +79,73 @@ pub fn usage_from_response(
     }
 }
 
+// A valid first alias must not hide another contradictory or malformed bill.
+// Preserve the response's original diagnostic numbers elsewhere, but do not
+// allow ambiguous usage to settle a durable dispatch reservation.
+fn consistent_usage_aliases<'a>(
+    values: impl IntoIterator<Item = Option<&'a JsonValue>>,
+) -> Result<Option<i64>, ()> {
+    let mut found = None;
+    for value in values.into_iter().flatten() {
+        let amount = value.as_i64().ok_or(())?;
+        if found.is_some_and(|original| original != amount) {
+            return Err(());
+        }
+        found = Some(amount);
+    }
+    Ok(found)
+}
+
 pub(crate) fn usage_is_reported(body: &JsonValue) -> bool {
-    let Some(usage) = body.get("usage") else {
+    let Some(usage) = body.get("usage").filter(|value| value.is_object()) else {
         return false;
     };
-    let read = |keys: &[&str]| {
-        keys.iter()
-            .find_map(|key| usage.get(*key).and_then(JsonValue::as_i64))
-    };
-    let (Some(input), Some(output), Some(total)) = (
+    let read = |keys: &[&str]| consistent_usage_aliases(keys.iter().map(|key| usage.get(*key)));
+    let (Ok(Some(input)), Ok(Some(output)), Ok(Some(total))) = (
         read(&["prompt_tokens", "input_tokens"]),
         read(&["completion_tokens", "output_tokens"]),
         read(&["total_tokens"]),
     ) else {
         return false;
     };
-    let cached = usage
-        .pointer("/prompt_tokens_details/cached_tokens")
-        .or_else(|| usage.get("cached_tokens"))
-        .or_else(|| usage.get("prompt_cache_hit_tokens"));
-    let cached = match cached {
-        Some(value) => match value.as_i64() {
-            Some(n) => n,
-            None => return false,
-        },
-        None => 0,
+    if ["prompt_tokens_details", "input_tokens_details"]
+        .iter()
+        .any(|key| {
+            usage
+                .get(*key)
+                .is_some_and(|value| !value.is_object() && !value.is_null())
+        })
+    {
+        return false;
+    }
+    let Ok(cached) = consistent_usage_aliases([
+        usage.pointer("/prompt_tokens_details/cached_tokens"),
+        usage.pointer("/input_tokens_details/cached_tokens"),
+        usage.get("cached_tokens"),
+        usage.get("prompt_cache_hit_tokens"),
+    ]) else {
+        return false;
     };
+    let cached = cached.unwrap_or(0);
     input >= 0
         && output >= 0
         && total >= 0
         && cached >= 0
         && cached <= input
         && input.checked_add(output) == Some(total)
+}
+
+pub(crate) fn cached_usage_is_reported(body: &JsonValue) -> bool {
+    if !usage_is_reported(body) {
+        return false;
+    }
+    let usage = &body["usage"];
+    matches!(consistent_usage_aliases([
+        usage.pointer("/prompt_tokens_details/cached_tokens"),
+        usage.pointer("/input_tokens_details/cached_tokens"),
+        usage.get("cached_tokens"),
+        usage.get("prompt_cache_hit_tokens"),
+    ]), Ok(Some(_)))
 }
 
 /// Compiled-in tool description. Names are static so a target response can
@@ -162,4 +200,55 @@ pub fn tool_schema_hash(specs: &[ToolSchema]) -> String {
             .as_bytes(),
     );
     format!("{:x}", hasher.finalize())
+}
+
+#[cfg(test)]
+mod reported_usage_tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn matching_usage_aliases_are_known_and_conflicting_or_malformed_aliases_are_not() {
+        let complete = json!({"usage":{
+            "prompt_tokens":80,"input_tokens":80,
+            "completion_tokens":20,"output_tokens":20,"total_tokens":100,
+            "prompt_tokens_details":{"cached_tokens":10},
+            "input_tokens_details":{"cached_tokens":10},
+            "cached_tokens":10,"prompt_cache_hit_tokens":10
+        }});
+        assert!(usage_is_reported(&complete));
+        for (field, value) in [
+            ("input_tokens", json!(800)),
+            ("input_tokens", json!("80")),
+            ("output_tokens", json!(21)),
+            ("cached_tokens", json!(11)),
+            ("prompt_cache_hit_tokens", json!(null)),
+            ("prompt_tokens_details", json!("unknown")),
+            ("input_tokens_details", json!({"cached_tokens":11})),
+        ] {
+            let mut body = complete.clone();
+            body["usage"][field] = value;
+            assert!(!usage_is_reported(&body), "{field}");
+        }
+        let alternate = json!({"usage":{"input_tokens":80,"output_tokens":20,"total_tokens":100}});
+        assert!(usage_is_reported(&alternate));
+        let input_style = json!({"usage":{"input_tokens":80,"output_tokens":20,"total_tokens":100,"input_tokens_details":{"cached_tokens":10}}});
+        assert!(usage_is_reported(&input_style));
+        assert_eq!(
+            usage_from_response(&input_style, 1, 1).cached_input_tokens,
+            10
+        );
+        let nullable_details = json!({"usage":{"input_tokens":80,"output_tokens":20,"total_tokens":100,"prompt_tokens_details":null}});
+        assert!(usage_is_reported(&nullable_details));
+        let parsed = usage_from_response(&complete, 1, 1);
+        assert_eq!(
+            (
+                parsed.input_tokens,
+                parsed.cached_input_tokens,
+                parsed.output_tokens,
+                parsed.total_tokens
+            ),
+            (80, 10, 20, 100)
+        );
+    }
 }

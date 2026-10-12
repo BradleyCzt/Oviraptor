@@ -60,7 +60,14 @@ pub(crate) fn try_expire_original_in_transaction(
             params![worker.id,child.assignment_id,child.run_id], |r|r.get(0),
         ).map_err(|e|e.to_string())?;
         if !complete {
-            return Err("assignment_expiry_existing_audit_invalid".into());
+            let web_closed = child.role == crate::agent_runtime::contract::AgentRole::WebExecutor
+                && crate::agent_runtime::web_mode::web_expiry_delivery::read_closed_original_on(
+                    tx, actor, child,
+                )?
+                .is_some();
+            if !web_closed {
+                return Err("assignment_expiry_existing_audit_invalid".into());
+            }
         }
         proof.verify(tx, actor, child, &worker)?;
         return Ok(true);

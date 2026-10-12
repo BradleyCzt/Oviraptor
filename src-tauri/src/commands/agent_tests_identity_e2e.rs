@@ -174,16 +174,6 @@
     /// findings and the fields the panel reads. §12 adds the last block: the run
     /// ledger is the authority and the checkpoint row is its serialization, so the
     /// two must agree instead of each keeping its own idea of the state.
-    pub(super) fn assert_agent_surface(
-        harness: &AgentHarness,
-        url: &str,
-        expected_status: &str,
-        expected_target_requests: i64,
-        expected_findings: usize,
-    ) {
-        assert_agent_surface_with_original_usage(harness, url, expected_status, expected_target_requests, expected_findings, None);
-    }
-
     fn assert_agent_surface_with_original_usage(
         harness: &AgentHarness,
         url: &str,

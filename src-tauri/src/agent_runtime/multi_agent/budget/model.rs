@@ -12,6 +12,7 @@ pub(crate) fn reserve(
     tokens: i64,
     requests: i64,
 ) -> Result<(), String> {
+    super::continuation::migration::require_plain_root_boundary(tx, &lease.root_run_id)?;
     let vector = BudgetVector {
         model_input_tokens: tokens,
         model_cached_tokens: tokens,
@@ -60,6 +61,10 @@ pub(crate) fn settle(
 ) -> Result<(), String> {
     settle_with(tx, lease, assignment, usage, append, super::Authority::Live)
 }
+
+include!("model/original_web_receipt.rs");
+
+pub(crate) mod expired_web_receipt;
 
 pub(crate) fn settle_terminal_receipt(
     tx: &Transaction<'_>,
@@ -263,6 +268,25 @@ pub(crate) fn release_unsent(
     assignment: &str,
 ) -> Result<(), String> {
     let worker = super::super::attempts::current(tx, lease, assignment)?;
+    let mapper_journal_exists: bool = tx.query_row(
+        "SELECT EXISTS(SELECT 1 FROM main.sqlite_master WHERE type='table' AND name='agent_mapper_loop_journal')",
+        [], |row| row.get(0),
+    ).map_err(|error| error.to_string())?;
+    let mapper_dispatch = if mapper_journal_exists {
+        tx.query_row(
+            "SELECT EXISTS(SELECT 1 FROM main.agent_mapper_loop_journal WHERE assignment_id=?1 AND child_run_id=?2 AND phase='dispatch')",
+            params![assignment, worker.child_run_id], |row| row.get(0),
+        ).map_err(|error| error.to_string())?
+    } else { false };
+    // An already settled zero-reservation worker may finish without a refund.
+    // Any remaining Mapper reservation belongs to its dedicated closure.
+    if mapper_dispatch {
+        for dimension in &DIMENSIONS[..4] {
+            if scope::current_balance(tx, lease, assignment, dimension)?.reserved > 0 {
+                return Err("mapper_loop_original_reconciliation_required".into());
+            }
+        }
+    }
     let sent:bool=tx.query_row(&format!("SELECT EXISTS(SELECT 1 FROM agent_specialist_calls WHERE assignment_id=?1 AND child_run_id=?2 AND NOT(state='executing' AND failure_code='model_cancelled_before_transport' AND finished_at<>'' AND event_sequence=0 AND response_hash='')) OR EXISTS(SELECT 1 FROM agent_source_model_rounds c
           LEFT JOIN agent_assignment_attempts x ON x.child_run_id=c.child_run_id AND x.assignment_id=c.assignment_id AND x.root_run_id=c.root_run_id
           WHERE c.assignment_id=?1 AND c.child_run_id=?2 AND NOT EXISTS(SELECT 1 FROM agent_model_cost_facts f
@@ -322,6 +346,8 @@ pub(crate) fn forfeit_call(
 
 mod mapper_allocation;
 pub(crate) use mapper_allocation::original_mapper_grant;
+pub(crate) mod mapper_loop_contract;
+pub(crate) use mapper_allocation::original_mapper_loop_grant_on;
 
 mod web_allocation;
-pub(crate) use web_allocation::original_web_grant;
+pub(crate) use web_allocation::{original_web_grant, original_web_grant_inventory_on};

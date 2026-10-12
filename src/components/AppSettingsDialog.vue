@@ -5,6 +5,7 @@ import ModalShell from "./ModalShell.vue";
 import { api } from "../api";
 import { useI18n } from "../i18n";
 import type { AppSettings } from "../types";
+import ToolApprovalPanel from "../features/environment/ToolApprovalPanel.vue";
 
 const props = defineProps<{ settings: AppSettings }>();
 const emit = defineEmits<{ close: []; saved: []; iconChanged: [] }>();
@@ -60,6 +61,7 @@ async function resetIcon() {
       </div>
       <p class="helper">{{tr('建议使用透明背景的正方形 PNG，尺寸至少 32×32，最大 5MB。','Use a square transparent PNG, at least 32×32 and no larger than 5MB.')}}</p>
       <p v-if="error" class="form-error">{{error}}</p>
+      <ToolApprovalPanel />
     </div>
     <template #footer>
       <button class="button ghost" @click="$emit('close')">{{tr('取消','Cancel')}}</button>

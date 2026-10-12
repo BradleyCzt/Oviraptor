@@ -4,6 +4,7 @@ struct GapReceiptFixture {
     session: MultiAgentSession,
     child: crate::agent_runtime::multi_agent::scheduler::ScheduledChild,
     input: JsonValue,
+    original_web: SpecialistOriginalWebExitSeen,
 }
 
 fn gap_receipt_response() -> String {
@@ -51,7 +52,10 @@ fn gap_receipt_fixture() -> GapReceiptFixture {
     )
     .unwrap();
     scheduler::mark_child_running(&connection, &session.lease, &child).unwrap();
+    let original_web = specialist_original_take_web_seen(&session.lease.root_run_id);
+    assert_eq!(original_web.count(), 1, "one actual original Web SDK before recovery");
     GapReceiptFixture {
+        original_web,
         root,
         context,
         session,
@@ -64,7 +68,9 @@ fn recover_gap_fixture(
     f: &GapReceiptFixture,
     connection: &rusqlite::Connection,
 ) -> Result<(), String> {
-    complete_gap_delivery(
+    let web_before = f.original_web.count();
+    assert_eq!(web_before, 1);
+    let result = complete_gap_delivery(
         connection,
         &f.context,
         &f.session,
@@ -75,7 +81,9 @@ fn recover_gap_fixture(
         &f.input,
         "",
         true,
-    )
+    );
+    assert_eq!(f.original_web.count(), web_before, "local original-receipt recovery cannot resend Web SDK");
+    result
 }
 
 fn assert_gap_receipt_completed(connection: &rusqlite::Connection) {
@@ -146,6 +154,7 @@ fn investigator_receipt_recovery_is_atomic_without_reactivation_or_recharge() {
                 assert_eq!(before,review_delivery_snapshot(&connection));
                 assert_eq!(seen.lock().unwrap().len(),1);
                 drop(connection);
+                assert_eq!(f.original_web.count(), 1, "no Web SDK recharge after original recovery/refusal");
                 std::fs::remove_dir_all(f.root).unwrap();
             }
         }
@@ -188,21 +197,26 @@ fn investigator_receipt_recovery_rejects_changed_authority_or_saved_input() {
         assert_eq!(before,review_delivery_snapshot(&connection),"{change}");
         assert_eq!(seen.lock().unwrap().len(),1);
         drop(connection);
-        std::fs::remove_dir_all(f.root).unwrap();
+        assert_eq!(f.original_web.count(), 1, "no Web SDK recharge after original recovery/refusal");
+                std::fs::remove_dir_all(f.root).unwrap();
     }
 }
 
 #[test]
 fn investigator_production_delivery_recovers_locally_after_normal_path_failure() {
-    let (root, mut context, session) = specialist_gap_fixture();
-    let (port, seen, _stop) = spawn_endpoint(std::sync::Arc::new(|_| {
+    // The born Root freezes its model endpoint, so the endpoint exists before
+    // the actual Root/C/worker fixture and is never swapped afterwards.
+    let (port, seen, _stop) = specialist_original_endpoint(std::sync::Arc::new(|_| {
         (
             200,
             "application/json",
             proposal_model_response(&gap_receipt_response()),
         )
     }));
-    context.environment.api_base = format!("http://127.0.0.1:{port}/v1");
+    let (root, context, session) =
+        specialist_original_gap_fixture(&format!("http://127.0.0.1:{port}/v1"));
+    let original_web = specialist_original_take_web_seen(&session.lease.root_run_id);
+    assert_eq!(original_web.count(), 1);
     let connection = db::open(&context.db_path).unwrap();
     connection.execute_batch("CREATE TRIGGER fault BEFORE INSERT ON agent_messages WHEN NEW.kind='gap_proposed' AND EXISTS(SELECT 1 FROM agent_runs WHERE id=NEW.from_run_id AND status='running') BEGIN SELECT RAISE(ABORT,'normal delivery unavailable'); END;").unwrap();
     let _real = RealSpecialistTransport::enter();
@@ -215,9 +229,47 @@ fn investigator_production_delivery_recovers_locally_after_normal_path_failure()
     )
     .unwrap();
     assert_gap_receipt_completed(&connection);
-    assert_eq!(seen.lock().unwrap().len(), 1);
+    assert_eq!(specialist_handler_call_count(&seen), 1);
+    assert_eq!(original_web.count(), 1, "normal-path failure recovery did not resend original Web SDK");
     drop(connection);
     std::fs::remove_dir_all(root).unwrap();
+}
+
+// PROD-BUGFIX-3 guard: local recovery sets aside only the genuine
+// Root-published `rootDecision`; a foreign task key or a forged/foreign
+// decision binding is still rejected and nothing is delivered.
+#[test]
+fn investigator_local_recovery_still_rejects_foreign_or_forged_root_task_keys() {
+    for (label, tamper) in [
+        ("foreign key", "json_set(task_slice_json,'$.foreign','injected')"),
+        ("forged summary", "json_set(task_slice_json,'$.rootDecision.summaryHash','forged')"),
+        ("foreign sequence", "json_set(task_slice_json,'$.rootDecision.eventSequence',999999)"),
+        ("wrong step", "json_set(task_slice_json,'$.rootDecision.step','dispatch:web_executor')"),
+        ("extra decision key", "json_set(task_slice_json,'$.rootDecision.extra',1)"),
+        ("forged frame", "json_set(task_slice_json,'$.rootDecision.frameHash','forged')"),
+        ("forged policy fact", "json_set(task_slice_json,'$.rootDecision.rustPolicy.factHash','forged')"),
+    ] {
+        let (port, seen, _stop) = specialist_original_endpoint(std::sync::Arc::new(|_| {
+            (200, "application/json", proposal_model_response(&gap_receipt_response()))
+        }));
+        let (root, context, session) =
+            specialist_original_gap_fixture_with_web_exit(&format!("http://127.0.0.1:{port}/v1"));
+        let connection = db::open(&context.db_path).unwrap();
+        connection.execute_batch("CREATE TRIGGER fault BEFORE INSERT ON agent_messages WHEN NEW.kind='gap_proposed' AND EXISTS(SELECT 1 FROM agent_runs WHERE id=NEW.from_run_id AND status='running') BEGIN SELECT RAISE(ABORT,'normal delivery unavailable'); END;").unwrap();
+        connection.execute_batch(&format!("CREATE TRIGGER tamper_task AFTER INSERT ON agent_specialist_calls \
+            WHEN NEW.role='deep_investigator' BEGIN UPDATE agent_assignments SET task_slice_json={tamper} WHERE id=NEW.assignment_id; END;")).unwrap();
+        let _real = RealSpecialistTransport::enter();
+        let error = multi_agent_investigate_review_gap(
+            &context, &session, "candidate-gap", 2, &serde_json::json!(["missing control"]),
+        ).unwrap_err();
+        assert!(error.contains("gap_receipt_task_mismatch"), "{label}: {error}");
+        let delivered: i64 = connection.query_row(
+            "SELECT COUNT(*) FROM agent_messages WHERE kind='gap_proposed'", [], |r| r.get(0)).unwrap();
+        assert_eq!(delivered, 0, "{label}");
+        assert_eq!(specialist_handler_call_count(&seen), 2, "{label}: one original Web and one Investigator SDK, no model retry");
+        drop(connection);
+        std::fs::remove_dir_all(root).unwrap();
+    }
 }
 
 #[test]
@@ -259,7 +311,8 @@ fn investigator_receipt_recovery_concurrent_callers_deliver_once() {
     assert_eq!(events, 1);
     assert_eq!(seen.lock().unwrap().len(), 1);
     drop(connection);
-    std::fs::remove_dir_all(f.root).unwrap();
+    assert_eq!(f.original_web.count(), 1, "no Web SDK recharge after original recovery/refusal");
+                std::fs::remove_dir_all(f.root).unwrap();
 }
 
 #[test]
@@ -310,7 +363,8 @@ fn investigator_recovery_requires_exact_received_input_and_strict_proposal() {
         assert_eq!(before, review_delivery_snapshot(&connection), "{invalid}");
         assert_eq!(seen.lock().unwrap().len(), 1);
         drop(connection);
-        std::fs::remove_dir_all(f.root).unwrap();
+        assert_eq!(f.original_web.count(), 1, "no Web SDK recharge after original recovery/refusal");
+                std::fs::remove_dir_all(f.root).unwrap();
     }
 }
 
@@ -375,7 +429,8 @@ fn investigator_settled_failure_cleanup_rejects_silently_skipped_updates() {
             assert_gap_receipt_completed(&connection);
             assert_eq!(seen.lock().unwrap().len(), 1);
             drop(connection);
-            std::fs::remove_dir_all(f.root).unwrap();
+            assert_eq!(f.original_web.count(), 1, "no Web SDK recharge after original recovery/refusal");
+                std::fs::remove_dir_all(f.root).unwrap();
         }
     }
 }

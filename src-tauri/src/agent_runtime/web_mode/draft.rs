@@ -12,8 +12,8 @@ pub(crate) struct FreshModeDraft<'tx, 'db> {
     scan: String,
     draft: String,
 }
-impl FreshModeDraft<'_, '_> {
-    pub(crate) fn transaction(&self) -> &Transaction<'_> {
+impl<'tx, 'db> FreshModeDraft<'tx, 'db> {
+    pub(crate) fn transaction(&self) -> &'tx Transaction<'db> {
         self.tx
     }
     pub(crate) fn scan_id(&self) -> &str {

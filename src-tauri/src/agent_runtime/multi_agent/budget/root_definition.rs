@@ -97,13 +97,18 @@ pub(crate) fn freeze_new(
     fresh: &store::NewlyInsertedNativeRoot<'_, '_>,
     declaration: &NewRootBudgetDeclaration,
 ) -> Result<(), String> {
-    freeze_new_for_mode(fresh,declaration,crate::agent_runtime::web_mode::WebMode::Single)
+    freeze_new_for_mode(
+        fresh,
+        declaration,
+        crate::agent_runtime::web_mode::WebMode::Single,
+    )
 }
 
 pub(crate) fn freeze_new_for_mode(
-    fresh:&store::NewlyInsertedNativeRoot<'_, '_>,declaration:&NewRootBudgetDeclaration,
-    mode:crate::agent_runtime::web_mode::WebMode,
-) -> Result<(),String> {
+    fresh: &store::NewlyInsertedNativeRoot<'_, '_>,
+    declaration: &NewRootBudgetDeclaration,
+    mode: crate::agent_runtime::web_mode::WebMode,
+) -> Result<(), String> {
     let tx = fresh.transaction();
     let root = fresh.id();
     lease::require_active_attempt(tx, &declaration.scan_id, declaration.attempt_number)?;
@@ -139,7 +144,9 @@ pub(crate) fn freeze_new_for_mode(
             AND (NOT json_valid(p.raw_json) OR json_extract(p.raw_json,'$.attemptNumber') IS NULL
                 OR json_extract(p.raw_json,'$.attemptNumber')=r.attempt_number))
         OR EXISTS(SELECT 1 FROM agent_coordinator_leases WHERE root_run_id=?1)
-        OR EXISTS(SELECT 1 FROM agent_root_budget_definitions WHERE root_run_id=?1)",
+        OR EXISTS(SELECT 1 FROM agent_root_budget_definitions WHERE root_run_id=?1)
+        OR EXISTS(SELECT 1 FROM agent_financial_root_budget_definitions WHERE root_run_id=?1)
+        OR EXISTS(SELECT 1 FROM agent_financial_continuations WHERE new_root_run_id=?1)",
             [root],
             |r| r.get(0),
         )
@@ -187,8 +194,15 @@ pub(crate) fn read(
         .optional()
         .map_err(|e| e.to_string())?;
     let Some((id, payload, text_hash)) = saved else {
-        return Ok(None);
+        return super::continuation::migration::read(db, root);
     };
+    let migrated: bool = db.query_row(
+        "SELECT EXISTS(SELECT 1 FROM agent_financial_root_budget_definitions WHERE root_run_id=?1)
+        OR EXISTS(SELECT 1 FROM agent_financial_continuations WHERE new_root_run_id=?1)",
+        [root], |r|r.get(0)).map_err(|e|e.to_string())?;
+    if migrated {
+        return Err("budget_declaration_duplicate_contract".into());
+    }
     let declaration: NewRootBudgetDeclaration =
         serde_json::from_str(&payload).map_err(|_| "budget_declaration_corrupt")?;
     let (scan, attempt, target, hash, text): (String, i64, String, String, String) = db

@@ -1,15 +1,10 @@
 // Render the actual task-detail SFC. IPC/icons/form are mocked; a source-evidence
 // child probe verifies parent scope wiring. Its actual SFC is tested separately.
 const assert = require('node:assert/strict');
-const fs = require('node:fs');
-const path = require('node:path');
 const test = require('node:test');
-const ts = require('typescript');
+const { loadSentinelApi } = require('./sentinel_api_harness.cjs');
 const { mount, flush, deferred, scan, page, source, searchClock } = require('./execution_history/harness.cjs');
 require('./execution_history/search_contract.cjs');
-const transpile = (text) => ts.transpileModule(text, {
-  compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020 },
-}).outputText;
 
 test('task-center cost strip discloses loaded deployment scope without asserting zero findings', async t => {
   const h = await mount(async () => page()); t.after(h.unmount);
@@ -25,12 +20,8 @@ test('task-center cost strip discloses loaded deployment scope without asserting
 
 test('actual API uses versioned execution history IPC and preserves an opaque cursor', async () => {
   const calls = [];
-  const exports = {};
   const result = { schemaVersion: 2, invocations: [] };
-  new Function('require', 'exports', transpile(fs.readFileSync(path.join(__dirname, '../src/features/sentinel/api.ts'), 'utf8')))((name) => {
-    assert.equal(name, '@tauri-apps/api/core');
-    return { invoke: async (...args) => { calls.push(args); return result; } };
-  }, exports);
+  const exports = { sentinelApi: loadSentinelApi(async (...args) => { calls.push(args); return result; }) };
   const cursor = '{"schemaVersion":2,"recordKey":"source:a:0001:0000"}';
   assert.equal(await exports.sentinelApi.getNativeAttemptToolHistory('scan-A', 3, cursor), result);
   assert.equal(await exports.sentinelApi.getNativeAttemptToolHistory('scan-A', 3), result);

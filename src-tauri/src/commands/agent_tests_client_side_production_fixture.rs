@@ -49,7 +49,7 @@ fn client_hook_fixture(tag: &str, hard_tokens: i64, hard_requests: i64) -> Clien
     }));
     let target = format!("http://127.0.0.1:{site_port}");
     let (directory, path, root, lease) =
-        multi_agent_new_task_root_for_target(tag, hard_tokens, hard_requests, &target);
+        multi_agent_task_root_for_target_protocol(tag, hard_tokens, hard_requests, &target, false);
     let mut context = test_context(&path, &target, vec![AgentIdentity::anonymous()]);
     context.scan_id = lease.scan_id.clone();
     context.target_dir = fs::canonicalize(&directory)
@@ -63,6 +63,8 @@ fn client_hook_fixture(tag: &str, hard_tokens: i64, hard_requests: i64) -> Clien
     context.execution_plan =
         web_mode_positive_plan_or(&path, &target, context.execution_plan.clone());
     let db = db::open(&path).unwrap();
+    assert!(crate::agent_runtime::web_mode::root::read(&db, &root).unwrap().unwrap()
+        .new_evidence_supervision().is_none(), "direct Broker fixture uses original birth contract");
     let supplier = scheduler::schedule_child(
         &db,
         &lease,

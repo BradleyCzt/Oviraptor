@@ -6,11 +6,14 @@ struct WebModeFixture {
     scan: String,
     work: PathBuf,
     target: String,
+    preserve: bool,
 }
 #[cfg(test)]
 impl Drop for WebModeFixture {
     fn drop(&mut self) {
-        let _ = fs::remove_dir_all(&self.root);
+        if !self.preserve {
+            let _ = fs::remove_dir_all(&self.root);
+        }
     }
 }
 
@@ -30,11 +33,18 @@ fn web_mode_test_rows(
         .into_iter()
         .map(|table| {
             let quoted = table.replace('"', "\"\"");
-            let mut statement = db
-                .prepare(&format!("SELECT * FROM \"{quoted}\" ORDER BY rowid"))
-                .unwrap();
+            let without_rowid: bool = db.query_row(
+                "SELECT wr FROM pragma_table_list WHERE schema='main' AND name=?1",
+                [&table], |r| r.get(0),
+            ).unwrap();
+            let sql = if without_rowid {
+                format!("SELECT * FROM \"{quoted}\"")
+            } else {
+                format!("SELECT * FROM \"{quoted}\" ORDER BY rowid")
+            };
+            let mut statement = db.prepare(&sql).unwrap();
             let count = statement.column_count();
-            let rows = statement
+            let mut rows = statement
                 .query_map([], |r| {
                     (0..count)
                         .map(|i| r.get(i))
@@ -43,6 +53,9 @@ fn web_mode_test_rows(
                 .unwrap()
                 .collect::<rusqlite::Result<Vec<_>>>()
                 .unwrap();
+            if without_rowid {
+                rows.sort_by_cached_key(|row| format!("{row:?}"));
+            }
             (table, rows)
         })
         .collect()
@@ -157,6 +170,11 @@ fn web_mode_fixture(mode: &str, target: &str) -> WebModeFixture {
         .canonicalize()
         .unwrap()
         .join(format!("oviraptor-mode-{}", Uuid::new_v4()));
+    web_mode_fixture_at_root(mode, target, root)
+}
+
+#[cfg(test)]
+fn web_mode_fixture_at_root(mode: &str, target: &str, root: PathBuf) -> WebModeFixture {
     let path = db::initialize(&root).unwrap();
     let mut db = db::open(&path).unwrap();
     db.execute("INSERT INTO projects(id,name) VALUES(9001,'Mode test')", [])
@@ -169,6 +187,7 @@ fn web_mode_fixture(mode: &str, target: &str) -> WebModeFixture {
         scan,
         work,
         target: target.into(),
+        preserve: false,
     }
 }
 

@@ -21,6 +21,7 @@ import WorkbenchSkillSelection from "../features/sentinel/workbench/WorkbenchSki
 import WorkbenchBrowserAuth from "../features/sentinel/workbench/WorkbenchBrowserAuth.vue";
 import WorkbenchTaskNotices from "../features/sentinel/workbench/WorkbenchTaskNotices.vue";
 import WorkbenchWebPolicy from "../features/sentinel/workbench/WorkbenchWebPolicy.vue";
+import WorkbenchToolSelection from "../features/sentinel/workbench/WorkbenchToolSelection.vue";
 import WorkbenchBudgetField from "../features/sentinel/workbench/WorkbenchBudgetField.vue";
 import { useWorkbenchPresentation } from "../features/sentinel/workbench/useWorkbenchPresentation";
 
@@ -65,6 +66,9 @@ const form = reactive({
   scanMode: "standard" as "quick" | "standard" | "deep",
   closure: "breadth" as "breadth" | "proof",
   orchestrationMode: "multi" as "single" | "multi",
+  homogeneousWorkers: false,
+  homogeneousExecution: false,
+  approvedToolIds: [] as string[],
   scopeMode: "full" as "auto" | "diff" | "full",
   diffBase: "origin/main",
   maxBudgetUsd: 5 as number | undefined,
@@ -197,7 +201,9 @@ onBeforeUnmount(() => {
             <div>
               <span class="eyebrow">{{ mode.toUpperCase() }}</span>
               <h3>{{ modeLabel(mode) }}</h3>
-              <p v-if="mode === 'web'">
+              <p v-if="mode === 'web' && form.homogeneousWorkers && !form.homogeneousExecution">{{ tr("主管按观测范围动态拆分任务，按需唤起同质 Worker 分析已有证据并汇报；本阶段只读分析，不派发目标验证或确认漏洞。", "The coordinator decomposes observed scope and wakes identical Workers to analyze existing evidence. This phase is read-only; it does not dispatch target verification or confirm findings.") }}</p>
+              <p v-else-if="mode === 'web' && form.homogeneousWorkers">{{ tr("主管按目标分派任务，冻结批准工具和权限；解析辅助代码在无网络沙箱中执行，实际结果与覆盖缺口进入聊天。", "The coordinator assigns work by goal with frozen approved tools and permissions. Parsing helpers execute in an offline sandbox; chat shows actual results and coverage gaps.") }}</p>
+              <p v-else-if="mode === 'web'">
                 {{
                   tr(
                     "输入 URL 后自动完成页面探索、HTTP/参数捕获、JS/指纹、本地知识与确定性验证；标准扫描处理真实运行时 API，深度扫描优先验证高价值证据。",
@@ -297,6 +303,13 @@ onBeforeUnmount(() => {
                 <option value="single">{{ tr("单智能体", "Single agent") }}</option>
               </select>
             </label>
+            <label v-if="mode === 'web' && !followup && !handoff && form.orchestrationMode === 'multi'" class="field span-two">
+              <span><input type="checkbox" v-model="form.homogeneousWorkers" :disabled="busy" /> {{ tr("主管按需分配同质 Worker", "Coordinator assigns homogeneous workers on demand") }}</span>
+              <small class="helper">{{ tr("主管按目标拆分任务，Worker 使用相同只读能力、独立上下文；分派、汇报和裁决在聊天中展示。", "The coordinator splits work by goal. Workers share read-only capabilities and independent contexts; chat shows dispatches, reports and decisions.") }}</small>
+              <span v-if="form.homogeneousWorkers"><input type="checkbox" v-model="form.homogeneousExecution" :disabled="busy" /> {{ tr("冻结批准工具并使用受控执行", "Freeze approved tools for controlled execution") }}</span>
+            </label>
+            <WorkbenchToolSelection v-if="mode === 'web' && !followup && !handoff || form.approvedToolIds.length > 0"
+              v-model="form.approvedToolIds" :disabled="busy" :eligible="mode === 'web' && !followup && !handoff && form.orchestrationMode === 'multi' && (!form.homogeneousWorkers || form.homogeneousExecution)" />
             <label v-if="mode === 'web'" class="field"
               ><span>{{ tr("收口", "Closure") }}</span>
               <select v-model="form.closure">
@@ -347,7 +360,7 @@ onBeforeUnmount(() => {
               ><input v-model="form.diffBase" placeholder="origin/main"
             /></label>
             <WorkbenchBudgetField v-model="form.maxBudgetUsd" :mode="mode" :tr="tr" />
-            <WorkbenchWebPolicy v-if="mode === 'web'" :scan-mode="form.scanMode"
+            <WorkbenchWebPolicy v-if="mode === 'web' && !form.homogeneousWorkers" :scan-mode="form.scanMode"
               :summary="webPolicySummary" :skill-names="effectiveWebSkillNames" />
             <button
               v-if="mode === 'web'"

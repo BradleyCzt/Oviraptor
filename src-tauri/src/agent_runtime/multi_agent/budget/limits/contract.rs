@@ -29,8 +29,9 @@ pub(super) fn frozen(db: &Connection, root: &str) -> Result<[Option<i64>; 10], S
     };
     if let Some(declaration) = super::super::root_definition::read(db, root)? {
         let finite = |value| (value > 0).then_some(value);
-        if declaration.limits[..3] != [finite(tokens); 3]
-            || declaration.limits[3] != finite(requests)
+        if declaration.schema_version != 3
+            && (declaration.limits[..3] != [finite(tokens); 3]
+                || declaration.limits[3] != finite(requests))
         {
             return Err("budget_declaration_native_ceiling_conflict".into());
         }

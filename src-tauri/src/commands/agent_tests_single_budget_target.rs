@@ -6,8 +6,24 @@ fn single_target_harness_with(
     site: impl Fn(String) -> (u16, &'static str, String) + Send + Sync + 'static,
 ) -> AgentHarness {
     use crate::agent_runtime::multi_agent::budget::root::RootOwner;
+    // The Root wall clock origin is the Root run's `created_at` (written while
+    // `runtime_open_run` creates the Root), a whole-second SQLite datetime, while
+    // elapsed is sampled at millisecond precision. A Root created at
+    // hh:mm:ss.900 is therefore charged ~900ms before any work (conservative,
+    // never under-billed). With a 1-4s hard limit that truncation, not the
+    // behavior under test, could exhaust the budget before the financial
+    // fixture below is even initialized. Create the task just after a second
+    // boundary so the frozen origin equals the real start; limits unchanged.
     let mut harness = agent_harness(tag, site, vec![AgentIdentity::anonymous()]);
     harness.context.execution_plan.timeout_seconds = timeout;
+    // Align after all expensive setup, before plan persistence inserts the original Root
+    // is born. Never rewrite an already born clock or enlarge its deadline.
+    if timeout <= 4 {
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap();
+        std::thread::sleep(Duration::from_millis(1002 - u64::from(now.subsec_millis())));
+    }
     freeze_harness_plan(&harness);
     harness.context.run = runtime_open_run(
         &harness.db_path,

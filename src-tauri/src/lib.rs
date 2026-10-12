@@ -1,6 +1,7 @@
 #![recursion_limit = "256"]
 
 mod agent_runtime;
+pub mod recovery_finance;
 mod artifact_import;
 mod asset_logs;
 mod auth_session;
@@ -208,7 +209,11 @@ fn show_main_window(app: &tauri::AppHandle) {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    if let Err(error) = startup_profile::preflight() {
+    if let Some(exit_code) = tool_supply::container_parser::guardian_entry() {
+        std::process::exit(exit_code);
+    }
+    let context = tauri::generate_context!();
+    if let Err(error) = startup_profile::preflight(&context.config().identifier) {
         eprintln!("Oviraptor acceptance profile rejected: {error}");
         std::process::exit(2);
     }
@@ -331,6 +336,7 @@ pub fn run() {
             auth_session::finish_browser_auth_session,
             auth_session::list_browser_auth_sessions,
             auth_session::list_sentinel_scan_auth_sessions,
+            auth_session::get_sentinel_scan_identity_material,
             auth_session::validate_browser_auth_session,
             auth_session::delete_browser_auth_session,
             commands::get_app_settings,
@@ -357,6 +363,7 @@ pub fn run() {
             commands::list_targets,
             commands::remove_target,
             commands::list_assets,
+            commands::mark_asset_entry_opened,
             commands::add_content_rule,
             commands::update_decision,
             commands::update_asset_decisions,
@@ -365,15 +372,62 @@ pub fn run() {
             commands::get_asset_ownership_summary,
             commands::assess_asset_ownership,
             commands::update_asset_ownership,
+            commands::get_project_ownership_bootstrap,
+            commands::preview_project_ownership_suggestions,
+            commands::save_project_ownership_directory,
+            commands::start_ownership_analysis,
+            commands::read_ownership_analysis,
+            commands::cancel_ownership_analysis,
+            commands::page_ownership_groups,
+            commands::page_ownership_group_members,
+            commands::preview_ownership_group_decision,
+            commands::apply_ownership_group_decision,
+            commands::read_ownership_operation,
+            commands::preview_ownership_group_revert,
+            commands::apply_ownership_group_revert,
+            commands::revoke_ownership_group_authorization,
+            commands::confirm_asset_ownership,
+            commands::authorize_asset_ownership,
             commands::exposure_summary,
             commands::list_exposure_findings,
+            commands::page_exposure_findings,
+            commands::page_exposure_runs,
+            commands::list_exposure_source_results_for_project,
+            commands::read_exposure_finding,
+            commands::exposure_scope_summary,
+            commands::exposure_known_limits,
+            commands::resume_exposure_scan,
+            commands::page_exposure_pending_discoveries,
+            commands::read_exposure_evidence,
+            commands::get_exposure_settings,
+            commands::save_exposure_settings,
+            commands::list_exposure_setting_versions,
+            commands::page_exposure_clusters,
+            commands::page_exposure_cluster_members,
+            commands::verify_exposure_export,
+            commands::review_exposure_finding_scoped,
+            commands::list_exposure_review_trail,
+            commands::save_exposure_remediation,
+            commands::page_exposure_remediations,
+            commands::start_exposure_retest,
+            commands::read_exposure_retest_outcome,
+            commands::mark_exposure_remediation,
+            commands::exposure_review_taxonomy,
             commands::save_exposure_finding,
-            commands::review_exposure_finding,
             commands::start_exposure_scan,
             commands::list_exposure_runs,
             commands::list_exposure_source_results,
             commands::cancel_exposure_scan,
             commands::export_exposure_findings,
+            commands::page_exposure_incidents,
+            commands::read_exposure_incident,
+            commands::page_exposure_incident_locations,
+            commands::exposure_coverage_drilldown,
+            commands::act_on_exposure_incident,
+            commands::propose_exposure_incidents,
+            commands::import_exposure_documents,
+            commands::grade_exposure_intel,
+            commands::reclassify_exposure_finding,
             commands::soft_delete_assets,
             commands::soft_delete_asset_selections,
             commands::list_runs,
@@ -386,12 +440,17 @@ pub fn run() {
             commands::sync_hackerone,
             commands::add_hackerone_scopes_to_project,
             commands::check_environment,
+            commands::approve_tool_inventory,
+            commands::revoke_tool_inventory,
+            commands::read_tool_approval_inventory,
             commands::install_environment_dependencies,
             commands::list_environment_install_logs,
             commands::get_environment_preparation_status,
             commands::recover_environment_preparation,
             commands::create_sentinel_scan,
             commands::create_sentinel_url_scan,
+            commands::create_sentinel_homogeneous_url_scan,
+            commands::create_sentinel_url_scan_with_tool_selection,
             commands::test_model_profile,
             commands::test_fofa_api,
             commands::list_agent_instructions,
@@ -444,6 +503,7 @@ pub fn run() {
             commands::read_sentinel_runner_log,
             commands::read_native_process_log,
             commands::read_native_sdk_log,
+            commands::read_native_mapper_prepared_history,
             commands::search_sentinel_scan_ids,
             commands::list_sentinel_targets,
             commands::list_sentinel_fuse_zone,
@@ -459,6 +519,28 @@ pub fn run() {
             commands::record_agent_request_review,
             commands::get_native_scan_status,
             commands::get_native_budget_diagnostics,
+            commands::get_native_root_cost_reconciliations,
+            commands::confirm_native_root_cost_reconciliation,
+            commands::preview_native_root_financial_continuation,
+            commands::preview_native_single_continuation,
+            commands::preview_native_protection_recovery,
+            commands::discover_native_protection_recovery_sources,
+            commands::preview_native_protection_recovery_proposal,
+            commands::approve_native_protection_recovery,
+            commands::preview_native_priced_protection_recovery,
+            commands::approve_native_priced_protection_recovery,
+            commands::get_native_priced_protection_recovery_approval,
+            commands::find_native_priced_protection_recovery_approval,
+            commands::cancel_native_priced_protection_recovery_approval,
+            commands::get_native_priced_protection_recovery_cancellation,
+            commands::get_native_protection_recovery_approval,
+            commands::create_native_protection_recovery_draft,
+            commands::get_native_protection_recovery_draft,
+            commands::get_native_protection_recovery_cancellation,
+            commands::get_native_protection_recovery_cancellation_by_request,
+            commands::approve_native_root_financial_continuation,
+            commands::get_native_root_financial_continuation,
+            commands::discover_native_root_financial_continuation,
             commands::get_native_scan_timeline_page,
             commands::get_agent_dialog_view,
             commands::save_agent_dialog_view,
@@ -514,7 +596,7 @@ pub fn run() {
             jobs::resume_job,
             jobs::cancel_job,
         ])
-        .build(tauri::generate_context!())
+        .build(context)
         .expect("error while building Oviraptor")
         .run(|app, event| {
             if let tauri::RunEvent::Exit = event {

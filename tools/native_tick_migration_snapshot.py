@@ -20,12 +20,38 @@ def file_hash(path):
 
 def open_database(path, writable=False):
     path = Path(path).resolve(strict=True)
-    db = sqlite3.connect(path.as_uri() + ('?mode=rw' if writable else '?mode=ro'),
-                         uri=True, isolation_level=None, timeout=10)
+    try:
+        db = sqlite3.connect(path.as_uri() + ('?mode=rw' if writable else '?mode=ro'),
+                             uri=True, isolation_level=None, timeout=10)
+        db.execute('SELECT count(*) FROM sqlite_master').fetchone()
+    except sqlite3.OperationalError:
+        # A closed WAL database has no -shm/-wal; some SQLite builds (macOS's
+        # system libsqlite3) cannot open it mode=ro. Reopen read-write only so
+        # SQLite may create its own WAL index; query_only below still forbids
+        # every write and the live source may keep changing, so no immutable.
+        if writable:
+            raise
+        db = sqlite3.connect(path.as_uri() + '?mode=rw', uri=True, isolation_level=None, timeout=10)
     db.text_factory = bytes
     db.execute('PRAGMA foreign_keys=ON')
     if not writable:
         db.execute('PRAGMA query_only=ON')
+    return db
+
+
+def open_backup(path):
+    """Read a closed, private, hash-pinned backup file without sidecar files.
+
+    The online backup copies the source's WAL header. Some SQLite builds (for
+    example macOS's system libsqlite3) refuse a mode=ro open of a WAL database
+    whose -shm/-wal do not exist, others create them. immutable=1 reads only the
+    backup file itself, never takes locks and never writes next to it.
+    """
+    path = Path(path).resolve(strict=True)
+    db = sqlite3.connect(path.as_uri() + '?mode=ro&immutable=1', uri=True, isolation_level=None)
+    db.text_factory = bytes
+    db.execute('PRAGMA foreign_keys=ON')
+    db.execute('PRAGMA query_only=ON')
     return db
 
 

@@ -161,3 +161,20 @@ fn gap_submission_result_receipt_write_failure_rolls_back_task_and_provenance() 
     let after:i64=db.query_row("SELECT COUNT(*) FROM sentinel_scans",[],|r|r.get(0)).unwrap();assert_eq!(before,after);
     let count:i64=db.query_row("SELECT COUNT(*) FROM agent_gap_followups",[],|r|r.get(0)).unwrap();assert_eq!(count,0);
 }
+
+/// Guard still bites (`root_paid_open_run_retained`): an open paid original
+/// Root's run row cannot be removed by raw SQL, directly or through the scan
+/// cascade; the refusal names the guard and every row survives.
+#[test]
+fn gap_submission_open_paid_root_run_rejects_direct_and_cascading_delete() {
+    let f=followup_fixture();let db=db::open(&f.context.db_path).unwrap();let input=followup_input(&f);
+    let root:String=db.query_row("SELECT r.id FROM agent_runs r WHERE r.scan_id=?1 AND r.role='coordinator' AND r.root_run_id=r.id
+        AND r.status<>'terminal' AND EXISTS(SELECT 1 FROM agent_root_budget_attempts a WHERE a.root_run_id=r.id)",
+        [&input.source_scan_id],|r|r.get(0)).unwrap();
+    let before=web_mode_test_rows(&db);
+    for sql in ["DELETE FROM agent_runs WHERE id=?1","DELETE FROM sentinel_scans WHERE id=(SELECT scan_id FROM agent_runs WHERE id=?1)"] {
+        let error=db.execute(sql,[&root]).unwrap_err().to_string();
+        assert!(error.contains("root_paid_open_run_retained"),"{sql}: {error}");
+        web_mode_assert_rows(&db,&before);
+    }
+}

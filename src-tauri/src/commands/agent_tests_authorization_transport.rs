@@ -113,5 +113,42 @@ fn authorization_child_sends_only_three_registered_gets_and_keeps_raw_bodies_pri
     assert!(!audit.contains("cookie-a"));
     assert!(!audit.contains("Bearer a"));
     assert!(context.target_dir.join(AGENT_HTTP_DIRECTORY).join("0001.body").exists());
+    // Actual received responses and immutable target ledger must independently
+    // reject a replay, even if the mutable claim is damaged offline.
+    assert_eq!(connection.execute("DELETE FROM agent_authorization_probe_claims WHERE child_run_id=?1 AND side='owner'",[&child.run_id]).unwrap(),1);
+    let damaged=super::tests::application_table_snapshot(&connection);
+    assert_eq!(claim_authorization_probe(&context,&child,&control,"owner",
+        &control.owner_identity,&control.owner_object_url).unwrap_err(),"authorization_side_already_claimed");
+    assert!(super::tests::application_table_snapshot(&connection)==damaged);
+    let charged_after=crate::agent_runtime::multi_agent::budget::balance(&connection,&root.id,None,"target_requests").unwrap();
+    assert_eq!((charged_after.reserved,charged_after.consumed,charged_after.indeterminate),(0,3,0));
 }
 
+
+#[test]
+fn authorization_fresh_artifact_proof_binds_original_write_and_scope() {
+    use sha2::Digest;
+    let (_root, db_path, app_data_dir, control) = authorization_fixture();
+    let mut context = test_context(&db_path, &control.target_url, vec![]);
+    context.target_dir = app_data_dir.join("fresh-original-proof");
+    context.run = Some(AgentRunLedger { db_path, run_id: "fresh-original-worker".into() });
+    let body = b"original-body-before-any-reader";
+    let proof = agent_write_http_record_fresh(&context, 1,
+        &serde_json::json!({"method":"GET","url":control.owner_object_url}),
+        &serde_json::json!({"status":200}), body).unwrap();
+    assert_eq!(proof.scan_id(), context.scan_id);
+    assert_eq!(proof.attempt_number(), context.attempt_number);
+    assert_eq!(proof.target_url(), context.target_url);
+    assert_eq!(proof.run_id(), Some("fresh-original-worker"));
+    assert_eq!(proof.body_bytes(), body.len());
+    let original_record = std::fs::read(proof.directory().join(proof.artifact_id())).unwrap();
+    assert_eq!(proof.record_bytes(), original_record.len());
+    assert_eq!(proof.record_sha256(), format!("{:x}", sha2::Sha256::digest(&original_record)));
+    assert_eq!(proof.body_sha256(), format!("{:x}", sha2::Sha256::digest(body)));
+    // Cold replacement cannot retroactively turn the original write proof into
+    // a digest of the reader's current bytes. This token is not a signed seal.
+    let metadata: JsonValue = serde_json::from_slice(&original_record).unwrap();
+    let body_path = proof.directory().join(metadata["payloadFile"].as_str().unwrap());
+    std::fs::write(body_path, b"cold-replacement").unwrap();
+    assert_ne!(proof.body_sha256(), format!("{:x}", sha2::Sha256::digest(b"cold-replacement")));
+}

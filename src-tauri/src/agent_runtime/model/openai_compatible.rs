@@ -13,7 +13,7 @@ use super::gateway::{
 };
 use super::profile::GatewayProfile;
 use super::transport::{self, CancelObservation, TransportError, TransportRequest};
-use super::usage::{tool_schema_hash, usage_from_response, usage_is_reported, ToolSchema};
+use super::usage::{cached_usage_is_reported, tool_schema_hash, usage_from_response, usage_is_reported, usage_wire_is_unambiguous, ToolSchema};
 use serde_json::Value as JsonValue;
 use std::{
     fs::OpenOptions,
@@ -109,6 +109,9 @@ impl OpenAiCompatibleGateway {
         if let Some(max_output) = self.profile.max_output_tokens {
             body["max_tokens"] = serde_json::json!(max_output);
         }
+        for (key, value) in self.profile.bounded_wire_options().as_object().unwrap() {
+            body[key] = value.clone();
+        }
         if !request.tools.is_empty() {
             body["tools"] = serde_json::json!(request
                 .tools
@@ -126,7 +129,8 @@ impl OpenAiCompatibleGateway {
         request: &ModelRequest,
         cancel: &CancelToken,
     ) -> Result<ModelResponse, ModelError> {
-        let _permit = admission::gate(self.profile.local).acquire(cancel)?;
+        let _permit =
+            admission::gate_for(self.profile.local, &self.profile.endpoint).acquire(cancel)?;
         if cancel.is_cancelled() {
             return Err(ModelError::Cancelled);
         }
@@ -207,13 +211,33 @@ impl OpenAiCompatibleGateway {
             "finishReason": response.finish_reason,
             "toolCalls": response.tool_calls.len(),
             "usage": response.usage.as_json(),
+            "usageReported": response.usage_reported,
+            "cachedUsageReported": response.cached_usage_reported,
+            "usageBasis": if response.usage_reported { "provider_reported" } else { "unverified" },
         });
+        let Ok(mut encoded) = serde_json::to_vec(&line) else { return; };
+        encoded.push(b'\n');
         if let Ok(mut file) = OpenOptions::new()
             .create(true)
             .append(true)
             .open(target_dir.join(USAGE_LEDGER_FILE))
         {
-            let _ = writeln!(file, "{line}");
+            // JSON Display emits multiple writes. Encode one complete frame,
+            // and serialize appenders (including short writes) on this file.
+            // Closing this distinct handle releases its advisory lock.
+            // This secondary diagnostic must not indefinitely delay the
+            // caller's durable cost receipt when a different writer is stuck.
+            let deadline = Instant::now() + Duration::from_millis(100);
+            let locked = loop {
+                match file.try_lock() {
+                    Ok(()) => break true,
+                    Err(std::fs::TryLockError::WouldBlock) if Instant::now() < deadline => {
+                        thread::sleep(Duration::from_millis(1));
+                    }
+                    Err(_) => break false,
+                }
+            };
+            if locked { let _ = file.write_all(&encoded); }
         }
     }
 }
@@ -286,11 +310,13 @@ impl OpenAiCompatibleGateway {
                 return Err(ModelError::UnsupportedCapability(truncate(message, 300)));
             }
         }
+        let unambiguous_usage = usage_wire_is_unambiguous(&text);
         Ok(ModelResponse {
             text: extract_message_text(&parsed),
             tool_calls: extract_tool_calls(&parsed),
             usage: usage_from_response(&parsed, request_bytes, text.len()),
-            usage_reported: usage_is_reported(&parsed),
+            usage_reported: usage_is_reported(&parsed) && unambiguous_usage,
+            cached_usage_reported: cached_usage_is_reported(&parsed) && unambiguous_usage,
             finish_reason: parsed
                 .pointer("/choices/0/finish_reason")
                 .and_then(JsonValue::as_str)

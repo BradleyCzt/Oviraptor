@@ -227,15 +227,16 @@ where
 
 /// The bytes that make a node what it is. Two nodes with the same natural key and a
 /// different value here are a plan drift, not a replay (§3.5).
-fn node_content(node: &EvidenceNode) -> JsonValue {
-    redact_json(&serde_json::json!({
+fn node_content(node: &EvidenceNode, plaintext: bool) -> JsonValue {
+    let value=serde_json::json!({
         "kind": node.kind.as_str(),
         "provenance": node.provenance.as_str(),
         "payload": node.payload,
         "artifactRefs": node.artifact_refs,
         "createdByRunId": node.created_by_run_id,
         "supersedesId": node.supersedes_id,
-    }))
+    });
+    if plaintext {value} else {redact_json(&value)}
 }
 
 fn edge_content(payload: &JsonValue, created_by_run_id: &str) -> JsonValue {
@@ -263,8 +264,9 @@ pub fn insert_evidence_node(
     if node.revision <= 0 {
         return Err("evidence node revision 必须为正数".to_string());
     }
-    let payload = redact_json(&node.payload).to_string();
-    let refs = redact_json(&serde_json::json!(node.artifact_refs)).to_string();
+    let plaintext=crate::agent_runtime::multi_agent::homogeneous::material_policy::for_root(connection,&node.root_run_id)?;
+    let payload = if plaintext {node.payload.clone()} else {redact_json(&node.payload)}.to_string();
+    let refs = if plaintext {serde_json::json!(node.artifact_refs)} else {redact_json(&serde_json::json!(node.artifact_refs))}.to_string();
     require_author(connection, &node.created_by_run_id, "node", &node.id)?;
     require_supersedes(connection, node)?;
     let owner: Option<(String, i64, String)> = query_one(
@@ -323,7 +325,7 @@ pub fn insert_evidence_node(
             node.root_run_id, node.revision, node.natural_key_hash
         )
     })?)?;
-    if node_content(&existing) == node_content(node) {
+    if node_content(&existing,plaintext) == node_content(node,plaintext) {
         return Ok(EvidenceInsert::Existing(existing.id));
     }
     Err(format!(

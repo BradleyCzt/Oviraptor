@@ -284,3 +284,106 @@ fn assignment_attempt_supervisor_successor_scope_does_not_adopt_other_root_worke
         fs::remove_dir_all(root).unwrap();
     }
 }
+
+#[test]
+fn assignment_attempt_supervisor_private_withdrawal_denies_business_other_root_and_forged_emitter_writes(
+) {
+    use crate::agent_runtime::multi_agent::supervisor::WorkerSupervisor;
+    for change in [
+        "INSERT INTO projects(name) VALUES('expiry-trigger-business')",
+        "UPDATE agent_runs SET status='paused' WHERE id='expiry-other-root'",
+        "INSERT INTO agent_collaboration_events(scan_id,attempt_number,entity_type,entity_id,event_type,payload_json) SELECT scan_id,attempt_number,'run',id,'run','{}' FROM agent_runs WHERE role='coordinator'",
+    ] {
+        let (root, context, lease, child) = specialist_journal_fixture();
+        let db = db::open(&context.db_path).unwrap();
+        db.execute("INSERT INTO agent_runs(id,scan_id,target_url,root_run_id,role,status,orchestration_policy) VALUES('expiry-other-root',?1,'https://other.invalid','expiry-other-root','coordinator','prepared','multi')", [&lease.scan_id]).unwrap();
+        expire_worker_deadline(&db, &child.run_id);
+        db.execute_batch(&format!("CREATE TRIGGER expiry_business_escape AFTER UPDATE OF state ON agent_assignment_attempts WHEN NEW.state='expired' BEGIN {change}; END;")).unwrap();
+        let before = super::tests::application_table_snapshot(&db);
+        let allocator = client_delivery_rows(&db, "sqlite_sequence");
+        assert!(WorkerSupervisor::start(&context.db_path, &lease).is_err(), "{change}");
+        assert_eq!(super::tests::application_table_snapshot(&db), before);
+        assert_eq!(client_delivery_rows(&db, "sqlite_sequence"), allocator);
+        drop(db);
+        fs::remove_dir_all(root).unwrap();
+    }
+    let (root, context, lease, child) = specialist_journal_fixture();
+    let db = db::open(&context.db_path).unwrap();
+    expire_worker_deadline(&db, &child.run_id);
+    db.execute_batch("DROP TRIGGER agent_collaboration_run_update; CREATE TRIGGER agent_collaboration_run_update AFTER UPDATE ON agent_runs BEGIN INSERT INTO projects(name) VALUES('forged-expiry-emitter'); END;").unwrap();
+    let before = super::tests::application_table_snapshot(&db);
+    let allocator = client_delivery_rows(&db, "sqlite_sequence");
+    assert!(WorkerSupervisor::start(&context.db_path, &lease).is_err());
+    assert_eq!(super::tests::application_table_snapshot(&db), before);
+    assert_eq!(client_delivery_rows(&db, "sqlite_sequence"), allocator);
+    drop(db);
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn assignment_attempt_supervisor_async_private_writer_rolls_back_without_rowid_business_escape() {
+    use crate::agent_runtime::multi_agent::supervisor::WorkerSupervisor;
+    for operation in [
+        "INSERT INTO expiry_business_without_rowid VALUES('extra','trigger')",
+        "UPDATE expiry_business_without_rowid SET value='trigger'",
+        "DELETE FROM expiry_business_without_rowid",
+    ] {
+        let (root, context, lease, child) = specialist_journal_fixture();
+        let db = db::open(&context.db_path).unwrap();
+        db.execute_batch("CREATE TABLE expiry_business_without_rowid(id TEXT PRIMARY KEY,value TEXT NOT NULL) WITHOUT ROWID; INSERT INTO expiry_business_without_rowid VALUES('original','keep');").unwrap();
+        let service = WorkerSupervisor::start(&context.db_path, &lease).unwrap();
+        db.execute_batch(&format!("CREATE TRIGGER expiry_async_escape AFTER UPDATE OF state ON agent_assignment_attempts WHEN NEW.state='expired' BEGIN {operation}; END;")).unwrap();
+        expire_worker_deadline(&db, &child.run_id);
+        let before = super::tests::application_table_snapshot(&db);
+        let allocator = client_delivery_rows(&db, "sqlite_sequence");
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
+        loop {
+            if service.check().is_err() {
+                break;
+            }
+            assert!(std::time::Instant::now() < deadline, "{operation}");
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+        assert_eq!(
+            super::tests::application_table_snapshot(&db),
+            before,
+            "{operation}"
+        );
+        assert_eq!(client_delivery_rows(&db, "sqlite_sequence"), allocator);
+        drop(service);
+        drop(db);
+        fs::remove_dir_all(root).unwrap();
+    }
+}
+
+#[test]
+fn assignment_attempt_supervisor_failed_private_withdrawal_keeps_original_worker_for_clean_restart()
+{
+    use crate::agent_runtime::multi_agent::{attempts, supervisor::WorkerSupervisor};
+    let (root, context, lease, child) = specialist_journal_fixture();
+    let db = db::open(&context.db_path).unwrap();
+    expire_worker_deadline(&db, &child.run_id);
+    let original = attempts::current(&db, &lease, &child.assignment_id).unwrap();
+    db.execute_batch("CREATE TRIGGER expiry_restart_escape AFTER UPDATE OF state ON agent_assignment_attempts WHEN NEW.state='expired' BEGIN INSERT INTO projects(name) VALUES('escape'); END;").unwrap();
+    let before = super::tests::application_table_snapshot(&db);
+    assert!(WorkerSupervisor::start(&context.db_path, &lease).is_err());
+    assert_eq!(super::tests::application_table_snapshot(&db), before);
+    assert_eq!(
+        attempts::current(&db, &lease, &child.assignment_id).unwrap(),
+        original
+    );
+    // Remove only this disposable fixture fault; preserve the original worker.
+    db.execute_batch("DROP TRIGGER expiry_restart_escape")
+        .unwrap();
+    let restart = WorkerSupervisor::start(&context.db_path, &lease).unwrap();
+    restart.check().unwrap();
+    let withdrawn = attempts::current(&db, &lease, &child.assignment_id).unwrap();
+    assert_eq!(withdrawn.state, "expired");
+    assert_eq!(withdrawn.id, original.id);
+    assert_eq!(withdrawn.worker_id, original.worker_id);
+    assert_eq!(withdrawn.fencing_token, original.fencing_token);
+    assert_expiry_preserved_resources(&db, &before);
+    drop(restart);
+    drop(db);
+    fs::remove_dir_all(root).unwrap();
+}

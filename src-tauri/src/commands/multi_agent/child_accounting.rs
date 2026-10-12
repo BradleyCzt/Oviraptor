@@ -32,7 +32,43 @@ fn settle_child_usage_for_status(
     usage: &AgentTokenUsage,
     run_status: &str,
 ) -> Result<(), String> {
-    crate::agent_runtime::multi_agent::lease::validate_coordinator_lease(transaction, lease)?;
+    settle_child_usage_for_status_on(transaction, lease, child, usage, run_status, false)
+}
+
+fn settle_original_web_child_usage(
+    transaction: &rusqlite::Transaction<'_>,
+    lease: &crate::agent_runtime::multi_agent::lease::CoordinatorLease,
+    child: &crate::agent_runtime::multi_agent::scheduler::ScheduledChild,
+) -> Result<(AgentTokenUsage, Vec<crate::agent_runtime::execution_owner::NativeInvocationOwner>), String> {
+    let (usage, idle) = crate::agent_runtime::multi_agent::budget::model::settle_original_web_receipt(
+        transaction, lease, &child.assignment_id, &child.run_id,
+    )?;
+    settle_child_usage_for_status_on(transaction, lease, child, &usage, "running", true)?;
+    crate::agent_runtime::multi_agent::budget::root::RootOwner::load_original(transaction, &lease.root_run_id)?
+        .require_original_coordinator(transaction, lease)?;
+    let mode = crate::agent_runtime::web_mode::root::read(transaction, &lease.root_run_id)?
+        .ok_or("web_model_settlement_original_mode_missing")?;
+    if mode.new_evidence_supervision().is_none() {
+        return Err("web_model_settlement_original_protocol_missing".into());
+    }
+    let verified = crate::agent_runtime::multi_agent::budget::web_lifetime::child_usage_original(
+        transaction, lease, &child.assignment_id, &child.run_id,
+    )?;
+    if verified != usage { return Err("web_model_settlement_usage_conflict".into()); }
+    Ok((usage, idle))
+}
+
+fn settle_child_usage_for_status_on(
+    transaction: &rusqlite::Transaction<'_>,
+    lease: &crate::agent_runtime::multi_agent::lease::CoordinatorLease,
+    child: &crate::agent_runtime::multi_agent::scheduler::ScheduledChild,
+    usage: &AgentTokenUsage,
+    run_status: &str,
+    original_web_receipt: bool,
+) -> Result<(), String> {
+    if !original_web_receipt {
+        crate::agent_runtime::multi_agent::lease::validate_coordinator_lease(transaction, lease)?;
+    }
     let (reserved_tokens, reserved_requests, budget_settled_at): (i64, i64, String) = transaction
         .query_row(
             "SELECT reserved_tokens,reserved_requests,budget_settled_at FROM agent_assignments \
@@ -65,12 +101,7 @@ fn settle_child_usage_for_status(
         {
             return Err("child_budget_settlement_replay_conflict".into());
         }
-        crate::agent_runtime::multi_agent::budget::model::settle(
-            transaction,
-            lease,
-            &child.assignment_id,
-            usage,
-        )?;
+        settle_child_model_usage_on(transaction, lease, child, usage, original_web_receipt)?;
         return Ok(());
     }
     let settled = transaction
@@ -97,12 +128,7 @@ fn settle_child_usage_for_status(
     }
     // Both ledgers remain in this transaction. A real summary writer failure
     // must remain visible; vector rejection rolls its tentative update back.
-    crate::agent_runtime::multi_agent::budget::model::settle(
-        transaction,
-        lease,
-        &child.assignment_id,
-        usage,
-    )
+    settle_child_model_usage_on(transaction, lease, child, usage, original_web_receipt)
     .map_err(|error| {
         if error == "budget_usage_exceeds_reservation" {
             "child_budget_settlement_exceeded_or_stale".into()
@@ -139,6 +165,53 @@ fn settle_child_usage_for_status(
         return Err("child_budget_settlement_replayed_or_stale".into());
     }
     Ok(())
+}
+
+fn settle_child_model_usage_on(
+    transaction: &rusqlite::Transaction<'_>,
+    lease: &crate::agent_runtime::multi_agent::lease::CoordinatorLease,
+    child: &crate::agent_runtime::multi_agent::scheduler::ScheduledChild,
+    usage: &AgentTokenUsage,
+    original_web_receipt: bool,
+) -> Result<(), String> {
+    if original_web_receipt {
+        let original = crate::agent_runtime::multi_agent::budget::web_lifetime::child_usage_original(
+            transaction, lease, &child.assignment_id, &child.run_id,
+        )?;
+        if original != *usage { return Err("web_model_settlement_usage_conflict".into()); }
+        Ok(())
+    } else {
+        if child.role == crate::agent_runtime::contract::AgentRole::SpaApiMapper
+            && crate::agent_runtime::web_mode::root::read(transaction, &lease.root_run_id)?
+                .and_then(|mode| mode.bootstrap_dispatch())
+                .is_some_and(|contract| contract["schemaVersion"] == 15)
+        {
+            let original = crate::agent_runtime::multi_agent::specialist::mapper_loop::verified_original_output_on(
+                transaction, lease, child,
+            )?;
+            if original.usage() != usage {
+                return Err("mapper_loop_settlement_original_usage_conflict".into());
+            }
+            for (dimension, amount) in crate::agent_runtime::multi_agent::budget::DIMENSIONS[..4]
+                .iter().zip([
+                    usage.input_tokens,
+                    usage.cached_input_tokens,
+                    usage.output_tokens,
+                    usage.model_requests,
+                ])
+            {
+                let balance = crate::agent_runtime::multi_agent::budget::balance(
+                    transaction, &lease.root_run_id, Some(&child.assignment_id), dimension,
+                )?;
+                if balance.consumed != amount || balance.indeterminate != 0 {
+                    return Err("mapper_loop_settlement_original_cost_conflict".into());
+                }
+            }
+            // Original rounds already paid the exact cumulative usage. Generic
+            // settlement may only release the remaining original reservation.
+        }
+        crate::agent_runtime::multi_agent::budget::model::settle(transaction, lease, &child.assignment_id, usage)
+    }
 }
 
 fn finish_coordinator_run(

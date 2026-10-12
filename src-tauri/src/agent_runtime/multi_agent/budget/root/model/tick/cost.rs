@@ -6,7 +6,10 @@ use serde_json::{json, Value};
 impl Tick {
     pub(super) fn cost_unknown(&self, db: &Connection, r: &ModelResponse) -> Result<bool, String> {
         if self.request_fact["version"] == 3 {
-            return self.call.original_actual_cost_known(db, r).map(|known| !known);
+            return self
+                .call
+                .original_actual_cost_known(db, r)
+                .map(|known| !known);
         }
         let limit:Option<i64>=db.query_row("SELECT hard_limit FROM agent_budget_limits WHERE root_run_id=?1 AND dimension='model_input_tokens'",[&self.call.owner.root],|r|r.get(0)).map_err(|e|e.to_string())?;
         let u = &r.usage;
@@ -64,7 +67,10 @@ impl Tick {
                 };
                 if held > reserve {
                     expected.insert(
-                        format!("{prefix}{dimension}:{}", if finite_actual { "actual" } else { "unlimited" }),
+                        format!(
+                            "{prefix}{dimension}:{}",
+                            if finite_actual { "actual" } else { "unlimited" }
+                        ),
                         (dimension.to_string(), "reserve".into(), held - reserve),
                     );
                 }
@@ -91,6 +97,7 @@ impl Tick {
         }
         let mut stmt=db.prepare("SELECT rowid,entry_id,root_run_id,assignment_id,lease_attempt_id,dimension,kind,amount,idempotency_key,source_id,created_at
             FROM agent_budget_entries WHERE (source_id=?1 OR idempotency_key LIKE ?2)
+              AND kind<>'reconcile'
               AND (?3=0 OR substr(idempotency_key,-8)=':reserve') ORDER BY entry_id").map_err(|e|e.to_string())?;
         let rows=stmt.query_map(params![self.call.id,format!("{prefix}%"),response.is_none()],|r|Ok(json!({
             "rowid":r.get::<_,i64>(0)?,"id":r.get::<_,String>(1)?,"root":r.get::<_,String>(2)?,"assignment":r.get::<_,String>(3)?,

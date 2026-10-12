@@ -29,6 +29,7 @@ fn native_budget_diagnostics_are_scoped_and_read_only() {
     assert_eq!(report["totalRoots"], 1);
     assert_eq!(report["roots"].as_array().unwrap().len(), 1);
     assert_eq!(report["roots"][0]["rootRunId"], "budget-current");
+    assert!(report["roots"][0]["singleOriginalHistory"].is_null(), "Source history is not a Single Web invoice");
     assert_eq!(report["roots"][0]["gaps"]["reservationTokenDelta"], 0);
     assert_eq!(report["roots"][0]["gaps"]["indeterminateInvocations"], 1);
     assert_eq!(

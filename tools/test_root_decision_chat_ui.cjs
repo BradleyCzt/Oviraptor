@@ -119,3 +119,25 @@ test('actual chat refuses malformed local tool names without advancing the origi
     assert.ok(m.b.statusError.value); assert.doesNotMatch(await renderDialog(m.b), /PRIVATE_CHAIN|PRIVATE_RESULT|已记录本地工具/);
   }
 });
+
+test('homogeneous real persisted reports and coordinator intent decisions render and deduplicate', async t=>{
+ const worker={...event('rpt-aaaa','worker_report',31,'已核对切片内观测材料'),fromRole:'homogeneous_worker',toRole:'coordinator',workerId:'wrk-aaaa',sliceId:'slc-bbbb',modelRequests:1,totalTokens:20};
+ const decision={...event('9','homogeneous_decision',32,'主管核验汇报并接受切片。'),fromRole:'coordinator',toRole:'operator',zeroIntent:{reason:'blocked_on_inflight_output',evidence_assignment_ids:['asg-cccc','asg-dddd'],note_zh:'等待在途汇报'}};
+ const m=await mount({getNativeScanStatus:async()=>({...status('A'),latestSequence:32,timelineBeforeSequence:31,timeline:[worker,decision]})});t.after(m.unmount);
+ const html=await renderDialog(m.b);for(const text of ['Worker 汇报','aaaa','bbbb','20 tokens','主管','等待'])assert.ok(html.includes(text),text);
+ await m.b.loadStatus(30);assert.equal(m.b.state.value.timeline.length,2);
+ m.api.getNativeScanStatus=async()=>({...status('A'),latestSequence:33,timelineBeforeSequence:33,isIncremental:true,timeline:[{...worker,id:'rpt-bad',sequence:33,totalTokens:-1}]});await m.b.loadStatus(32);assert.equal(m.b.statusSync.latestSequence.value,32);assert.ok(m.b.statusError.value);
+});
+
+test('homogeneous guidance ACK does not become a legacy action receipt or contradict its closure', async t => {
+ const id='aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee';
+ const original={...event(id,'user_directive',30,'优先核对现有证据'),fromRole:'operator',toRole:'coordinator',taskClosure:{disposition:'not_applied',requiresReconciliation:false,automaticRetry:false}};
+ const guide={...event('dir-aaaa','homogeneous_guidance',31,'Worker 已读取主管批准的引导约束。'),fromRole:'coordinator',toRole:'operator',status:'applied',sourceUserDirectiveId:id};
+ const m=await mount({getNativeScanStatus:async()=>({...status('A'),latestSequence:31,timelineBeforeSequence:30,timeline:[original,guide]})});t.after(m.unmount);
+ let html=await renderDialog(m.b);assert.match(html,/分析约束已被 Worker 读取/);assert.doesNotMatch(html,/指令未取得动作落实回执/);
+ assert.equal(m.b.state.value.timeline[0].taskClosure.disposition,'not_applied','the original action closure is unchanged');
+ m.b.state.value.timeline[1].status='relayed';html=await renderDialog(m.b);assert.match(html,/没有确认 Worker 已读取/);assert.doesNotMatch(html,/分析约束已被 Worker 读取/);
+ m.b.state.value.timeline[1].sourceUserDirectiveId='11111111-2222-3333-4444-555555555555';html=await renderDialog(m.b);assert.match(html,/指令未取得动作落实回执/);
+ m.api.getNativeScanStatus=async()=>({...status('A'),latestSequence:32,timelineBeforeSequence:32,isIncremental:true,timeline:[{...guide,sequence:32,status:'invented_ack'}]});
+ await m.b.loadStatus(31);assert.equal(m.b.statusSync.latestSequence.value,31);assert.ok(m.b.statusError.value);
+});

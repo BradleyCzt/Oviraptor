@@ -56,7 +56,20 @@ fn bootstrap_original_case(kind: &str, expected: &str) {
         ))],
     );
     let actor = bootstrap_original_actor(&h);
-    let parent = supervisor::WorkerSupervisor::start(&h.db_path, &actor).unwrap();
+    // This freshly born Root requires its actual private birth issuer. Keep
+    // the same original C; do not retrofit a protocol or unsigned supervisor.
+    let issuer = {
+        let db = db::open(&h.db_path).unwrap();
+        original_withdrawal_issuer_on(&db, &actor)
+            .unwrap()
+            .expect("fresh bootstrap Root must retain its original signed issuer")
+    };
+    let owner = crate::agent_runtime::multi_agent::parent_invocation_owner::ParentInvocationOwner::claim(
+        &h.db_path, &actor.scan_id, actor.attempt_number, &actor.root_run_id,
+    ).unwrap();
+    let parent = supervisor::WorkerSupervisor::start_owned_signed(
+        &h.db_path, &actor, owner, issuer,
+    ).unwrap();
     h.context.supervision = Some(parent.ticket());
     let decision = native_coordinator_tick(&h.context, &actor).unwrap();
     assert!(!decision.replayed);

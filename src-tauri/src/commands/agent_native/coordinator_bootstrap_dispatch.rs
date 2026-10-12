@@ -1,12 +1,31 @@
 // Mapper issuance consumes a paid initial Root choice, never advisory prose alone.
+#[cfg(test)]
 fn native_coordinator_prepare_mapper(
     context: &AgentRunContext,
     actor: &crate::agent_runtime::multi_agent::lease::CoordinatorLease,
     decision: &NativeCoordinatorTickReceipt,
     task: &JsonValue,
 ) -> Result<crate::agent_runtime::multi_agent::scheduler::ScheduledChild, String> {
+    native_coordinator_prepare_mapper_with_loop_bounds(context, actor, decision, task, None)
+}
+
+fn native_coordinator_prepare_mapper_with_loop_bounds(
+    context: &AgentRunContext,
+    actor: &crate::agent_runtime::multi_agent::lease::CoordinatorLease,
+    decision: &NativeCoordinatorTickReceipt,
+    task: &JsonValue,
+    loop_bounds: Option<&mapper_loop_request::VerifiedMapperLoopRequestBounds>,
+) -> Result<crate::agent_runtime::multi_agent::scheduler::ScheduledChild, String> {
     use crate::agent_runtime::{contract::AgentRole, multi_agent::scheduler, store};
     let db = db::open(&context.db_path)?;
+    if crate::agent_runtime::multi_agent::budget::root::model::tick::financial_purpose::binding_on(
+        &db,
+        &actor.root_run_id,
+    )?
+    .is_some()
+    {
+        return Err("financial_continuation_child_dispatch_denied".into());
+    }
     let mode = crate::agent_runtime::web_mode::root::read(&db, &actor.root_run_id)?
         .ok_or("web_mode_root_missing")?;
     if mode.bootstrap_dispatch().is_none() {
@@ -48,8 +67,19 @@ fn native_coordinator_prepare_mapper(
     {
         return Err("root_bootstrap_original_choice_conflict".into());
     }
+    if original["bootstrapDispatch"]["schemaVersion"] == 15 {
+        return native_coordinator_prepare_mapper_loop_allocated(
+            &db, context, actor, decision, task, &original,
+            loop_bounds.ok_or("mapper_loop_original_request_bounds_required")?,
+        );
+    }
+    if loop_bounds.is_some() {
+        return Err("mapper_loop_legacy_contract_upgrade_denied".into());
+    }
     if original["bootstrapDispatch"]["allocationRule"] == "current_balance_after_reviewer_floor" {
-        return native_coordinator_prepare_mapper_allocated(&db, context, actor, decision, task, &original);
+        return native_coordinator_prepare_mapper_allocated(
+            &db, context, actor, decision, task, &original,
+        );
     }
     let mut task = task.clone();
     let object = task.as_object_mut().ok_or("root_decision_task_invalid")?;

@@ -27,6 +27,8 @@ fn authorize(context: AuthContext<'_>) -> Authorization {
                     table_name,
                     "agent_root_budget_attempts"
                         | "agent_root_model_journal"
+                        | "agent_root_model_cache_provenance"
+                        | "agent_root_model_cache_capture"
                         | "agent_root_tick_receipts"
                         | "agent_budget_limits"
                         | "agent_budget_clock_origins"

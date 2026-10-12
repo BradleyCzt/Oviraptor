@@ -5,25 +5,30 @@ use crate::agent_runtime::{model::gateway::ModelResponse, store};
 use rusqlite::{params, Connection, OptionalExtension, Transaction};
 use serde_json::{json, Value};
 use std::time::Duration;
-
+pub(super) mod authorization_admission;
 mod cost;
 mod lifetime;
 pub(crate) use lifetime::{require_idle_original, verify_closed_original, INVOCATION_KIND};
-mod history;
-pub(crate) mod local;
+mod confirmation;
+mod continuation_audit;
 pub(crate) mod decision;
-mod publication;
-mod public_projection;
+pub(crate) mod financial_purpose;
+mod history;
 mod human_projection;
-mod unpublished_projection;
+pub(crate) mod local;
+mod original_semantic;
+pub(crate) use original_semantic::{OriginalSemanticFailure, OriginalSemanticToken};
+mod public_projection;
+mod publication;
+mod reconciliation;
 mod terminal_proof;
+mod unpublished_projection;
 use terminal_proof::TerminalCapture;
-mod timeline;
-mod storage;
-mod round;
 mod observation;
+mod round;
+mod storage;
+mod timeline;
 use decision::DecisionSummary;
-
 #[derive(Clone)]
 pub(crate) struct Tick {
     call: RootModelCall,
@@ -73,6 +78,7 @@ impl Tick {
         if round < 1 || estimate <= 0 || basis.is_null() || request.is_null() {
             return Err("root_tick_input_invalid".into());
         }
+        financial_purpose::verify_on(tx, root, round, basis, request)?;
         let saved: Option<(String, String, i64, String, String, String)> = tx
             .query_row(
                 "SELECT call_id,lease_attempt_id,round,request_hash,basis_hash,fact_json
@@ -104,8 +110,11 @@ impl Tick {
                 Some(v @ 1..=3) => v,
                 _ => return Err("root_tick_original_input_conflict".into()),
             }
-        } else { 3 };
-        let fact = json!({"version":version,"owner":owner.contract,"basis":basis,"request":request});
+        } else {
+            3
+        };
+        let fact =
+            json!({"version":version,"owner":owner.contract,"basis":basis,"request":request});
         let hash = store::stable_hash(&fact.to_string());
         if let Some((id, owner_id, saved_round, saved_hash, basis_hash, text)) = saved {
             let value: Value = serde_json::from_str(&text).map_err(|_| "root_tick_json_invalid")?;
@@ -175,7 +184,13 @@ impl Tick {
         if legacy {
             return Err("root_tick_history_not_recoverable".into());
         }
-        let call = RootModelCall::claim_on(tx, root, round, &hash, estimate)?;
+        let authorization = authorization_admission::verify_on(tx, root, round, &fact)?;
+        let call = match authorization.as_ref() {
+            Some(proof) => {
+                RootModelCall::claim_one_shot_on(tx, root, round, &hash, estimate, proof)?
+            }
+            None => RootModelCall::claim_on(tx, root, round, &hash, estimate)?,
+        };
         let mut tick = Self {
             call,
             basis: Self::basis_hash(basis),
@@ -191,7 +206,10 @@ impl Tick {
     // Copy only this already claimed original scope for financial unit tests.
     // This verifier creates no owner, dispatch, budget or executable permission.
     #[cfg(test)]
-    pub(crate) fn original_model_call_for_test(&self, db: &Connection) -> Result<RootModelCall,String> {
+    pub(crate) fn original_model_call_for_test(
+        &self,
+        db: &Connection,
+    ) -> Result<RootModelCall, String> {
         self.verify_request(db)?;
         Ok(self.call.clone())
     }
@@ -202,22 +220,37 @@ impl Tick {
         self.call.remaining
     }
     pub(crate) fn require_executable(&self, db: &Connection) -> Result<(), String> {
+        if db.is_autocommit() {
+            let snapshot = db.unchecked_transaction().map_err(|e| e.to_string())?;
+            return self.require_executable(&snapshot);
+        }
         self.verify_request(db)?;
         self.verify_local_parents(db)?;
         self.call.require_executable(db)
     }
     /// New frozen financial policy retains the physical invoice before any
     /// additional cost writer. Old Native transactions retain their old shape.
-    pub(crate) fn persist_received_invoice(&self, db: &Connection, response: &ModelResponse) -> Result<(), String> {
-        if self.request_fact["version"] != 3 { return Ok(()); }
-        if !db.is_autocommit() { return Err("root_tick_invoice_requires_own_transaction".into()); }
-        let tx = rusqlite::Transaction::new_unchecked(db, rusqlite::TransactionBehavior::Immediate).map_err(|e|e.to_string())?;
+    pub(crate) fn persist_received_invoice(
+        &self,
+        db: &Connection,
+        response: &ModelResponse,
+    ) -> Result<(), String> {
+        if self.request_fact["version"] != 3 {
+            return Ok(());
+        }
+        if !db.is_autocommit() {
+            return Err("root_tick_invoice_requires_own_transaction".into());
+        }
+        let tx = rusqlite::Transaction::new_unchecked(db, rusqlite::TransactionBehavior::Immediate)
+            .map_err(|e| e.to_string())?;
         super::super::transaction::protect(&tx, || {
             self.verify_request(&tx)?;
-            self.call.insert(&tx, "received", &RootModelCall::received_fact(response))?;
+            self.call
+                .insert(&tx, "received", &RootModelCall::received_fact(response))?;
+            self.call.record_cache_provenance(&tx, response)?;
             self.verify_request(&tx)
         })?;
-        tx.commit().map_err(|e|e.to_string())
+        tx.commit().map_err(|e| e.to_string())
     }
     pub(crate) fn received(
         &self,
@@ -226,13 +259,62 @@ impl Tick {
     ) -> Result<Received, String> {
         // Parse and sanitize first. Invalid/private/raw response text is never
         // persisted; its original fee/hash still must be retained afterwards.
-        let local = self.call.owner.contract["root"].get("localDeliberation").is_some();
-        let semantic = if local {
+        let local = self.call.owner.contract["root"]
+            .get("localDeliberation")
+            .is_some();
+        let authorization_output = self.request_fact["basis"]["phase"] == "authorization-output";
+        let external_surface_output =
+            self.request_fact["basis"]["phase"] == "external-surface-output";
+        let business_logic_output = self.request_fact["basis"]["phase"] == "business-logic-output";
+        let business_logic_input = self.request_fact["basis"]["phase"] == "business-logic-input";
+        // Phase 1 审核 P0-1：同质主管轮次。真实决策由 `homogeneous::apply` 在同一
+        // 付费轮的返回路径落库；账本这里只登记投影摘要，camelCase 结构不变。
+        let homogeneous_decision = self.request_fact["basis"]["phase"] == "homogeneous-decision";
+        let semantic = if homogeneous_decision {
+            crate::agent_runtime::multi_agent::homogeneous::journal::ledger_response(response)
+                .map(|summary| (summary, None))
+        } else if authorization_output && !response.tool_calls.is_empty() {
+            // Reject before the pure local executor. Keep this a semantic
+            // failure: the original received invoice is still settled below.
+            Err("root_authorization_output_local_tool_denied".into())
+        } else if external_surface_output && !response.tool_calls.is_empty() {
+            // Semantic refusal still preserves the original received invoice.
+            Err("root_external_surface_output_local_tool_denied".into())
+        } else if business_logic_output && !response.tool_calls.is_empty() {
+            Err("root_business_logic_output_local_tool_denied".into())
+        } else if business_logic_input && !response.tool_calls.is_empty() {
+            Err("root_business_logic_dispatch_local_tool_denied".into())
+        } else if local {
             local::LocalStep::parse(response, &self.request_fact["basis"]).and_then(|step| {
-                let summary = match &step { Some(step)=>step.summary()?, None=>DecisionSummary::parse_response(response)? };
+                let summary = match &step {
+                    Some(step) => step.summary()?,
+                    None => DecisionSummary::parse_response(response)?,
+                };
                 Ok((summary, step))
             })
-        } else { DecisionSummary::parse_response(response).map(|s|(s,None)) };
+        } else {
+            DecisionSummary::parse_response(response).map(|s| (s, None))
+        };
+        self.received_semantic_on(tx, response, semantic)
+    }
+    pub(crate) fn received_with_original_semantic(
+        &self,
+        tx: &Transaction<'_>,
+        response: &ModelResponse,
+        token: OriginalSemanticToken,
+    ) -> Result<Received, String> {
+        // Invalid semantics still retain the original bill; they cannot produce
+        // a decision or publication. The request and financial proof below are
+        // verified in the same protected transaction as the existing API.
+        let semantic = token.into_semantic(self, response);
+        self.received_semantic_on(tx, response, semantic)
+    }
+    fn received_semantic_on(
+        &self,
+        tx: &Transaction<'_>,
+        response: &ModelResponse,
+        semantic: Result<(DecisionSummary, Option<local::LocalStep>), String>,
+    ) -> Result<Received, String> {
         super::super::transaction::protect(tx, || {
             self.verify_request(tx)?;
             let unknown = self.call.terminal_on(tx, "received", Some(response), "")?;
@@ -274,7 +356,11 @@ impl Tick {
                 Err(code) => Err(code),
             };
             self.verify_request(tx)?;
-            Ok(Received { decision, unknown, terminal })
+            Ok(Received {
+                decision,
+                unknown,
+                terminal,
+            })
         })
     }
     pub(crate) fn stopped(
@@ -292,6 +378,23 @@ impl Tick {
         })
     }
     fn verify_request(&self, db: &Connection) -> Result<(), String> {
+        if db.is_autocommit() {
+            let snapshot = db.unchecked_transaction().map_err(|e| e.to_string())?;
+            return self.verify_request(&snapshot);
+        }
+        financial_purpose::verify_on(
+            db,
+            &self.call.owner.root,
+            self.call.round,
+            &self.request_fact["basis"],
+            &self.request_fact["request"],
+        )?;
+        authorization_admission::verify_on(
+            db,
+            &self.call.owner.root,
+            self.call.round,
+            &self.request_fact,
+        )?;
         self.call.owner.verify(db)?;
         self.call.verify(db, "dispatch", &self.call.dispatch())?;
         if self.read(db, "request")? != Some(self.request_receipt())
@@ -305,27 +408,48 @@ impl Tick {
         self.verify_request(db)?;
         saved.summary.validate()?;
         if let Some(step) = &saved.local_step {
-            if self.call.owner.contract["root"]["localDeliberation"].is_null() { return Err("root_local_history_not_authorized".into()); }
+            if self.call.owner.contract["root"]["localDeliberation"].is_null() {
+                return Err("root_local_history_not_authorized".into());
+            }
             step.verify(&self.request_fact["basis"])?;
-            if step.summary()? != saved.summary { return Err("root_local_summary_changed".into()); }
+            if step.summary()? != saved.summary {
+                return Err("root_local_summary_changed".into());
+            }
         }
-        if saved.unknown != self.cost_unknown(db, &saved.financial_response()?)? {
+        let response = saved.financial_response(db, &self.call)?;
+        if saved.unknown != self.cost_unknown(db, &response)? {
             return Err("root_tick_cost_status_changed".into());
         }
         if self.read(db, "decision")? != Some(saved.fact())
             || self.request_row(db)? != saved.request_proof
-            || self.cost_rows(db, Some(&saved.financial_response()?))? != saved.cost_proof
+            || self.cost_rows(db, Some(&response))? != saved.cost_proof
         {
             return Err("root_tick_decision_changed".into());
         }
         self.call.verify(db, "received", &saved.invoice)
+    }
+    #[cfg(test)]
+    pub(crate) fn read_original_cache_for_test(
+        db: &Connection,
+        root: &str,
+        call: &str,
+    ) -> Result<bool, String> {
+        let tick = Self::original_request_for_projection(db, root, call)?;
+        let raw: String = db.query_row("SELECT receipt_json FROM main.agent_root_model_journal WHERE call_id=?1 AND phase='received'",
+            [call], |r|r.get(0)).map_err(|e|e.to_string())?;
+        let invoice =
+            serde_json::from_str(&raw).map_err(|_| "root_cache_original_invoice_invalid")?;
+        tick.call.read_cache_provenance(db, &invoice)
     }
     fn load_decision(&self, db: &Connection) -> Result<Option<SavedDecision>, String> {
         self.read(db, "decision")?
             .map(|value| {
                 let result = SavedDecision {
                     summary: DecisionSummary::from_json(&value["summary"])?,
-                    local_step: value.get("localStep").map(|v|local::LocalStep::from_json(v,&self.request_fact["basis"])).transpose()?,
+                    local_step: value
+                        .get("localStep")
+                        .map(|v| local::LocalStep::from_json(v, &self.request_fact["basis"]))
+                        .transpose()?,
                     invoice: value["invoice"].clone(),
                     cost_proof: value["costProof"].clone(),
                     request_proof: value["requestProof"].clone(),

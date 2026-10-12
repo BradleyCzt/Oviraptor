@@ -53,6 +53,10 @@ pub struct ModelResponse {
     /// Provider supplied a complete, consistent breakdown. Otherwise usage is
     /// only an estimate and cannot close an append-only billing obligation.
     pub usage_reported: bool,
+    /// The provider explicitly reported a consistent cache subset. An absent
+    /// cache field retains legacy token compatibility but cannot prove zero
+    /// cache usage for a rate card with distinct input prices.
+    pub cached_usage_reported: bool,
     pub finish_reason: String,
 }
 

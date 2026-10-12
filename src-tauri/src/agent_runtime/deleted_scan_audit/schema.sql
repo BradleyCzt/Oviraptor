@@ -30,3 +30,23 @@ CREATE TRIGGER IF NOT EXISTS deleted_anchor_no_delete BEFORE DELETE ON native_de
 CREATE TRIGGER IF NOT EXISTS deleted_anchor_no_replace BEFORE INSERT ON native_deleted_scan_anchors
  WHEN EXISTS(SELECT 1 FROM native_deleted_scan_anchors WHERE root_run_id=NEW.root_run_id)
  BEGIN SELECT RAISE(ABORT,'deleted_anchor_immutable'); END;
+
+-- Additive v2 identity-aware archives. Original v1 rows and hashes are untouched.
+CREATE TABLE IF NOT EXISTS native_deleted_scan_audits_v2 (
+ scan_id TEXT PRIMARY KEY,
+ version INTEGER NOT NULL CHECK(version=2),
+ audit_json TEXT NOT NULL CHECK(json_valid(audit_json)),
+ audit_hash TEXT NOT NULL CHECK(length(audit_hash)=64),
+ deleted_at TEXT NOT NULL
+);
+CREATE TRIGGER IF NOT EXISTS deleted_audit_v2_no_update BEFORE UPDATE ON native_deleted_scan_audits_v2
+ BEGIN SELECT RAISE(ABORT,'deleted_audit_immutable'); END;
+CREATE TRIGGER IF NOT EXISTS deleted_audit_v2_no_delete BEFORE DELETE ON native_deleted_scan_audits_v2
+ BEGIN SELECT RAISE(ABORT,'deleted_audit_immutable'); END;
+CREATE TRIGGER IF NOT EXISTS deleted_audit_v2_no_replace BEFORE INSERT ON native_deleted_scan_audits_v2
+ WHEN EXISTS(SELECT 1 FROM native_deleted_scan_audits_v2 WHERE scan_id=NEW.scan_id)
+   OR EXISTS(SELECT 1 FROM native_deleted_scan_audits WHERE scan_id=NEW.scan_id)
+ BEGIN SELECT RAISE(ABORT,'deleted_audit_immutable'); END;
+CREATE TRIGGER IF NOT EXISTS deleted_audit_v1_v2_conflict BEFORE INSERT ON native_deleted_scan_audits
+ WHEN EXISTS(SELECT 1 FROM native_deleted_scan_audits_v2 WHERE scan_id=NEW.scan_id)
+ BEGIN SELECT RAISE(ABORT,'deleted_audit_immutable'); END;

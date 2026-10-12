@@ -15,9 +15,18 @@ pub(crate) fn acceptance_root() -> Result<Option<PathBuf>, String> {
 
 /// Reject an invalid opt-in profile before AppKit/Tauri starts. A setup error
 /// after the native event loop begins is treated as a crash by macOS.
-pub(crate) fn preflight() -> Result<(), String> {
-    if let Some(root) = acceptance_root()? {
+pub(crate) fn preflight(identifier: &str) -> Result<(), String> {
+    let root = acceptance_root()?;
+    require_bundle_root(identifier, root.as_deref())?;
+    if let Some(root) = root {
         isolated_directories(&root)?;
+    }
+    Ok(())
+}
+
+fn require_bundle_root(identifier: &str, root: Option<&Path>) -> Result<(), String> {
+    if identifier == "com.oviraptor.nest.acceptance" && root.is_none() {
+        return Err("acceptance_bundle_requires_isolated_root".into());
     }
     Ok(())
 }

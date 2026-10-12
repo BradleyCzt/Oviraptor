@@ -7,6 +7,34 @@ pub(super) fn expire_worker_deadline(db: &rusqlite::Connection, run: &str) {
 fn assert_expiry_preserved_resources(db: &rusqlite::Connection, before: &[(String, Vec<String>)]) {
     let after = super::tests::application_table_snapshot(db);
     for (table, rows) in before {
+        if table == "agent_worker_expiry_receipts" {
+            let current = &after.iter().find(|(name, _)| name == table).unwrap().1;
+            assert!(
+                rows.iter().all(|row| current.contains(row)),
+                "original withdrawal receipts changed"
+            );
+            let tx = if db.is_autocommit() {
+                Some(db.unchecked_transaction().unwrap())
+            } else {
+                None
+            };
+            let snapshot = tx.as_deref().unwrap_or(db);
+            let mut q = snapshot
+                .prepare("SELECT worker_attempt_id FROM agent_worker_expiry_receipts")
+                .unwrap();
+            let workers = q
+                .query_map([], |r| r.get::<_, String>(0))
+                .unwrap()
+                .collect::<rusqlite::Result<Vec<_>>>()
+                .unwrap();
+            for worker in workers {
+                crate::agent_runtime::multi_agent::attempts::withdrawal_receipt::verify_original(
+                    snapshot, &worker,
+                )
+                .unwrap();
+            }
+            continue;
+        }
         if ![
             "agent_assignment_attempts",
             "agent_assignments",

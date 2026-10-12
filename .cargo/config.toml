@@ -1,0 +1,13 @@
+# Bundled SQLite build options (libsqlite3-sys reads LIBSQLITE3_FLAGS).
+#
+# SQLITE_DEFAULT_MEMSTATUS=1 (SQLite's default) makes every sqlite3_malloc and
+# sqlite3_free take one process-global mutex to maintain memory statistics.
+# Every db::open re-parses the large Oviraptor schema, so concurrent
+# connections (parallel scans/workers in the app, and the parallel unit-test
+# harness) serialized on that single mutex: 8 concurrent openers spent ~57 s of
+# kernel time in mutex waits and tight wall-time/lease budgets expired.
+# Disabling memory statistics is SQLite's recommended setting; Oviraptor never
+# reads sqlite3_memory_used/sqlite3_status or sets a soft heap limit.
+# Guarded by db::tests::bundled_sqlite_has_no_process_global_memstatus_mutex.
+[env]
+LIBSQLITE3_FLAGS = "SQLITE_DEFAULT_MEMSTATUS=0"

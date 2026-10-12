@@ -216,12 +216,25 @@ async fn drive(
         }
         Ok(TransportReply { status, body })
     };
-    tokio::select! {
-        outcome = fetch => outcome,
-        _ = wait_for_cancel(&cancel) => Err(cancelled(CancelInitiator::Local)),
-    }
+    settle(fetch, wait_for_cancel(&cancel)).await
     // Falling out of `select!` is what drops `fetch`, its response body and the
     // connection underneath them.
+}
+
+/// Race the request against cancellation. `biased` decides only a tie: when
+/// the reply has already been read to the end by the time a cancel probe also
+/// fires in the same poll, the known (billed) reply wins instead of a coin
+/// flip turning it into an unknown outcome. A reply still on the wire keeps
+/// losing to cancellation, and callers re-check authority after receipt.
+pub(crate) async fn settle(
+    fetch: impl std::future::Future<Output = Result<TransportReply, TransportError>>,
+    cancel: impl std::future::Future<Output = ()>,
+) -> Result<TransportReply, TransportError> {
+    tokio::select! {
+        biased;
+        outcome = fetch => outcome,
+        _ = cancel => Err(cancelled(CancelInitiator::Local)),
+    }
 }
 
 fn cancelled(initiator: CancelInitiator) -> TransportError {

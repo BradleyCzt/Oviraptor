@@ -17,10 +17,10 @@ fn create_sentinel_asset_scan_in(
 ) -> Result<SentinelScan, String> {
     // Project membership, fuse filtering, policy and the complete target set
     // belong to one draft snapshot. A failed late insert must leave no draft.
-    let transaction = rusqlite::Transaction::new_unchecked(
-        connection, rusqlite::TransactionBehavior::Immediate,
-    ).map_err(|error| format!("无法锁定资产任务草稿：{error}"))?;
-    let window=crate::agent_runtime::web_mode::draft::DraftCreationWindow::begin(&transaction)?;
+    let transaction =
+        rusqlite::Transaction::new_unchecked(connection, rusqlite::TransactionBehavior::Immediate)
+            .map_err(|error| format!("无法锁定资产任务草稿：{error}"))?;
+    let window = crate::agent_runtime::web_mode::draft::DraftCreationWindow::begin(&transaction)?;
     let connection = &transaction;
     let project_name: String = connection
         .query_row(
@@ -57,7 +57,9 @@ fn create_sentinel_asset_scan_in(
     let duplicate_count = original_count - targets.len();
     let mut checkpoint = format!("待确认：已加入 {} 个 URL", targets.len());
     if excluded_count > 0 {
-        checkpoint.push_str(&format!("；{excluded_count} 个所选资产因熔断、已移出或不属于当前工作空间而排除"));
+        checkpoint.push_str(&format!(
+            "；{excluded_count} 个所选资产因熔断、已移出或不属于当前工作空间而排除"
+        ));
     }
     if duplicate_count > 0 {
         checkpoint.push_str(&format!("；合并 {duplicate_count} 个重复 URL"));
@@ -74,12 +76,16 @@ fn create_sentinel_asset_scan_in(
         Some("breadth"),
     )?;
     let inserted = connection.execute("INSERT INTO sentinel_scans(id,project_id,project_name,status,current_checkpoint,task_path,scan_type,task_name) VALUES(?1,?2,?3,'draft',?4,'','web',?3)", params![scan_id,project_id,project_name,checkpoint]).map_err(|e| e.to_string())?;
-    if inserted != 1 { return Err("资产任务草稿写入未完成".into()); }
+    if inserted != 1 {
+        return Err("资产任务草稿写入未完成".into());
+    }
     let inserted = connection.execute(
         "INSERT INTO sentinel_scan_contexts(scan_id,environment,policy_json) VALUES(?1,'internal',?2)",
         params![scan_id, policy.to_string()],
     ).map_err(|error| error.to_string())?;
-    if inserted != 1 { return Err("资产任务策略写入未完成".into()); }
+    if inserted != 1 {
+        return Err("资产任务策略写入未完成".into());
+    }
     for (asset_id, company, url) in &targets {
         let inserted = connection
             .execute(
@@ -87,7 +93,9 @@ fn create_sentinel_asset_scan_in(
                 params![project_id, scan_id, asset_id, company, url],
             )
             .map_err(|e| e.to_string())?;
-        if inserted != 1 { return Err("资产任务目标写入未完成".into()); }
+        if inserted != 1 {
+            return Err("资产任务目标写入未完成".into());
+        }
     }
     // Check persisted values as well as affected rows: an AFTER trigger can
     // remove or change a row while the INSERT still reports success.
@@ -95,18 +103,34 @@ fn create_sentinel_asset_scan_in(
         "SELECT EXISTS(SELECT 1 FROM sentinel_scans s JOIN sentinel_scan_contexts c ON c.scan_id=s.id WHERE s.id=?1 AND s.project_id=?2 AND s.project_name=?3 AND s.task_name=?3 AND s.status='draft' AND s.current_checkpoint=?4 AND s.task_path='' AND s.scan_type='web' AND s.attempt_count=0 AND c.environment='internal' AND c.policy_json=?5)",
         params![scan_id, project_id, project_name, checkpoint, policy.to_string()], |row| row.get(0),
     ).map_err(|error| error.to_string())?;
-    let count: i64 = connection.query_row("SELECT COUNT(*) FROM sentinel_targets WHERE scan_id=?1", [&scan_id], |row| row.get(0)).map_err(|error| error.to_string())?;
-    if !valid || count != targets.len() as i64 { return Err("资产任务草稿持久化校验失败".into()); }
+    let count: i64 = connection
+        .query_row(
+            "SELECT COUNT(*) FROM sentinel_targets WHERE scan_id=?1",
+            [&scan_id],
+            |row| row.get(0),
+        )
+        .map_err(|error| error.to_string())?;
+    if !valid || count != targets.len() as i64 {
+        return Err("资产任务草稿持久化校验失败".into());
+    }
     for (asset_id, company, url) in &targets {
         let valid: bool = connection.query_row(
             "SELECT EXISTS(SELECT 1 FROM sentinel_targets WHERE scan_id=?1 AND project_id=?2 AND asset_id=?3 AND company=?4 AND url=?5 AND status='queued' AND last_attempt_number=0)",
             params![scan_id, project_id, asset_id, company, url], |row| row.get(0),
         ).map_err(|error| error.to_string())?;
-        if !valid { return Err("资产任务目标持久化校验失败".into()); }
+        if !valid {
+            return Err("资产任务目标持久化校验失败".into());
+        }
     }
     let result = sentinel_scan_by_id(connection, &scan_id)?;
-    crate::agent_runtime::web_mode::draft::register_new(window,&scan_id,crate::agent_runtime::web_mode::WebMode::Multi)?;
-    transaction.commit().map_err(|error| format!("资产任务草稿提交失败：{error}"))?;
+    crate::agent_runtime::web_mode::draft::register_new(
+        window,
+        &scan_id,
+        crate::agent_runtime::web_mode::WebMode::Multi,
+    )?;
+    transaction
+        .commit()
+        .map_err(|error| format!("资产任务草稿提交失败：{error}"))?;
     Ok(result)
 }
 
@@ -129,10 +153,170 @@ pub fn create_sentinel_url_scan(
 ) -> Result<SentinelScan, String> {
     let connection = db::open(&state.db_path)?;
     create_sentinel_url_scan_with_mode_in(
-        &connection, project_id, task_name, urls, scan_mode, max_budget_usd,
-        auth_session_id, auth_session_ids, auth_session_scope_id, skill_ids,
-        instruction, closure, orchestration_mode,
+        &connection,
+        project_id,
+        task_name,
+        urls,
+        scan_mode,
+        max_budget_usd,
+        auth_session_id,
+        auth_session_ids,
+        auth_session_scope_id,
+        skill_ids,
+        instruction,
+        closure,
+        orchestration_mode,
     )
+}
+
+/// Task-external approved inventory selection for a genuinely new Multi draft.
+/// Empty selection preserves the old creation path without loading trust files.
+#[tauri::command]
+#[allow(clippy::too_many_arguments)]
+pub fn create_sentinel_url_scan_with_tool_selection(
+    app: tauri::AppHandle,
+    state: State<AppState>,
+    project_id: i64,
+    task_name: String,
+    urls: Vec<String>,
+    scan_mode: Option<String>,
+    max_budget_usd: Option<f64>,
+    auth_session_id: Option<String>,
+    auth_session_ids: Option<Vec<String>>,
+    auth_session_scope_id: Option<String>,
+    skill_ids: Option<Vec<i64>>,
+    instruction: Option<String>,
+    closure: Option<String>,
+    orchestration_mode: Option<String>,
+    approved_ids: Option<Vec<String>>,
+) -> Result<SentinelScan, String> {
+    let ids = approved_ids.unwrap_or_default();
+    let connection = db::open(&state.db_path)?;
+    if ids.is_empty() {
+        return create_sentinel_url_scan_with_mode_in(
+            &connection,
+            project_id,
+            task_name,
+            urls,
+            scan_mode,
+            max_budget_usd,
+            auth_session_id,
+            auth_session_ids,
+            auth_session_scope_id,
+            skill_ids,
+            instruction,
+            closure,
+            orchestration_mode,
+        );
+    }
+    let configuration = crate::tool_supply::ToolAdministratorConfiguration::from_app(&app)?;
+    create_sentinel_url_scan_with_tool_selection_in(
+        &connection,
+        &configuration,
+        project_id,
+        task_name,
+        urls,
+        scan_mode,
+        max_budget_usd,
+        auth_session_id,
+        auth_session_ids,
+        auth_session_scope_id,
+        skill_ids,
+        instruction,
+        closure,
+        orchestration_mode,
+        ids,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+fn create_sentinel_url_scan_with_tool_selection_in(
+    connection: &rusqlite::Connection,
+    configuration: &crate::tool_supply::ToolAdministratorConfiguration,
+    project_id: i64,
+    task_name: String,
+    urls: Vec<String>,
+    scan_mode: Option<String>,
+    max_budget_usd: Option<f64>,
+    auth_session_id: Option<String>,
+    auth_session_ids: Option<Vec<String>>,
+    auth_session_scope_id: Option<String>,
+    skill_ids: Option<Vec<i64>>,
+    instruction: Option<String>,
+    closure: Option<String>,
+    orchestration_mode: Option<String>,
+    approved_ids: Vec<String>,
+) -> Result<SentinelScan, String> {
+    create_sentinel_url_scan_with_tool_selection_execution_in(connection,configuration,project_id,task_name,urls,scan_mode,max_budget_usd,auth_session_id,auth_session_ids,auth_session_scope_id,skill_ids,instruction,closure,orchestration_mode,approved_ids,false)
+}
+
+#[allow(clippy::too_many_arguments)]
+fn create_sentinel_url_scan_with_tool_selection_execution_in(
+    connection:&rusqlite::Connection,configuration:&crate::tool_supply::ToolAdministratorConfiguration,
+    project_id:i64,task_name:String,urls:Vec<String>,scan_mode:Option<String>,max_budget_usd:Option<f64>,
+    auth_session_id:Option<String>,auth_session_ids:Option<Vec<String>>,auth_session_scope_id:Option<String>,
+    skill_ids:Option<Vec<i64>>,instruction:Option<String>,closure:Option<String>,orchestration_mode:Option<String>,
+    mut approved_ids:Vec<String>,execution:bool,
+) -> Result<SentinelScan, String> {
+    if approved_ids.is_empty()
+        || approved_ids.len() > 16
+        || approved_ids
+            .iter()
+            .any(|id| !Uuid::parse_str(id).is_ok_and(|uuid| uuid.to_string() == *id))
+    {
+        return Err("tool_selection_approved_ids_invalid".into());
+    }
+    approved_ids.sort();
+    if approved_ids.windows(2).any(|pair| pair[0] == pair[1]) {
+        return Err("tool_selection_approved_ids_invalid".into());
+    }
+    let mode = crate::agent_runtime::web_mode::WebMode::new_input(orchestration_mode.as_deref())?;
+    if orchestration_mode.is_none() || mode != crate::agent_runtime::web_mode::WebMode::Multi {
+        return Err("tool_selection_explicit_multi_required".into());
+    }
+    let transaction =
+        rusqlite::Transaction::new_unchecked(connection, rusqlite::TransactionBehavior::Immediate)
+            .map_err(|error| format!("无法锁定 Web 工具选择草稿：{error}"))?;
+    let window = crate::agent_runtime::web_mode::draft::DraftCreationWindow::begin(&transaction)?;
+    let scan = create_sentinel_url_draft_rows(
+        &transaction,
+        project_id,
+        task_name,
+        urls,
+        scan_mode,
+        max_budget_usd,
+        auth_session_id,
+        auth_session_ids,
+        auth_session_scope_id,
+        skill_ids,
+        instruction,
+        closure,
+        None,
+    )?;
+    if execution{freeze_homogeneous_metadata_in(&transaction,&scan.id,true)?;}
+    let fresh = crate::agent_runtime::web_mode::draft::register_new(window, &scan.id, mode)?;
+    let targets = {
+        let mut statement = transaction
+            .prepare("SELECT url FROM main.sentinel_targets WHERE scan_id=?1 ORDER BY url")
+            .map_err(|e| e.to_string())?;
+        let rows = statement
+            .query_map([&scan.id], |r| r.get::<_, String>(0))
+            .map_err(|e| e.to_string())?;
+        rows.collect::<rusqlite::Result<Vec<_>>>()
+            .map_err(|e| e.to_string())?
+    };
+    let request =
+        crate::tool_supply::selection::DeclaredSelectionRequest::parse(&serde_json::json!({
+            "schemaVersion":1,"requestId":Uuid::new_v4().to_string(),
+            "scope":{"scanId":scan.id,"attemptNumber":1,"targetUrls":targets},
+            "selection":{"schemaVersion":1,"approvalIds":approved_ids},
+        }))?;
+    crate::tool_supply::selection::stage_for_new_draft(&fresh, configuration, Some(&request))?
+        .ok_or("tool_selection_stage_insert_unconfirmed")?;
+    transaction
+        .commit()
+        .map_err(|error| format!("无法提交 Web 工具选择草稿：{error}"))?;
+    Ok(scan)
 }
 
 #[cfg(test)]
@@ -151,31 +335,121 @@ fn create_sentinel_url_scan_in(
     instruction: Option<String>,
     closure: Option<String>,
 ) -> Result<SentinelScan, String> {
-    create_sentinel_url_scan_with_mode_in(connection,project_id,task_name,urls,scan_mode,max_budget_usd,
-        auth_session_id,auth_session_ids,auth_session_scope_id,skill_ids,instruction,closure,None)
+    create_sentinel_url_scan_with_mode_in(
+        connection,
+        project_id,
+        task_name,
+        urls,
+        scan_mode,
+        max_budget_usd,
+        auth_session_id,
+        auth_session_ids,
+        auth_session_scope_id,
+        skill_ids,
+        instruction,
+        closure,
+        None,
+    )
 }
 
 #[allow(clippy::too_many_arguments)]
 fn create_sentinel_url_scan_with_mode_in(
-    connection:&rusqlite::Connection,project_id:i64,task_name:String,urls:Vec<String>,scan_mode:Option<String>,
-    max_budget_usd:Option<f64>,auth_session_id:Option<String>,auth_session_ids:Option<Vec<String>>,
-    auth_session_scope_id:Option<String>,skill_ids:Option<Vec<i64>>,instruction:Option<String>,closure:Option<String>,
-    orchestration_mode:Option<String>,
-) -> Result<SentinelScan,String> {
-    let mode=crate::agent_runtime::web_mode::WebMode::new_input(orchestration_mode.as_deref())?;
+    connection: &rusqlite::Connection,
+    project_id: i64,
+    task_name: String,
+    urls: Vec<String>,
+    scan_mode: Option<String>,
+    max_budget_usd: Option<f64>,
+    auth_session_id: Option<String>,
+    auth_session_ids: Option<Vec<String>>,
+    auth_session_scope_id: Option<String>,
+    skill_ids: Option<Vec<i64>>,
+    instruction: Option<String>,
+    closure: Option<String>,
+    orchestration_mode: Option<String>,
+) -> Result<SentinelScan, String> {
+    create_sentinel_url_scan_scheduling_in(connection, project_id, task_name, urls, scan_mode,
+        max_budget_usd, auth_session_id, auth_session_ids, auth_session_scope_id, skill_ids,
+        instruction, closure, orchestration_mode, false)
+}
+
+/// An explicit product opt-in, frozen before the draft is signed. Legacy callers
+/// keep their original mode and never acquire homogeneous execution implicitly.
+#[tauri::command]
+#[allow(clippy::too_many_arguments)]
+pub fn create_sentinel_homogeneous_url_scan(
+    app:AppHandle,
+    state: State<AppState>, project_id: i64, task_name: String, urls: Vec<String>,
+    scan_mode: Option<String>, max_budget_usd: Option<f64>, auth_session_id: Option<String>,
+    auth_session_ids: Option<Vec<String>>, auth_session_scope_id: Option<String>,
+    skill_ids: Option<Vec<i64>>, instruction: Option<String>, closure: Option<String>,
+    execution:Option<bool>,approved_ids:Option<Vec<String>>,
+) -> Result<SentinelScan, String> {
+    let connection = db::open(&state.db_path)?;
+    let ids=approved_ids.unwrap_or_default();
+    if execution.unwrap_or(false){
+        let configuration=crate::tool_supply::ToolAdministratorConfiguration::from_app(&app)?;
+        return create_sentinel_url_scan_with_tool_selection_execution_in(&connection,&configuration,project_id,task_name,urls,scan_mode,max_budget_usd,auth_session_id,auth_session_ids,auth_session_scope_id,skill_ids,instruction,closure,Some("multi".into()),ids,true);
+    }
+    if !ids.is_empty(){return Err("homogeneous_readonly_draft_cannot_select_execution_tools".into());}
+    create_sentinel_url_scan_scheduling_in(&connection, project_id, task_name, urls, scan_mode,
+        max_budget_usd, auth_session_id, auth_session_ids, auth_session_scope_id, skill_ids,
+        instruction, closure, Some("multi".into()), true)
+}
+
+#[allow(clippy::too_many_arguments)]
+fn create_sentinel_url_scan_scheduling_in(
+    connection: &rusqlite::Connection, project_id: i64, task_name: String, urls: Vec<String>,
+    scan_mode: Option<String>, max_budget_usd: Option<f64>, auth_session_id: Option<String>,
+    auth_session_ids: Option<Vec<String>>, auth_session_scope_id: Option<String>,
+    skill_ids: Option<Vec<i64>>, instruction: Option<String>, closure: Option<String>,
+    orchestration_mode: Option<String>, homogeneous: bool,
+) -> Result<SentinelScan, String> {
+    let mode = crate::agent_runtime::web_mode::WebMode::new_input(orchestration_mode.as_deref())?;
     // Identity ownership, policy and all targets are one draft. In particular,
     // a late target insert failure must not consume a captured login identity.
-    let transaction = rusqlite::Transaction::new_unchecked(
-        connection, rusqlite::TransactionBehavior::Immediate,
-    ).map_err(|error| format!("无法锁定 Web 任务草稿：{error}"))?;
-    let window=crate::agent_runtime::web_mode::draft::DraftCreationWindow::begin(&transaction)?;
+    let transaction =
+        rusqlite::Transaction::new_unchecked(connection, rusqlite::TransactionBehavior::Immediate)
+            .map_err(|error| format!("无法锁定 Web 任务草稿：{error}"))?;
+    let window = crate::agent_runtime::web_mode::draft::DraftCreationWindow::begin(&transaction)?;
     let scan = create_sentinel_url_draft_rows(
-        &transaction, project_id, task_name, urls, scan_mode, max_budget_usd,
-        auth_session_id, auth_session_ids, auth_session_scope_id, skill_ids, instruction, closure, None,
+        &transaction,
+        project_id,
+        task_name,
+        urls,
+        scan_mode,
+        max_budget_usd,
+        auth_session_id,
+        auth_session_ids,
+        auth_session_scope_id,
+        skill_ids,
+        instruction,
+        closure,
+        None,
     )?;
-    crate::agent_runtime::web_mode::draft::register_new(window,&scan.id,mode)?;
-    transaction.commit().map_err(|error| format!("无法提交 Web 任务草稿：{error}"))?;
+    if homogeneous {
+        freeze_homogeneous_metadata_in(&transaction,&scan.id,false)?;
+    }
+    crate::agent_runtime::web_mode::draft::register_new(window, &scan.id, mode)?;
+    transaction
+        .commit()
+        .map_err(|error| format!("无法提交 Web 任务草稿：{error}"))?;
     Ok(scan)
+}
+
+fn freeze_homogeneous_metadata_in(transaction:&rusqlite::Transaction<'_>,scan:&str,execution:bool)->Result<(),String>{
+        let goal:String=transaction.query_row("SELECT COALESCE(json_extract(policy_json,'$.additionalInstruction'),'') FROM sentinel_scan_contexts WHERE scan_id=?1",[scan],|r|r.get(0)).map_err(|e|e.to_string())?;
+        let mut plan = json!({"schemaVersion":1,"scanId":scan,"attemptNumber":1,
+            "scheduling_model":"homogeneous_workers","workerExecution":"model_read_only_v1",
+            "allowedParallel":3,"lane":"read_only_analysis","goal":goal,
+            "credentialVisibility":"plaintext"});
+        if execution{plan["workerExecution"]=json!(crate::agent_runtime::multi_agent::homogeneous::execution_policy::MODE);plan["targetParallel"]=json!(1);plan["reviewParallel"]=json!(1);}
+        transaction.execute("INSERT INTO native_scan_plans(scan_id,attempt_number,scan_type,backend,plan_json,plan_hash) VALUES(?1,1,'web','native',?2,?3)",
+            params![scan, plan.to_string(), crate::agent_runtime::store::stable_hash(&plan.to_string())])
+            .map_err(|e| format!("homogeneous_plan_freeze:{e}"))?;
+        transaction.execute("UPDATE sentinel_scan_contexts SET policy_json=json_set(policy_json,'$.scheduling_model','homogeneous_workers','$.workerExecution',?2) WHERE scan_id=?1",params![scan,plan["workerExecution"].as_str().unwrap()])
+            .map_err(|e| format!("homogeneous_draft_policy:{e}"))?;
+    Ok(())
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -552,7 +826,13 @@ fn sync_sentinel_attempt(connection: &rusqlite::Connection, scan_id: &str) {
     let stage = sentinel_attempt_stage(&status, &checkpoint);
     let terminal = matches!(
         status.as_str(),
-        "completed" | "completed_with_gaps" | "partial" | "recon_only" | "failed" | "cancelled" | "paused"
+        "completed"
+            | "completed_with_gaps"
+            | "partial"
+            | "recon_only"
+            | "failed"
+            | "cancelled"
+            | "paused"
     );
     let _ = connection.execute(
         "UPDATE sentinel_scan_attempts SET status=?1,stage=?2,checkpoint=CASE WHEN ?4=1 AND trim(stop_reason)<>'' THEN checkpoint ELSE ?3 END,stop_reason=CASE WHEN ?4=1 AND trim(stop_reason)='' THEN ?3 ELSE stop_reason END,llm_requests_delta=MAX(0,(SELECT llm_requests FROM sentinel_scans WHERE id=?5)-llm_requests_start),input_tokens_delta=MAX(0,(SELECT input_tokens FROM sentinel_scans WHERE id=?5)-input_tokens_start),output_tokens_delta=MAX(0,(SELECT output_tokens FROM sentinel_scans WHERE id=?5)-output_tokens_start),cached_tokens_delta=MAX(0,(SELECT cached_tokens FROM sentinel_scans WHERE id=?5)-cached_tokens_start),total_tokens_delta=MAX(0,(SELECT total_tokens FROM sentinel_scans WHERE id=?5)-total_tokens_start),finished_at=CASE WHEN ?4=1 AND finished_at='' THEN datetime('now','localtime') WHEN ?4=0 THEN '' ELSE finished_at END,updated_at=datetime('now','localtime') WHERE scan_id=?5 AND attempt_number=?6 AND NOT EXISTS(SELECT 1 FROM native_web_attempt_closures WHERE scan_id=?5 AND attempt_number=?6)",
@@ -575,7 +855,8 @@ fn prepare_web_scan_retry(
     scan_id: &str,
     status: &str,
 ) -> Result<i64, String> {
-    let transaction = connection.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
+    let transaction = connection
+        .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
         .map_err(|error| error.to_string())?;
     let count = prepare_web_scan_retry_in(&transaction, scan_id, status)?;
     transaction.commit().map_err(|error| error.to_string())?;
@@ -587,13 +868,17 @@ fn prepare_web_scan_retry_in(
     scan_id: &str,
     status: &str,
 ) -> Result<i64, String> {
-    if connection.is_autocommit() { return Err("web_retry_requires_transaction".into()); }
+    if connection.is_autocommit() {
+        return Err("web_retry_requires_transaction".into());
+    }
     let registered: bool = connection.query_row(
         "SELECT EXISTS(SELECT 1 FROM sentinel_processes WHERE scan_id=?1)
          OR EXISTS(SELECT 1 FROM analyzer_container_receipts WHERE scan_id=?1 AND cleanup_status<>'confirmed')",
         [scan_id],|r|r.get(0),
     ).map_err(|e|e.to_string())?;
-    if registered { return Err("scan_quiescence_cleanup_unconfirmed".into()); }
+    if registered {
+        return Err("scan_quiescence_cleanup_unconfirmed".into());
+    }
     match status {
         "scanning" | "pausing" => return Err("任务仍在运行，请先暂停后再继续".into()),
         "paused" => return Err("暂停任务请使用“继续扫描”，无需重新执行".into()),
@@ -626,7 +911,11 @@ fn prepare_web_scan_retry_in(
         )
         .map_err(|error| error.to_string())?
         .max(1);
-    let execution_mode = if retry_incomplete_only { "resume" } else { "fresh" };
+    let execution_mode = if retry_incomplete_only {
+        "resume"
+    } else {
+        "fresh"
+    };
     let checkpoint = if !retry_incomplete_only && fuse_excluded > 0 {
         format!("已建立第 {next_attempt} 次全新执行计划：清空当前结果面后重新处理 {target_count} 个 URL，排除熔断区 {fuse_excluded} 个；旧结果仅保留在执行历史中")
     } else if !retry_incomplete_only {
@@ -638,7 +927,13 @@ fn prepare_web_scan_retry_in(
     };
     let target_ids = {
         let mut statement = connection.prepare("SELECT t.id FROM sentinel_targets t WHERE scan_id=?1 AND (?2=0 OR status NOT IN ('completed','recon_only','manual_review')) AND NOT EXISTS (SELECT 1 FROM sentinel_fuse_zone f WHERE f.archived=0 AND f.project_id=t.project_id AND f.normalized_url=lower(rtrim(trim(t.url),'/'))) ORDER BY t.id").map_err(|e| e.to_string())?;
-        let rows = statement.query_map(params![scan_id,retry_incomplete_only as i64], |r| r.get::<_,i64>(0)).map_err(|e| e.to_string())?.collect::<Result<Vec<_>,_>>().map_err(|e| e.to_string())?;
+        let rows = statement
+            .query_map(params![scan_id, retry_incomplete_only as i64], |r| {
+                r.get::<_, i64>(0)
+            })
+            .map_err(|e| e.to_string())?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|e| e.to_string())?;
         rows
     };
     let routing_reason = format!("第 {next_attempt} 次执行待重新分流；上一轮结束原因见执行历史");
@@ -648,7 +943,9 @@ fn prepare_web_scan_retry_in(
             params![scan_id, retry_incomplete_only as i64, routing_reason],
         )
         .map_err(|error| error.to_string())?;
-    if changed as i64 != target_count { return Err("web_retry_targets_not_persisted".into()); }
+    if changed as i64 != target_count {
+        return Err("web_retry_targets_not_persisted".into());
+    }
     connection
         .execute(
             "INSERT INTO app_settings(key,value) VALUES(?1,?2) ON CONFLICT(key) DO UPDATE SET value=excluded.value",
@@ -661,13 +958,19 @@ fn prepare_web_scan_retry_in(
             params![checkpoint, scan_id, status],
         )
         .map_err(|error| error.to_string())?;
-    if changed != 1 { return Err("web_retry_state_changed".into()); }
+    if changed != 1 {
+        return Err("web_retry_state_changed".into());
+    }
     for id in target_ids {
         let valid: bool = connection.query_row("SELECT EXISTS(SELECT 1 FROM sentinel_targets WHERE id=?1 AND scan_id=?2 AND status='queued' AND value_score=0 AND scan_mode='' AND routing_reason=?3)", params![id,scan_id,routing_reason], |r| r.get(0)).map_err(|e| e.to_string())?;
-        if !valid { return Err("web_retry_target_postcondition".into()); }
+        if !valid {
+            return Err("web_retry_target_postcondition".into());
+        }
     }
     let valid: bool = connection.query_row("SELECT EXISTS(SELECT 1 FROM sentinel_scans WHERE id=?1 AND status='draft' AND current_checkpoint=?2 AND previous_scan_id='') AND EXISTS(SELECT 1 FROM app_settings WHERE key=?3 AND value=?4) AND NOT EXISTS(SELECT 1 FROM sentinel_processes WHERE scan_id=?1)",params![scan_id,checkpoint,format!("sentinel-next-attempt-mode:{scan_id}"),execution_mode],|r| r.get(0)).map_err(|e| e.to_string())?;
-    if !valid { return Err("web_retry_preparation_postcondition".into()); }
+    if !valid {
+        return Err("web_retry_preparation_postcondition".into());
+    }
     Ok(target_count)
 }
 
@@ -764,7 +1067,10 @@ pub fn list_agent_instructions(state: State<AppState>) -> Result<Vec<AgentSkill>
 }
 
 #[tauri::command]
-pub fn save_agent_instruction(state: State<AppState>, input: AgentSkillInput) -> Result<i64, String> {
+pub fn save_agent_instruction(
+    state: State<AppState>,
+    input: AgentSkillInput,
+) -> Result<i64, String> {
     let name = input.name.trim();
     let instructions = input.instructions.trim();
     if name.is_empty() || name.chars().count() > 80 {
@@ -837,7 +1143,6 @@ fn agent_trace_base(
         )
         .map_err(|_| "Agent 任务不存在".to_string())
 }
-
 
 fn retained_trace_value(value: &JsonValue) -> JsonValue {
     crate::agent_runtime::secrets::redact_json_with(value, None)

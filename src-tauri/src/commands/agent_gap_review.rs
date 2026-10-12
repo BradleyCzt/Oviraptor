@@ -10,10 +10,11 @@ hypothesisVerdict 只评价原假设；verdict 评价本次 findingCandidates，
 summary 区分缺口补足、原假设结论、本次新发现结论。confirmed verdict 的 missingEvidence 必须为空。"#;
 
 fn gap_followup_review_context(
-    tx: &rusqlite::Transaction<'_>,
+    tx: &rusqlite::Connection,
     root: &str,
     target_dir: &Path,
 ) -> Result<Option<JsonValue>, String> {
+    if tx.is_autocommit() { return Err("gap_original_snapshot_required".into()); }
     let linked: Option<(String,String,String,String,String,i64)> = tx.query_row(
         "SELECT f.source_scan_id,f.assessment_message_id,f.source_hash,f.source_preview_json,r.target_url,s.project_id \
          FROM agent_runs r JOIN agent_gap_followups f ON f.scan_id=r.scan_id \
@@ -270,9 +271,10 @@ struct GapReviewReceiptRow {
 }
 
 fn verified_gap_review_receipt(
-    tx: &rusqlite::Transaction<'_>,
+    tx: &rusqlite::Connection,
     request: &str,
 ) -> Result<JsonValue, String> {
+    if tx.is_autocommit() { return Err("gap_original_snapshot_required".into()); }
     let GapReviewReceiptRow {root,candidate_id,revision,raw,assignment,verdict,reasons,missing,confidence,summary,assessment,hash,resolved} = tx.query_row(
         "SELECT q.root_run_id,q.candidate_id,q.candidate_revision,q.candidate_json,q.assignment_id,d.verdict, \
          d.reason_codes_json,d.missing_evidence_json,d.confidence,json_extract(m.payload_json,'$.summary'), \

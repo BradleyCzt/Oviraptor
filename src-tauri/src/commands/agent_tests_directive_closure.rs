@@ -195,7 +195,7 @@ fn directive_reentry_ignored_lane_release_rolls_back_without_refund() {
 
 #[test]
 fn directive_reentry_real_target_does_not_retry_unknown_proposal_or_block_mapper() {
-    use crate::agent_runtime::multi_agent::{directive::proposals, supervisor::WorkerSupervisor};
+    use crate::agent_runtime::multi_agent::directive::proposals;
     for replaced_fence in [false, true] {
         let _real = RealSpecialistTransport::enter();
         let mut h = fresh_multi_production_harness("directive-reentry-real-target");
@@ -210,7 +210,7 @@ fn directive_reentry_real_target_does_not_retry_unknown_proposal_or_block_mapper
         let adaptive = AgentBudgetSettings::from_json(&serde_json::json!({}));
         freeze_fresh_multi_production_harness(&mut h);
         let original = bootstrap_original_actor(&h);
-        let parent = WorkerSupervisor::start(&h.db_path, &original).unwrap();
+        let parent = start_original_fixture_supervisor(&h.db_path, &original).unwrap();
         h.context.supervision = Some(parent.ticket());
         let db = db::open(&h.db_path).unwrap();
         let tx =

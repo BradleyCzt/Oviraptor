@@ -46,8 +46,13 @@ impl WebFinancialProducer {
     }
 }
 fn web_financial_producer_fixture() -> WebFinancialProducer {
+    web_financial_producer_fixture_with_site(mock_site)
+}
+fn web_financial_producer_fixture_with_site(
+    site: impl Fn(String) -> (u16, &'static str, String) + Send + Sync + 'static,
+) -> WebFinancialProducer {
     let real = RealSpecialistTransport::enter();
-    let mut h = fresh_multi_production_harness("web-financial-producer");
+    let mut h = fresh_multi_production_harness_with_site("web-financial-producer", site);
     let web_reply: std::sync::Arc<std::sync::Mutex<WebFinancialReply>> =
         std::sync::Arc::new(std::sync::Mutex::new(std::sync::Arc::new(|_| {
             (200, "application/json", model_round(&[], 10))
@@ -82,7 +87,8 @@ fn web_financial_producer_fixture() -> WebFinancialProducer {
     h.context.execution_plan.hard_model_requests = 6;
     h.context.execution_plan.soft_model_requests = 6;
     h.context.execution_plan.max_turns = 8;
-    freeze_fresh_multi_production_harness(&mut h);
+    // Preserve the original six-request financial/stop boundary under v5.
+    freeze_fresh_multi_production_harness_original_v5(&mut h);
     let mut f = WebFinancialProducer {
         f: BudgetTriggerFixture {
             h,

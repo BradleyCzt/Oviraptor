@@ -1,3 +1,5 @@
+include!("tests_web_resume_finance.rs");
+
 fn web_start_fixture() -> (PathBuf,PathBuf,rusqlite::Connection) {
     let root = std::env::temp_dir().join(format!("oviraptor-web-start-{}",Uuid::new_v4()));
     let db_path = db::initialize(&root).unwrap();

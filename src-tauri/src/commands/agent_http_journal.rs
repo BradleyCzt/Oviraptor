@@ -37,6 +37,7 @@ fn agent_http_claim_error(reason: String) -> JsonValue {
         | "budget_operation_not_granted"
         | "budget_execution_policy_invalid" => "tool_capability_or_fencing_denied",
         "cancelled"
+        | "root_supervision_request_capacity_exhausted"
         | "request_budget_exhausted"
         | "agent_attempt_not_active"
         | "tool_execution_surface_denied"
@@ -155,6 +156,7 @@ fn claim_agent_http_request(
     claim_agent_http_request_with_headers(context, runtime, request, url, &headers)
 }
 
+#[cfg(test)]
 fn claim_agent_http_request_with_headers(
     context: &AgentRunContext,
     runtime: &AgentToolRuntime,
@@ -196,6 +198,7 @@ fn claim_agent_http_request_with_headers(
     Ok(Some(claim))
 }
 
+#[cfg(test)]
 fn receive_agent_http_headers(
     context: &AgentRunContext,
     claim: &AgentHttpClaim,

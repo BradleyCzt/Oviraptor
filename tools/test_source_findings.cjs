@@ -4,6 +4,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const test = require('node:test');
 const ts = require('typescript');
+const { loadSentinelApi } = require('./sentinel_api_harness.cjs');
 const vue = require('vue');
 const { parse, compileScript, compileTemplate } = require('@vue/compiler-sfc');
 const { renderToString } = require('@vue/server-renderer');
@@ -69,10 +70,8 @@ async function mount(read, exportReview = async () => '/exports/review.json') {
 }
 
 test('source findings API preserves exact attempt and paging in IPC', async () => {
-  const calls = [], exports = {};
-  new Function('require', 'exports', transpile(fs.readFileSync(path.join(__dirname, '../src/features/sentinel/api.ts'), 'utf8')))((name) => {
-    assert.equal(name, '@tauri-apps/api/core'); return { invoke: async (...args) => { calls.push(args); return page(); } };
-  }, exports);
+  const calls = [];
+  const exports = { sentinelApi: loadSentinelApi(async (...args) => { calls.push(args); return page(); }) };
   await exports.sentinelApi.getNativeSourceFindings('A', 3);
   await exports.sentinelApi.getNativeSourceFindings('A', 2, 50, 10);
   await exports.sentinelApi.exportNativeSourceFindings('A', 2);

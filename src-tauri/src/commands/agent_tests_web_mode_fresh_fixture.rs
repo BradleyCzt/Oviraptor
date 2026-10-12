@@ -10,6 +10,18 @@ fn multi_agent_new_task_root_for_target(
     String,
     crate::agent_runtime::multi_agent::lease::CoordinatorLease,
 ) {
+    multi_agent_task_root_for_target_protocol(name, hard_tokens, hard_requests, target, true)
+}
+
+// Legacy birth contract for direct Broker/Client tests without a Web SDK loop.
+// Kept creation-only: never remove a protocol from an already born Root.
+fn multi_agent_task_root_for_target_protocol(
+    name: &str,
+    hard_tokens: i64,
+    hard_requests: i64,
+    target: &str,
+    new_evidence: bool,
+) -> (PathBuf, PathBuf, String, crate::agent_runtime::multi_agent::lease::CoordinatorLease) {
     let root = std::env::temp_dir()
         .canonicalize()
         .unwrap()
@@ -28,7 +40,20 @@ fn multi_agent_new_task_root_for_target(
     plan.soft_uncached_tokens = hard_tokens.saturating_div(2);
     plan.hard_model_requests = hard_requests;
     plan.soft_model_requests = hard_requests.saturating_div(2);
-    persist_frozen_web_execution_plan(&path, &scan.id, 1, target, &plan).unwrap();
+    if new_evidence {
+        persist_frozen_web_execution_plan(&path, &scan.id, 1, target, &plan).unwrap();
+    } else {
+        let proof = private_web_mode_on(&db, &scan.id, 1).unwrap();
+        let mode = crate::agent_runtime::web_mode::root::NewRootModeDeclaration::from_verified(
+            &proof, target, &plan.hash(),
+        ).unwrap().with_local_deliberation().unwrap()
+            .with_original_v5_bootstrap_for_test().unwrap();
+        let budget = fresh_web_root_budget_declaration(&proof, target, &plan).unwrap();
+        crate::agent_runtime::store::record_attempt_plan_with_declarations(
+            &db, &scan.id, 1, target, plan.backend, &plan.hash(), &plan.as_json(),
+            Some(&budget), Some(&mode),
+        ).unwrap();
+    }
     let mut context = test_context(&path, target, vec![]);
     context.scan_id = scan.id.clone();
     context.execution_plan = plan;

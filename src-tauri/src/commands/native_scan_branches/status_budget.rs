@@ -22,10 +22,28 @@ fn native_budget_diagnostics(
         .map_err(|error| format!("无法读取预算 root：{error}"))?;
     let reports = roots.into_iter().map(|root| {
         let gaps = crate::agent_runtime::multi_agent::budget_gaps::budget_ledger_gaps_in_snapshot(snapshot, &root)?;
-        Ok(json!({"rootRunId":root,"gaps":gaps}))
+        let single_original_history = native_single_original_history(snapshot, &root)?;
+        Ok(json!({"rootRunId":root,"gaps":gaps,"singleOriginalHistory":single_original_history}))
     }).collect::<Result<Vec<_>, String>>()?;
     Ok(json!({"roots":reports,"totalRoots":total,"truncated":total > 50,
         "authoritative":false,"schema":"summary_gap_v1"}))
+}
+
+/// Deliberately projects fixed diagnostic codes, never raw audit/SQLite errors.
+/// A closed original invoice is not consent, a dollar invoice or new capacity.
+fn native_single_original_history(db: &rusqlite::Connection, root: &str) -> Result<JsonValue, String> {
+    let single: bool = db.query_row(
+        "SELECT EXISTS(SELECT 1 FROM main.agent_runs r JOIN main.sentinel_scans s ON s.id=r.scan_id
+         WHERE r.id=?1 AND r.backend='native' AND r.role='coordinator'
+         AND r.parent_run_id IS NULL AND r.assignment_id='' AND r.orchestration_policy='single'
+         AND s.scan_type='web')", [root], |row| row.get(0),
+    ).map_err(|_| "budget_single_history_scope_unavailable".to_owned())?;
+    if !single { return Ok(JsonValue::Null); }
+    let verified = crate::agent_runtime::multi_agent::budget::continuation::verify_settled_history_on(db, root).is_ok();
+    Ok(json!({"schemaVersion":1,"rootRunId":root,
+        "state":if verified {"verified_closed_history"} else {"not_verified"},
+        "authoritative":false,"executionAllowed":false,"targetRequestsGranted":0,
+        "basis":"original_runtime_records_not_provider_dollar_invoice"}))
 }
 
 fn native_budget_diagnostics_for_attempt(

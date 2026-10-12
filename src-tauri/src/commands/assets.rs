@@ -121,6 +121,10 @@ fn field_sql(field: &str) -> Option<&'static str> {
         "projectLastSeen" => "pa.last_seen",
         "lastRunId" => "pa.last_run_id",
         "deletedAt" => "pa.deleted_at",
+        "hasLogin" => "a.has_login",
+        "hasRegister" => "a.has_register",
+        "entrySeen" => "CASE WHEN COALESCE(pa.entry_opened_at,'')<>'' THEN '1' ELSE '0' END",
+        "entryOpenedAt" => "pa.entry_opened_at",
         "sentinelStatus" => "COALESCE((SELECT COALESCE(ss.status,st.status,'sent') FROM sentinel_targets st LEFT JOIN sentinel_scans ss ON ss.id=st.scan_id WHERE st.project_id=pa.project_id AND (st.asset_id=a.id OR (st.asset_id IS NULL AND st.url=COALESCE(NULLIF(a.link,''),a.host))) ORDER BY st.updated_at DESC LIMIT 1),'not_sent')",
         "sentinelScanCount" => "(SELECT COUNT(DISTINCT st.scan_id) FROM sentinel_targets st WHERE st.project_id=pa.project_id AND (st.asset_id=a.id OR (st.asset_id IS NULL AND st.url=COALESCE(NULLIF(a.link,''),a.host)))",
         "sentinelSentAt" => "(SELECT MAX(st.updated_at) FROM sentinel_targets st WHERE st.project_id=pa.project_id AND (st.asset_id=a.id OR (st.asset_id IS NULL AND st.url=COALESCE(NULLIF(a.link,''),a.host)))",
@@ -131,7 +135,7 @@ fn field_sql(field: &str) -> Option<&'static str> {
 fn numeric_asset_field(field: &str) -> bool {
     matches!(
         field,
-        "port" | "statusCode" | "score" | "isDeleted" | "lastRunId" | "sentinelScanCount" | "ownershipConfidence" | "exposureEligible"
+        "port" | "statusCode" | "score" | "isDeleted" | "lastRunId" | "sentinelScanCount" | "ownershipConfidence" | "exposureEligible" | "hasLogin" | "hasRegister"
     )
 }
 
@@ -145,6 +149,7 @@ fn date_asset_field(field: &str) -> bool {
             | "projectLastSeen"
             | "deletedAt"
             | "sentinelSentAt"
+            | "entryOpenedAt"
     )
 }
 
@@ -220,8 +225,28 @@ fn asset_filter(query: &AssetQuery, apply_decision_view: bool) -> (String, Vec<S
         "related" => where_parts.push("o.status='related'".into()),
         "third_party" => where_parts.push("o.status='third_party'".into()),
         "excluded" => where_parts.push("o.status='excluded'".into()),
-        "eligible" => where_parts.push("o.exposure_eligible=1 AND o.authorization_status='allowed' AND o.status='confirmed'".into()),
+        // O0：与归属门禁摘要卡（asset_ownership_summary.exposure_eligible）及下游暴露面范围同一口径：
+        // 只看 exposure_eligible=1。旧口径额外要求 confirmed+allowed，会让卡片数字与列表总数对不上，
+        // 并把下游实际会消费的异常行（例如历史遗留的非 confirmed 准入行）从预览里藏起来。
+        "eligible" => where_parts.push("COALESCE(o.exposure_eligible,0)=1".into()),
         "review" => where_parts.push("COALESCE(o.status,'unreviewed') IN ('unreviewed','attributed')".into()),
+        _ => {}
+    }
+    match query.has_login_view.as_str() {
+        "yes" | "1" => where_parts.push("a.has_login=1".into()),
+        "no" | "0" => where_parts.push("a.has_login=0".into()),
+        "unknown" | "-1" => where_parts.push("a.has_login=-1".into()),
+        _ => {}
+    }
+    match query.has_register_view.as_str() {
+        "yes" | "1" => where_parts.push("a.has_register=1".into()),
+        "no" | "0" => where_parts.push("a.has_register=0".into()),
+        "unknown" | "-1" => where_parts.push("a.has_register=-1".into()),
+        _ => {}
+    }
+    match query.entry_seen_view.as_str() {
+        "seen" | "yes" | "1" => where_parts.push("COALESCE(pa.entry_opened_at,'')<>''".into()),
+        "unseen" | "no" | "0" => where_parts.push("COALESCE(pa.entry_opened_at,'')=''".into()),
         _ => {}
     }
     if !query.search.trim().is_empty() {
@@ -320,6 +345,9 @@ fn asset_order(query: &AssetQuery) -> String {
         "ownershipConfidence" => "COALESCE(o.confidence,0)",
         "exposureEligible" => "COALESCE(o.exposure_eligible,0)",
         "probeOutcome" => "a.probe_outcome",
+        "hasLogin" => "a.has_login",
+        "hasRegister" => "a.has_register",
+        "entrySeen" => "CASE WHEN COALESCE(pa.entry_opened_at,'')='' THEN 0 ELSE 1 END",
         "firstSeen" => "a.first_seen",
         "projectLastSeen" => "pa.last_seen",
         "lastAlive" => "a.last_alive",
@@ -368,6 +396,9 @@ fn asset_from_row(row: &Row<'_>) -> rusqlite::Result<Asset> {
         last_run_id: row.get(35)?,
         deleted_at: row.get(36)?,
         project_name: row.get(37)?,
+        has_login: row.get(38)?,
+        has_register: row.get(39)?,
+        entry_opened_at: row.get(40)?,
     })
 }
 
@@ -378,8 +409,34 @@ const ASSET_SELECT: &str = r#"SELECT a.id,pa.project_id,a.asset_key,a.company,a.
  COALESCE((SELECT COALESCE(ss.status,st.status,'sent') FROM sentinel_targets st LEFT JOIN sentinel_scans ss ON ss.id=st.scan_id WHERE st.project_id=pa.project_id AND (st.asset_id=a.id OR (st.asset_id IS NULL AND st.url=COALESCE(NULLIF(a.link,''),a.host))) ORDER BY st.updated_at DESC LIMIT 1),'not_sent'),
  (SELECT COUNT(DISTINCT st.scan_id) FROM sentinel_targets st WHERE st.project_id=pa.project_id AND (st.asset_id=a.id OR (st.asset_id IS NULL AND st.url=COALESCE(NULLIF(a.link,''),a.host)))),
  (SELECT MAX(st.updated_at) FROM sentinel_targets st WHERE st.project_id=pa.project_id AND (st.asset_id=a.id OR (st.asset_id IS NULL AND st.url=COALESCE(NULLIF(a.link,''),a.host)))),
- pa.first_seen,pa.last_seen,pa.last_run_id,pa.deleted_at,p.name
+ pa.first_seen,pa.last_seen,pa.last_run_id,pa.deleted_at,p.name,
+ a.has_login,a.has_register,pa.entry_opened_at
  FROM assets a JOIN project_assets pa ON pa.asset_id=a.id JOIN projects p ON p.id=pa.project_id LEFT JOIN asset_ownership_decisions o ON o.project_id=pa.project_id AND o.asset_id=a.id"#;
+
+#[tauri::command]
+pub fn mark_asset_entry_opened(
+    state: State<AppState>,
+    project_id: i64,
+    asset_id: i64,
+) -> Result<String, String> {
+    let connection = db::open(&state.db_path)?;
+    let changed = connection
+        .execute(
+            "UPDATE project_assets SET entry_opened_at=datetime('now','localtime') WHERE project_id=?1 AND asset_id=?2",
+            params![project_id, asset_id],
+        )
+        .map_err(|error| error.to_string())?;
+    if changed == 0 {
+        return Err("这条资产不在当前项目里，没有标记为已看".into());
+    }
+    connection
+        .query_row(
+            "SELECT entry_opened_at FROM project_assets WHERE project_id=?1 AND asset_id=?2",
+            params![project_id, asset_id],
+            |row| row.get(0),
+        )
+        .map_err(|error| error.to_string())
+}
 
 #[tauri::command]
 pub async fn list_assets(

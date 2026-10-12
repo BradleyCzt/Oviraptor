@@ -67,8 +67,10 @@ fn client_side_actual_delivery_failure_does_not_enter_unprotected_pause_cleanup(
     assert_eq!(f.site_seen.lock().unwrap().len(), 1);
     assert!(!f.db.query_row("SELECT EXISTS(SELECT 1 FROM projects WHERE name='forbidden old cleanup write')",
         [], |r| r.get::<_, bool>(0)).unwrap(), "actual paid delivery failure entered cleanup and changed business rows");
-    assert!(error.contains("local delivery fixture failure")
-        || error.starts_with("client_side_delivery_write_rejected:"), "{error}");
+    let local_error = error.strip_prefix("executor_followup_failed:client_side:")
+        .expect("original executor follow-up stage must remain explicit");
+    assert!(local_error.contains("local delivery fixture failure")
+        || local_error.starts_with("client_side_delivery_write_rejected:"), "{error}");
     assert!(
         !error.contains("specialist_cleanup:") && !error.contains("readonly_local_recovery:"),
         "{error}"

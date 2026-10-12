@@ -3,16 +3,21 @@
 fn executor_allocation_actual_three_sdk_preparation_preserves_original_reviewer_floor() {
     let _real = RealSpecialistTransport::enter();
     let (port, seen, _) = spawn_endpoint(std::sync::Arc::new(|request| {
+        if request.contains("You are the Root Coordinator") && request.contains("budget-allocation") {
+            return (200,"application/json",fresh_multi_root_wire_response(&request).unwrap());
+        }
+        if !request.contains("You are the Root Coordinator") && !request.contains("SPA/API Mapper") {
+            return (200,"application/json",model_round(&[],10));
+        }
         (
             200,
             "application/json",
             changed_fact_response(&request, true),
         )
     }));
-    let mut f = root_tick_fixture_protocol_limits(
+    let mut f = root_tick_fixture_original_v5_limits(
         "executor-reviewer-floor",
         &format!("http://127.0.0.1:{port}/v1"),
-        true,
         (60_000, 6),
     );
     drop(f.parent.take());
@@ -47,10 +52,12 @@ fn executor_allocation_actual_three_sdk_preparation_preserves_original_reviewer_
         grant,
         "execution window follows actually admitted budget"
     );
+    let outcome = run_native_agent(&f.context);
+    assert!(matches!(outcome,AgentTargetOutcome::Limited(_) | AgentTargetOutcome::BoundedCompleted(_) | AgentTargetOutcome::Incomplete(_)),"{}",outcome.detail());
     multi_agent_finish_execution(
         &f.context,
         &mut session,
-        &AgentTargetOutcome::incomplete("allocation developer proof"),
+        &outcome,
     )
     .unwrap();
     drop(session);
@@ -65,7 +72,11 @@ fn executor_allocation_closed_mapper_fixture(
     NativeCoordinatorTickReceipt,
     std::sync::Arc<std::sync::Mutex<Vec<String>>>,
 ) {
-    let (f, bootstrap, seen) = mapper_allocation_fixture(limits);
+    let (port, seen, _) = spawn_endpoint(std::sync::Arc::new(|request| {
+        (200,"application/json",changed_fact_response(&request,true))
+    }));
+    let f = root_tick_fixture_original_v5_limits("executor-original-v5",&format!("http://127.0.0.1:{port}/v1"),limits);
+    let bootstrap = native_coordinator_tick(&f.context,&f.actor).unwrap();
     let mapper = native_coordinator_prepare_mapper(
         &f.context,
         &f.actor,
@@ -183,16 +194,21 @@ fn executor_allocation_full_mixed_unlimited_preparation_binds_actual_runtime_win
     let _real = RealSpecialistTransport::enter();
     for limits in [(0, 6), (60_000, 0)] {
         let (port, seen, _) = spawn_endpoint(std::sync::Arc::new(|request| {
+            if request.contains("You are the Root Coordinator") && request.contains("budget-allocation") {
+                return (200,"application/json",fresh_multi_root_wire_response(&request).unwrap());
+            }
+            if !request.contains("You are the Root Coordinator") && !request.contains("SPA/API Mapper") {
+                return (200,"application/json",model_round(&[],10));
+            }
             (
                 200,
                 "application/json",
                 changed_fact_response(&request, true),
             )
         }));
-        let mut f = root_tick_fixture_protocol_limits(
+        let mut f = root_tick_fixture_original_v5_limits(
             "executor-mixed-unlimited",
             &format!("http://127.0.0.1:{port}/v1"),
-            true,
             limits,
         );
         drop(f.parent.take());
@@ -211,10 +227,12 @@ fn executor_allocation_full_mixed_unlimited_preparation_binds_actual_runtime_win
         let window = f.context.run_budget.as_ref().unwrap();
         assert_eq!((window.hard_tokens, window.hard_requests), expected);
         assert_eq!(seen.lock().unwrap().len(), 3);
+        let outcome = run_native_agent(&f.context);
+        assert!(matches!(outcome,AgentTargetOutcome::Limited(_) | AgentTargetOutcome::BoundedCompleted(_) | AgentTargetOutcome::Incomplete(_)),"{}",outcome.detail());
         multi_agent_finish_execution(
             &f.context,
             &mut session,
-            &AgentTargetOutcome::incomplete("mixed unlimited window developer proof"),
+            &outcome,
         )
         .unwrap();
         drop(session);

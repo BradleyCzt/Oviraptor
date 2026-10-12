@@ -1,6 +1,6 @@
 use super::{completion, gateway, raw, MockProvider};
 use crate::agent_runtime::model::{
-    admission::{AdmissionGate, CLOUD_MAX_IN_FLIGHT},
+    admission::{admission_domain, gate_for, AdmissionGate, CLOUD_MAX_IN_FLIGHT},
     CancelToken, ModelError, ModelRequest, OpenAiCompatibleGateway,
 };
 use std::{
@@ -106,4 +106,80 @@ fn waiting_cloud_request_can_cancel_without_taking_a_slot() {
     assert_eq!(handle.join().unwrap(), Err(ModelError::Cancelled));
     assert_eq!(gate.queued(), 0);
     drop(occupied);
+}
+
+// Production keeps one admission domain per deployment kind for the whole
+// process: a different provider endpoint must never buy extra capacity.
+// Only the in-process test harness scopes domains by fake-provider origin.
+#[test]
+fn production_admission_domain_is_process_wide_and_test_domain_is_per_provider_origin() {
+    for local in [true, false] {
+        let a = admission_domain(local, "http://127.0.0.1:4100/v1/chat/completions", false);
+        let b = admission_domain(
+            local,
+            "https://api.other.example/v9/chat/completions",
+            false,
+        );
+        assert_eq!(a, b, "production admission must ignore the endpoint");
+        assert_ne!(
+            a,
+            admission_domain(!local, "http://127.0.0.1:4100/v1", false)
+        );
+    }
+    let base = admission_domain(true, "http://127.0.0.1:4100/v1", true);
+    assert_eq!(
+        base,
+        admission_domain(true, "HTTP://127.0.0.1:4100/v1/chat/completions", true)
+    );
+    assert_eq!(base, admission_domain(true, "http://127.0.0.1:4100", true));
+    assert_ne!(
+        base,
+        admission_domain(true, "http://127.0.0.1:4101/v1", true)
+    );
+    assert_ne!(
+        base,
+        admission_domain(false, "http://127.0.0.1:4100/v1", true)
+    );
+}
+
+// One test's held permit (or a slow fake provider) cannot starve another
+// test's provider, and each scoped gate keeps the production capacity.
+#[test]
+fn scoped_admission_gates_isolate_held_permits_between_provider_origins() {
+    let occupied_local = MockProvider::spawn(|_, _| raw(completion("unused", &[], 1)));
+    let free_local = MockProvider::spawn(|_, _| raw(completion("ok", &[], 1)));
+    let held = gate_for(
+        true,
+        &format!("{}/chat/completions", occupied_local.base_url),
+    );
+    let permit = held.acquire(&CancelToken::new()).unwrap();
+    assert!(std::ptr::eq(held, gate_for(true, &occupied_local.base_url)));
+    assert!(!std::ptr::eq(held, gate_for(true, &free_local.base_url)));
+    let started = Instant::now();
+    gateway(&free_local.base_url, true)
+        .complete_once(&ModelRequest::default(), &CancelToken::new())
+        .unwrap();
+    assert!(started.elapsed() < Duration::from_secs(2));
+    assert_eq!(free_local.hits(), 1);
+    // The occupied provider's own requests still queue behind its single permit.
+    let token = CancelToken::new();
+    let waiting = token.clone();
+    let client = gateway(&occupied_local.base_url, true);
+    let handle = thread::spawn(move || client.complete_once(&ModelRequest::default(), &waiting));
+    wait_for_queue(held, 1);
+    token.cancel();
+    assert!(handle.join().unwrap().is_err());
+    assert_eq!((held.queued(), occupied_local.hits()), (0, 0));
+    drop(permit);
+    let cloud = gate_for(false, &free_local.base_url);
+    let permits: Vec<_> = (0..CLOUD_MAX_IN_FLIGHT)
+        .map(|_| cloud.acquire(&CancelToken::new()).unwrap())
+        .collect();
+    let token = CancelToken::new();
+    let waiting = token.clone();
+    let handle = thread::spawn(move || cloud.acquire(&waiting).map(|_| ()));
+    wait_for_queue(cloud, 1);
+    token.cancel();
+    assert_eq!(handle.join().unwrap(), Err(ModelError::Cancelled));
+    drop(permits);
 }

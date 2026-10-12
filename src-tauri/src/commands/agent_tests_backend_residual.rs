@@ -284,51 +284,31 @@
     }
 
     /// Runs the actual per-target Native entry against local model/site fixtures.
-    fn native_web_target_retirement_fixture(tag: &str) -> (String, PathBuf) {
-        let mut harness = agent_harness(tag, mock_site, vec![AgentIdentity::anonymous()]);
-        retarget_model(
-            &mut harness,
-            vec![model_round(
-                &[(
-                    "finish_target",
-                    serde_json::json!({
-                        "coverage": closing_ledger(&["authorization"]),
-                        "stopReason":"计划内调查已完成"
-                    }),
-                )],
-                300,
-            )],
-        );
-        fs::write(
-            harness.context.target_dir.join("frontend-evidence.json"),
-            harness.context.evidence.to_string(),
-        )
-        .unwrap();
-        let prepared = PreparedFrontendTarget {
-            position: 1,
-            route: harness.context.route.clone(),
-            target_dir: harness.context.target_dir.clone(),
-            proxy: None,
-            browser: None,
-        };
-        let adaptive = AgentBudgetSettings::from_json(&serde_json::json!({}));
-        let outcome = run_agent_target(
-            &prepared,
-            AgentTargetExecution {
-                db_path: &harness.db_path,
-                scan_id: "agent-scan",
-                attempt_number: 1,
-                settings: &serde_json::json!({}),
-                environment: &harness.context.environment,
-                adaptive: &adaptive,
-                log_path: &harness.context.log_path,
-            },
-        ).unwrap().outcome;
+    /// The task comes from the real creator/startup/HMAC and a frozen multi Web
+    /// Root (`multi_terminal_owned_dispatch`), as the production entry requires;
+    /// that real path is the one which selects the Native backend.
+    fn native_web_target_retirement_fixture(_tag: &str) -> (String, PathBuf) {
+        let (harness, owned, stop) = multi_terminal_owned_dispatch();
+        let outcome = &owned.outcome;
         assert!(
             !matches!(outcome, AgentTargetOutcome::Failed(_) if outcome.detail().contains("Strix")),
             "native 路径不得出现 Strix 失败：{}",
             outcome.detail()
         );
+        // The real dispatch pins agentBackendPolicy=native; the original fixture ran
+        // with default settings, so the default must also select Native here.
+        assert_eq!(
+            agent_select_backend(
+                &harness.db_path,
+                &harness.context.scan_id,
+                1,
+                &harness.context.target_url,
+                &serde_json::json!({}),
+                true
+            ),
+            AgentBackendKind::Native
+        );
+        stop.store(true, std::sync::atomic::Ordering::SeqCst);
         let log = fs::read_to_string(&harness.context.log_path).unwrap_or_default();
         (log, harness.db_path.clone())
     }
@@ -346,4 +326,13 @@
             )
             .unwrap();
         assert_eq!(strix_runs, 0, "REM-002：不允许登记 Strix run");
+        let native_runs: i64 = db::open(&db_path)
+            .unwrap()
+            .query_row(
+                "SELECT COUNT(*) FROM agent_runs WHERE scan_id='agent-scan' AND backend='native'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert!(native_runs >= 1, "the zero count must observe this task's actual native runs");
     }

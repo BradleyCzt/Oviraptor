@@ -10,9 +10,25 @@ fn deliver_readonly_assessment(
         Some(path) => complete_assessment_at(connection, lease, child, usage, payload, Some(path)),
         None => complete_readonly_assessment(connection, lease, child, usage, payload),
     };
-    // A rejected Client delivery never leaves its protected transaction for cleanup.
+    let mapper_loop = if child.role == crate::agent_runtime::contract::AgentRole::SpaApiMapper {
+        crate::agent_runtime::web_mode::root::read(connection, &lease.root_run_id)?
+            .and_then(|mode| mode.bootstrap_dispatch())
+            .is_some_and(|contract| {
+                contract["schemaVersion"] == 15
+                    && contract["mapperLoopRule"]
+                        == "original_frozen_mapper_two_round_one_lookup_v1"
+            })
+    } else {
+        false
+    };
+    // A rejected delivery never enters legacy unsent cleanup. Mapper loop
+    // invoices must remain available for their original per-round recovery.
     // The already paid receipt and original grant remain available for explicit local recovery.
-    if child.role == crate::agent_runtime::contract::AgentRole::ClientSide {
+    if child.role == crate::agent_runtime::contract::AgentRole::ClientSide
+        || child.role == crate::agent_runtime::contract::AgentRole::InputParser
+        || child.role == crate::agent_runtime::contract::AgentRole::BusinessLogic
+        || mapper_loop
+    {
         return complete();
     }
     match complete() {
@@ -54,6 +70,17 @@ fn complete_assessment_at(
             connection, lease, child, usage, payload, target_dir,
         );
     }
+    if child.role == crate::agent_runtime::contract::AgentRole::InputParser {
+        return complete_assessment_at_checked(
+            connection,
+            lease,
+            child,
+            usage,
+            payload,
+            target_dir,
+            |tx| input_parser_validate_received(tx, lease, child, usage, payload, target_dir),
+        );
+    }
     complete_assessment_at_checked(connection, lease, child, usage, payload, target_dir, |_| {
         Ok(())
     })
@@ -72,13 +99,24 @@ fn complete_assessment_at_checked(
         contract::AgentRole,
         multi_agent::{lease::require_executable_coordinator, mailbox, scheduler},
     };
+    if child.role == AgentRole::SpaApiMapper
+        && crate::agent_runtime::web_mode::root::read(connection, &lease.root_run_id)?
+            .and_then(|mode| mode.bootstrap_dispatch())
+            .is_some_and(|contract| contract["schemaVersion"] == 15)
+        && crate::agent_runtime::multi_agent::attempts::current(connection, lease, &child.assignment_id)?.state == "expired"
+    {
+        verify_local(connection)?;
+        return complete_expired_mapper_assessment(connection, lease, child, usage, payload);
+    }
     let (kind, prefix) = match child.role {
         AgentRole::SpaApiMapper => ("evidence_summary", "mapper"),
         AgentRole::IdentitySession => ("identity_assessment", "identity"),
         AgentRole::ExternalSurface => ("evidence_summary", "public-surface"),
+        AgentRole::BusinessLogic => ("evidence_summary", "business-logic"),
         AgentRole::RepoMapper => ("evidence_summary", "repo-mapper"),
         AgentRole::SourceAnalyst => ("evidence_summary", "source-analyst"),
         AgentRole::ClientSide => ("evidence_summary", "client-side"),
+        AgentRole::InputParser => ("input_assessment", "input-parser"),
         _ => return Err("readonly_assessment_role_invalid".into()),
     };
     let payload = crate::agent_runtime::secrets::redact_json(payload);
@@ -125,7 +163,54 @@ fn complete_assessment_at_checked(
             |r| r.get(0),
         )
         .map_err(|e| e.to_string())?;
-    let received: bool = tx
+    let mapper_loop = child.role == AgentRole::SpaApiMapper
+        && crate::agent_runtime::web_mode::root::read(&tx, &lease.root_run_id)?
+            .and_then(|mode| mode.bootstrap_dispatch())
+            .is_some_and(|contract| contract["schemaVersion"] == 15);
+    let mapper_output_guard = if mapper_loop {
+        let output = crate::agent_runtime::multi_agent::specialist::mapper_loop::verified_original_output_on(&tx, lease, child)?;
+        if output.usage() != usage || payload != serde_json::json!({"summary":output.text()}) {
+            return Err("mapper_loop_delivery_original_output_conflict".into());
+        }
+        if state == "running" {
+            let original = original_root_capture_mode(&tx, &lease.root_run_id)?;
+            Some(crate::agent_runtime::multi_agent::specialist::mapper_loop::final_seal::capture_final_before_on(&tx, lease, child, &original)?)
+        } else if state == "completed" {
+            crate::agent_runtime::multi_agent::specialist::mapper_loop::final_seal::read_final_original_on(&tx, lease, child)?
+                .ok_or("mapper_loop_final_original_receipt_missing")?;
+            None
+        } else {
+            return Err("mapper_loop_delivery_original_state_required".into());
+        }
+    } else { None };
+    let surface_output_guard = if child.role == AgentRole::ExternalSurface
+        && external_surface_response_receipt::enabled_on(&tx, &lease.root_run_id)? {
+        if state == "running" {
+            let original = original_root_capture_mode(&tx, &lease.root_run_id)?;
+            Some(external_surface_output_receipt::capture_before_on(
+                &tx, lease, child,
+                target_dir.ok_or("public_surface_artifact_root_required")?, &original,
+            )?)
+        } else {
+            external_surface_output_receipt::read_original_on(&tx, lease, child)?
+                .ok_or("external_surface_output_original_receipt_missing")?;
+            None
+        }
+    } else { None };
+    let business_output_guard = if child.role == AgentRole::BusinessLogic {
+        if state == "running" {
+            let original = original_root_capture_mode(&tx, &lease.root_run_id)?;
+            Some(business_logic_output_receipt::capture_before_on(
+                &tx, lease, child,
+                target_dir.ok_or("business_logic_artifact_root_required")?, &original,
+            )?)
+        } else {
+            business_logic_output_receipt::read_original_on(&tx, lease, child)?
+                .ok_or("business_logic_output_original_receipt_missing")?;
+            None
+        }
+    } else { None };
+    let legacy_received: bool = tx
         .query_row(
             "SELECT EXISTS(SELECT 1 FROM agent_specialist_calls WHERE assignment_id=?1
         AND child_run_id=?2 AND state='received')",
@@ -133,6 +218,7 @@ fn complete_assessment_at_checked(
             |r| r.get(0),
         )
         .map_err(|e| e.to_string())?;
+    let received = legacy_received || mapper_loop;
     #[cfg(not(test))]
     if !received {
         return Err("readonly_assessment_receipt_required".into());
@@ -257,6 +343,15 @@ fn complete_assessment_at_checked(
     crate::agent_runtime::multi_agent::lease::validate_coordinator_lease(&tx, lease)?;
     crate::agent_runtime::multi_agent::lease::require_executable_coordinator(&tx, lease)?;
     verify_local(&tx)?;
+    if let Some(guard) = &surface_output_guard {
+        external_surface_output_receipt::issue_after_on(&tx, lease, child, guard, &message)?;
+    }
+    if let Some(guard) = &business_output_guard {
+        business_logic_output_receipt::issue_after_on(&tx, lease, child, guard, &message)?;
+    }
+    if let Some(guard) = &mapper_output_guard {
+        crate::agent_runtime::multi_agent::specialist::mapper_loop::final_seal::issue_final_after_on(&tx, lease, child, guard, &message)?;
+    }
     tx.commit()
         .map_err(|e| format!("readonly_assessment_commit:{e}"))?;
     Ok(payload)

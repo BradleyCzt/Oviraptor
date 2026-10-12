@@ -298,6 +298,17 @@ fn scrub_pairs(text: &str, context: Option<&RedactionContext>) -> String {
             continue;
         }
         output.push_str(&rest[key_start..offset + 1]);
+        // A credential is a scalar. When a credential-named key (for example
+        // `multiAgentIdentitySession`, ending in `session`) holds a JSON object
+        // or array, the old span consumed only the opening bracket: nothing
+        // secret was removed and the embedded JSON became invalid. Keep the
+        // container intact and keep scanning inside it, exactly like
+        // `redact_json_with` recurses into a credential-named container; every
+        // credential scalar nested inside is still redacted by its own key.
+        if json_container_starts_at(rest, offset + 1) {
+            rest = &rest[offset + 1..];
+            continue;
+        }
         let (value_start, value_end) = pair_value_span(rest, offset + 1);
         output.push_str(&rest[offset + 1..value_start]);
         output.push_str(&marker_for(context, "auth", &rest[value_start..value_end]));
@@ -305,6 +316,23 @@ fn scrub_pairs(text: &str, context: Option<&RedactionContext>) -> String {
     }
     output.push_str(rest);
     output
+}
+
+/// Whether the value after a separator is a JSON object/array (`{"`, `{}`,
+/// `["`, `[{`, `[[`, `[]`), not a bare `{token}` / `[token]` credential.
+fn json_container_starts_at(text: &str, from: usize) -> bool {
+    let value = text[from..].trim_start_matches([' ', '\t', '\n', '\r']);
+    let mut characters = value.chars();
+    let opener = characters.next();
+    let next = characters
+        .as_str()
+        .trim_start_matches([' ', '\t', '\n', '\r'])
+        .chars()
+        .next();
+    matches!(
+        (opener, next),
+        (Some('{'), Some('"' | '}')) | (Some('['), Some('"' | '{' | '[' | ']'))
+    )
 }
 
 /// One `key=value` pair's value: up to the next pair, string quote or line end.
@@ -509,4 +537,67 @@ pub fn contains_secret(text: &str) -> bool {
         let cleaned = token.trim_matches(|character: char| ",;\"'()[]<>{}".contains(character));
         looks_like_jwt(cleaned) || looks_like_bearer(cleaned)
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // PROD-BUGFIX-2 regression: a credential-named key holding a JSON object
+    // (the real `multiAgentIdentitySession` evidence) must not corrupt the
+    // embedded JSON of an archived specialist request.
+    #[test]
+    fn credential_named_json_container_stays_valid_and_matches_structured_redaction() {
+        let candidate = serde_json::json!({
+            "evidence": {
+                "multiAgentIdentitySession": {"identityMode": "IdentitySet", "summary": "metadata only"},
+                "multiAgentMapper": {"summary": "mapper"},
+            },
+            "target": "https://authorized.example.test",
+        });
+        let request = serde_json::json!({"messages": [
+            {"role": "system", "content": "review"},
+            {"role": "user", "content": candidate.to_string()},
+        ]});
+        let archived = redact_json(&request);
+        let content = archived["messages"][1]["content"].as_str().unwrap();
+        let parsed: JsonValue = serde_json::from_str(content).expect("archived input must stay valid JSON");
+        assert_eq!(parsed, redact_json(&candidate));
+        assert_eq!(parsed["evidence"]["multiAgentIdentitySession"]["identityMode"], "IdentitySet");
+    }
+
+    // Guard still bites: real credential scalars, including ones nested inside
+    // a credential-named container and bare non-JSON `{token}` / `[token]`
+    // values, are still replaced, and the archived JSON stays valid.
+    #[test]
+    fn real_credentials_are_still_redacted_inside_and_outside_json_containers() {
+        let raw = serde_json::json!({
+            "apiKey": "sk-live-0123456789abcdef",
+            "password": "hunter2-correct-horse",
+            "session": "session-token-value-1",
+            "multiAgentIdentitySession": {"accessToken": "nested-access-token", "identityMode": "IdentitySet"},
+            "userSession": {"sessionId": "nested-session-id"},
+            "cookies": [{"name": "Cookie", "value": "sid=abcdef"}],
+        });
+        let text = raw.to_string();
+        let scrubbed = redact_text_with(&text, None);
+        let parsed: JsonValue = serde_json::from_str(&scrubbed).expect("scrubbed JSON must stay valid");
+        for secret in ["sk-live-0123456789abcdef", "hunter2-correct-horse", "session-token-value-1",
+            "nested-access-token", "nested-session-id"] {
+            assert!(!scrubbed.contains(secret), "{secret} leaked: {scrubbed}");
+        }
+        for pointer in ["/apiKey", "/password", "/session",
+            "/multiAgentIdentitySession/accessToken", "/userSession/sessionId"] {
+            assert!(parsed.pointer(pointer).and_then(JsonValue::as_str).unwrap().starts_with("<redacted:"), "{pointer}");
+        }
+        assert_eq!(parsed["multiAgentIdentitySession"]["identityMode"], "IdentitySet");
+        let structured = redact_json(&raw);
+        assert!(!structured.to_string().contains("nested-access-token"));
+        assert!(!structured.to_string().contains("sid=abcdef"));
+        // Bare (non-JSON) bracketed credentials are still consumed whole.
+        for bare in ["token=[abc123secret]", "session={abc123secret}", "password: [hunter2]"] {
+            let out = redact_text_with(bare, None);
+            assert!(!out.contains("abc123secret") && !out.contains("hunter2"), "{bare} -> {out}");
+        }
+    }
 }

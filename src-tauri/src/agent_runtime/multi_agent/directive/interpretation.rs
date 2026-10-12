@@ -96,9 +96,13 @@ pub(super) fn explicit_host_boundary_request(text: &str) -> bool {
 }
 
 pub(super) fn interpret(text: &str, target_key: &str) -> DraftInterpretation {
+    interpret_with_material(text, target_key, false)
+}
+
+pub(super) fn interpret_with_material(text: &str, target_key: &str, plaintext: bool) -> DraftInterpretation {
     let lower = text.to_ascii_lowercase();
-    let redacted = redact_text_with(text, None);
-    let secret = redacted != text;
+    let redacted = if plaintext { text.to_string() } else { redact_text_with(text, None) };
+    let secret = !plaintext && redacted != text;
     let host_boundary = explicit_host_boundary_request(text);
     let bypass = controlled_action_guard::requests_cleanup_bypass(&lower)
         || contains_any(

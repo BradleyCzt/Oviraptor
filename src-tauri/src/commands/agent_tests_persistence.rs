@@ -419,24 +419,17 @@
     #[test]
     fn a_stop_during_a_model_round_settles_the_transport_and_is_never_billed() {
         use std::sync::atomic::{AtomicUsize, Ordering as AtomicOrdering};
-        let harness = agent_harness("p06-cancel", mock_site, vec![AgentIdentity::anonymous()]);
+        // The task comes from the real creator/startup/HMAC and the original
+        // frozen Single Root (plan + budget declaration), as Native requires.
+        let mut harness = fresh_single_production_harness("p06-cancel", mock_site);
+        freeze_fresh_single_production_harness(&mut harness);
         let AgentHarness {
             db_path,
             mut context,
             site_seen,
             ..
         } = harness;
-        let target_url = context.target_url.clone();
-        persist_agent_execution_plan(
-            &db_path,
-            "agent-scan",
-            context.attempt_number,
-            &target_url,
-            &context.execution_plan.clone(),
-        )
-        .unwrap();
-        let ledger = runtime_open_run(&db_path, "agent-scan", &context.route).expect("run row");
-        context.run = Some(ledger.clone());
+        let ledger = context.run.clone().expect("run row");
         let pause_db = db_path.clone();
         let served = std::sync::Arc::new(AtomicUsize::new(0));
         let served_counter = served.clone();
@@ -444,13 +437,10 @@
             if served_counter.fetch_add(1, AtomicOrdering::SeqCst) == 0 {
                 // The user stops the task while this generation is still running; the
                 // provider answers five seconds later, which is exactly the request
-                // that used to keep running after the UI said "stopped".
-                if let Ok(connection) = db::open(&pause_db) {
-                    let _ = connection.execute(
-                        "UPDATE sentinel_scans SET status='cancelled' WHERE id='agent-scan'",
-                        [],
-                    );
-                }
+                // that used to keep running after the UI said "stopped". A running
+                // task is stopped through the real pause request (cancel only
+                // removes drafts), so drive that production entry here.
+                request_sentinel_pause(&pause_db, "agent-scan").unwrap();
                 std::thread::sleep(std::time::Duration::from_secs(5));
             }
             (
@@ -530,6 +520,16 @@
             0,
             "an unread round is not billed"
         );
+        // Original Root budget: the in-flight request is never consumed, and its
+        // unknown provider outcome stays held (not refunded) for reconciliation.
+        let root_requests = crate::agent_runtime::multi_agent::budget::balance(
+            &connection,
+            &ledger.run_id,
+            Some(""),
+            "model_requests",
+        )
+        .unwrap();
+        assert_eq!((root_requests.consumed, root_requests.indeterminate), (0, 1));
     }
 
     /// Phase 2 §3.2: the matrix classifies **every** target before any dependency is

@@ -12,6 +12,7 @@ include!("multi_agent/tests/worker_reassignment_faults.rs");
 include!("multi_agent/tests/worker_reassignment_bootstrap.rs");
 include!("multi_agent/tests/worker_reassignment_kill.rs");
 include!("multi_agent/tests/worker_supervisor.rs");
+include!("multi_agent/tests/worker_expiry_receipt.rs");
 include!("multi_agent/tests/worker_supervisor_liveness.rs");
 include!("multi_agent/tests/worker_supervisor_transport.rs");
 include!("multi_agent/tests/parent_governance.rs");

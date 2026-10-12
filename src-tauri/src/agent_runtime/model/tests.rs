@@ -806,3 +806,271 @@ fn a_vanished_peer_stops_the_upstream_request() {
         "the upstream kept serving to a peer that had left"
     );
 }
+
+/// FRESH-SINGLE-FIX negative test: a reply that has already been read to the
+/// end must not lose a coin flip to a cancel probe that fires in the same poll
+/// (that turned a billed, received Root reply into an unknown outcome whose
+/// reserve was forfeited as indeterminate). A reply still on the wire keeps
+/// losing to cancellation.
+#[test]
+fn transport_settle_prefers_a_completed_reply_and_still_cancels_in_flight() {
+    use super::transport::{self, CancelInitiator, TransportError, TransportReply};
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .unwrap();
+    // Unbiased, 256 ties lose at least once with probability 1 - 2^-256.
+    for round in 0..256 {
+        let outcome = runtime.block_on(transport::settle(
+            std::future::ready(Ok(TransportReply {
+                status: 200,
+                body: b"{\"usage\":{}}".to_vec(),
+            })),
+            std::future::ready(()),
+        ));
+        match outcome {
+            Ok(reply) => assert_eq!((reply.status, reply.body.len()), (200, 12)),
+            other => panic!("tie {round}: a completed reply was discarded: {other:?}"),
+        }
+    }
+    let in_flight = runtime.block_on(transport::settle(
+        std::future::pending::<Result<TransportReply, TransportError>>(),
+        std::future::ready(()),
+    ));
+    match in_flight {
+        Err(TransportError::Cancelled(observation)) => {
+            assert_eq!(observation.initiator, CancelInitiator::Local)
+        }
+        other => panic!("an in-flight reply must still be cancelled: {other:?}"),
+    }
+    let source = include_str!("transport.rs");
+    assert!(source.contains("settle(fetch, wait_for_cancel(&cancel)).await"));
+    assert!(source.contains("        biased;\n        outcome = fetch => outcome,"));
+}
+
+
+#[test]
+fn received_usage_log_distinguishes_provider_reported_and_ambiguous_numbers() {
+    let provider = MockProvider::spawn(|index, _| {
+        let text = completion("usage log", &[], 100);
+        raw(if index == 0 { text } else { text.replacen("\"usage\":", "\"usage\":{},\"usage\":", 1) })
+    });
+    let client = gateway(&provider.base_url, true);
+    let root = std::env::temp_dir().join(format!("oviraptor-usage-log-{}", uuid::Uuid::new_v4()));
+    std::fs::create_dir(&root).unwrap();
+    for reported in [true, false] {
+        let reply = client.complete(&ModelRequest::default(), &CancelToken::new()).unwrap();
+        assert_eq!(reply.usage_reported, reported);
+        client.record_usage_line(&root, &reply);
+    }
+    let text = std::fs::read_to_string(root.join(super::openai_compatible::USAGE_LEDGER_FILE)).unwrap();
+    let lines: Vec<JsonValue> = text.lines().map(|line| serde_json::from_str(line).unwrap()).collect();
+    assert_eq!(lines.len(), 2);
+    assert_eq!(lines[0]["usageReported"], true);
+    assert_eq!(lines[0]["usageBasis"], "provider_reported");
+    assert_eq!(lines[1]["usageReported"], false);
+    assert_eq!(lines[1]["usageBasis"], "unverified");
+    assert_eq!(lines[0]["usage"], lines[1]["usage"], "matching displayed numbers cannot conceal billing ambiguity");
+    assert_eq!(provider.hits(), 2);
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn received_cache_provenance_distinguishes_absent_zero_and_ambiguous_wire() {
+    use crate::recovery_finance::{Money, RateCard};
+    let binding = "a".repeat(64);
+    let pricing = RateCard::new(binding.clone(), "local-test-pricing".into(),
+        Money::from_nanos(2_000_000_000).unwrap(), Money::from_nanos(500_000_000).unwrap(),
+        Money::from_nanos(4_000_000_000).unwrap(), Money::from_nanos(10_000_000).unwrap()).unwrap();
+    let provider = MockProvider::spawn(|index, _| {
+        let mut body: JsonValue = serde_json::from_str(&completion("cache provenance", &[], 100)).unwrap();
+        body["usage"].as_object_mut().unwrap().remove("prompt_tokens_details");
+        match index {
+            0 => {},
+            1 => body["usage"]["cached_tokens"] = serde_json::json!(0),
+            2 => body["usage"]["input_tokens_details"] = serde_json::json!({"cached_tokens":25}),
+            _ => body["usage"]["cached_tokens"] = serde_json::json!(0),
+        }
+        let text = body.to_string();
+        raw(if index == 3 { text.replacen("\"cached_tokens\":0", "\"cached_tokens\":0,\"cached_tokens\":0", 1) } else { text })
+    });
+    let client = gateway(&provider.base_url, true);
+    let root = std::env::temp_dir().join(format!("oviraptor-cache-provenance-{}", uuid::Uuid::new_v4()));
+    std::fs::create_dir(&root).unwrap();
+    for (reported, cache_reported, cached) in [(true, false, 0), (true, true, 0), (true, true, 25), (false, false, 0)] {
+        let reply = client.complete(&ModelRequest::default(), &CancelToken::new()).unwrap();
+        assert_eq!((reply.usage_reported, reply.cached_usage_reported, reply.usage.cached_input_tokens), (reported, cache_reported, cached));
+        let quote = pricing.quote_reported_response(&binding, &reply);
+        if !reported {
+            assert_eq!(quote.unwrap_err(), "recovery_pricing_usage_unreported");
+        } else if !cache_reported {
+            assert_eq!(quote.unwrap_err(), "recovery_pricing_cached_usage_unreported");
+        } else {
+            assert_eq!(quote.unwrap().nanos(), 10_240_000 - cached * 1_500);
+        }
+        client.record_usage_line(&root, &reply);
+    }
+    let text = std::fs::read_to_string(root.join(super::openai_compatible::USAGE_LEDGER_FILE)).unwrap();
+    let frames: Vec<JsonValue> = text.lines().map(|line| serde_json::from_str(line).unwrap()).collect();
+    assert_eq!(frames.len(), 4);
+    for (frame, expected) in frames.iter().zip([false, true, true, false]) {
+        assert_eq!(frame["cachedUsageReported"], expected);
+    }
+    assert_eq!(provider.hits(), 4, "provenance inspection never resends an SDK request");
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+
+#[test]
+fn concurrent_usage_logging_preserves_complete_json_frames() {
+    let finish = "quoted\" newline\n终态 ".repeat(500);
+    let observed = finish.clone();
+    let provider = MockProvider::spawn(move |_, _| {
+        let mut body: JsonValue = serde_json::from_str(&completion("log frame", &[], 100)).unwrap();
+        body["choices"][0]["finish_reason"] = serde_json::json!(observed);
+        raw(body.to_string())
+    });
+    let client = Arc::new(gateway(&provider.base_url, true));
+    let response = client.complete(&ModelRequest::default(), &CancelToken::new()).unwrap();
+    let root = std::env::temp_dir().join(format!("oviraptor-usage-frame-{}", uuid::Uuid::new_v4()));
+    std::fs::create_dir(&root).unwrap();
+    let barrier = Arc::new(std::sync::Barrier::new(8));
+    let mut workers = Vec::new();
+    for _ in 0..8 {
+        let (client, response, root, barrier) = (client.clone(), response.clone(), root.clone(), barrier.clone());
+        workers.push(thread::spawn(move || {
+            barrier.wait();
+            for _ in 0..4 { client.record_usage_line(&root, &response); }
+        }));
+    }
+    for worker in workers { worker.join().unwrap(); }
+    let text = std::fs::read_to_string(root.join(super::openai_compatible::USAGE_LEDGER_FILE)).unwrap();
+    assert_eq!(text.lines().count(), 32);
+    for line in text.lines() {
+        let frame: JsonValue = serde_json::from_str(line).expect("concurrent diagnostic appends must be complete JSON frames");
+        assert_eq!(frame["finishReason"], finish);
+        assert_eq!(frame["usageReported"], true);
+    }
+    assert_eq!(provider.hits(), 1, "32 diagnostic appends are not 32 model requests");
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+
+#[test]
+fn locked_usage_diagnostic_does_not_indefinitely_block_the_received_call() {
+    let provider = MockProvider::spawn(|_, _| raw(completion("received", &[], 100)));
+    let client = gateway(&provider.base_url, true);
+    let response = client.complete(&ModelRequest::default(), &CancelToken::new()).unwrap();
+    let root = std::env::temp_dir().join(format!("oviraptor-usage-held-{}", uuid::Uuid::new_v4()));
+    std::fs::create_dir(&root).unwrap();
+    let path = root.join(super::openai_compatible::USAGE_LEDGER_FILE);
+    let held = std::fs::OpenOptions::new().create(true).append(true).open(&path).unwrap();
+    held.lock().unwrap();
+    let started = Instant::now();
+    client.record_usage_line(&root, &response);
+    assert!(started.elapsed() < Duration::from_secs(1));
+    assert!(std::fs::read_to_string(&path).unwrap().is_empty(), "a contended diagnostic cannot write an unlocked partial frame");
+    drop(held);
+    client.record_usage_line(&root, &response);
+    assert_eq!(std::fs::read_to_string(&path).unwrap().lines().count(), 1);
+    assert_eq!(provider.hits(), 1, "diagnostic contention cannot reissue a model request");
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+
+#[test]
+fn complete_payload_budget_rejects_messages_and_tool_schema_before_transport() {
+    for tools in [false, true] {
+        let provider = MockProvider::spawn(|_, _| raw(completion("accepted", &[], 10)));
+        let client = gateway(&provider.base_url, true);
+        let size = profile(&provider.base_url, true).request_budget_bytes();
+        let mut request = ModelRequest::default();
+        if tools {
+            request.tools = vec![ToolSchema::new("large", "schema", serde_json::json!({"description":"界".repeat(size)}))];
+        } else {
+            request.messages = vec![serde_json::json!({"role":"user","content":"界".repeat(size)})];
+        }
+        let error = client.complete_once_observed(&request, &CancelToken::new()).unwrap_err();
+        assert!(matches!(error, super::openai_compatible::OneShotFailure::BeforeTransport(ModelError::ContextOverflow(_))));
+        assert_eq!(provider.hits(), 0);
+        client.complete(&ModelRequest::default(), &CancelToken::new()).unwrap();
+        assert_eq!(provider.hits(), 1);
+    }
+}
+
+
+#[test]
+fn request_payload_budget_extreme_local_policy_never_overflows_transport_ceiling() {
+    let mut local = profile("http://127.0.0.1:11434/v1", true);
+    for (context, output, expected) in [
+        (u64::MAX, Some(1), 6_000_000),
+        (u64::MAX, Some(u64::MAX), 16_384),
+        (1, Some(u64::MAX), 16_384),
+        (32_768, Some(2_048), 120_832),
+    ] {
+        local.max_context_tokens = context;
+        local.max_output_tokens = output;
+        assert_eq!(local.request_budget_bytes(), expected);
+    }
+}
+
+
+#[test]
+fn configured_output_limit_is_sent_exactly_and_invalid_limits_never_dispatch() {
+    for local in [false, true] {
+        let provider = MockProvider::spawn(|_, _| raw(completion("bounded", &[], 10)));
+        let mut bounded = profile(&provider.base_url, local);
+        bounded.max_output_tokens = Some(37);
+        let client = OpenAiCompatibleGateway::new(bounded.clone(), &[]);
+        client.complete_once_observed(&ModelRequest::default(), &CancelToken::new()).unwrap();
+        let requests = provider.bodies();
+        let raw = &requests[0];
+        let body: JsonValue = serde_json::from_str(raw.split("\r\n\r\n").nth(1).unwrap_or(raw)).unwrap();
+        assert_eq!(body["max_tokens"], 37);
+        for limit in [0, u64::MAX, i64::MAX as u64 + 1] {
+            bounded.max_output_tokens = Some(limit);
+            let invalid = OpenAiCompatibleGateway::new(bounded.clone(), &[]);
+            assert!(matches!(invalid.complete_once_observed(&ModelRequest::default(), &CancelToken::new()),
+                Err(super::openai_compatible::OneShotFailure::BeforeTransport(ModelError::Protocol(ref e))) if e == "model_output_limit_invalid"));
+        }
+        if local {
+            bounded.max_output_tokens = Some(bounded.max_context_tokens);
+            let invalid = OpenAiCompatibleGateway::new(bounded, &[]);
+            assert!(matches!(invalid.complete_once_observed(&ModelRequest::default(), &CancelToken::new()),
+                Err(super::openai_compatible::OneShotFailure::BeforeTransport(ModelError::Protocol(_)))));
+        }
+        assert_eq!(provider.hits(), 1);
+    }
+}
+
+#[test]
+fn small_deepseek_structured_calls_freeze_non_thinking_without_expanding_reservation() {
+    for (model, cap, disabled) in [
+        ("deepseek-v4-flash", Some(512), true),
+        ("deepseek-v4-pro", Some(1024), true),
+        ("deepseek-flash", Some(2048), true),
+        ("deepseek-v4-flash", Some(4096), false),
+        ("deepseek-v4-flash", None, false),
+        ("other-model", Some(512), false),
+    ] {
+        let provider = MockProvider::spawn(|_, _| raw(completion("answer", &[], 10)));
+        let mut bounded = profile(&provider.base_url, false);
+        bounded.model = model.into();
+        bounded.max_output_tokens = cap;
+        let frozen = bounded.bounded_wire_options();
+        let client = OpenAiCompatibleGateway::new(bounded, &[]);
+        client.complete_once_observed(&ModelRequest::default(), &CancelToken::new()).unwrap();
+        let requests = provider.bodies();
+        let raw = &requests[0];
+        let body: JsonValue = serde_json::from_str(raw.split_once("\r\n\r\n").unwrap().1).unwrap();
+        assert_eq!(body.get("max_tokens").and_then(JsonValue::as_u64), cap);
+        if disabled {
+            assert_eq!(body["thinking"], frozen["thinking"]);
+            assert_eq!(body["thinking"]["type"], "disabled");
+        } else {
+            assert!(body.get("thinking").is_none());
+            assert_eq!(frozen, serde_json::json!({}));
+        }
+        assert_eq!(provider.hits(), 1);
+    }
+}

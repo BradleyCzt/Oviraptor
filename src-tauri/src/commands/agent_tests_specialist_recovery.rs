@@ -37,6 +37,40 @@ fn specialist_recovery_pipeline_reuses_completed_and_paused_analysis() {
     }
 }
 
+// Guard still bites: only the exact saved-receipt pause (original grant held,
+// unsettled, reconciliation failure class, received call only) is adoptable.
+#[test]
+fn specialist_recovery_paused_mapper_grant_rejects_any_other_paused_projection() {
+    // Uncertain/unknown Mapper debt is covered by
+    // coordinator_mapper_allocation_actual_unknown_sdk_retains_debt_and_cannot_reallocate
+    // (specialist calls are immutable, so it cannot be injected here).
+    for damage in ["failure_class", "held_tokens", "settled"] {
+        let (port,seen,_stop) = specialist_original_mapper_failure_endpoint(std::sync::Arc::new(|request| (200,"application/json",changed_fact_response(&request,true))));
+        let (root, mut context, _lease) = specialist_original_context("specialist-recovery-guard",&format!("http://127.0.0.1:{port}/v1"));
+        let connection = db::open(&context.db_path).unwrap();
+        connection.execute_batch("CREATE TRIGGER break_delivery BEFORE UPDATE OF acknowledged_at ON agent_messages WHEN NEW.kind='evidence_summary' BEGIN SELECT RAISE(IGNORE); END;").unwrap();
+        let _real = RealSpecialistTransport::enter();
+        assert!(multi_agent_prepare(&mut context).is_err());
+        connection.execute_batch("DROP TRIGGER break_delivery;").unwrap();
+        let state:(String,i64,String,String) = connection.query_row("SELECT state,reserved_tokens,budget_settled_at,failure_class FROM agent_assignments WHERE role='spa_api_mapper'",[],|r|Ok((r.get(0)?,r.get(1)?,r.get(2)?,r.get(3)?))).unwrap();
+        assert_eq!((state.0.as_str(),state.1,state.2.as_str()),("paused",8000,""),"fixture must reach the saved-receipt pause");
+        let sql = match damage {
+            "failure_class" => "UPDATE agent_assignments SET failure_class='model_error' WHERE role='spa_api_mapper'",
+            "held_tokens" => "UPDATE agent_assignments SET reserved_tokens=7999 WHERE role='spa_api_mapper'",
+            "settled" => "UPDATE agent_assignments SET budget_settled_at=datetime('now','localtime') WHERE role='spa_api_mapper'",
+            _ => unreachable!(),
+        };
+        connection.execute(sql,[]).unwrap();
+        let calls = seen.lock().unwrap().len();
+        let error = multi_agent_prepare(&mut context).err().unwrap();
+        assert!(error.contains("mapper_allocation_original_grant_conflict"),"{damage}: {error}");
+        assert_eq!(seen.lock().unwrap().len(),calls,"{damage}: no model call after a rejected grant");
+        let completed:i64 = connection.query_row("SELECT COUNT(*) FROM agent_assignments WHERE role='spa_api_mapper' AND state='completed'",[],|r|r.get(0)).unwrap();
+        assert_eq!(completed,0,"{damage}");
+        let _=fs::remove_dir_all(root);
+    }
+}
+
 #[test]
 fn specialist_recovery_rotated_fence_requires_new_attempt_before_budget_rebinding() {
     for completed_mapper in [false, true] {

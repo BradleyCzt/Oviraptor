@@ -9,6 +9,8 @@ use super::audit_rows::Rows;
 // Root-scoped accounting and journals include siblings, so collateral release
 // or a new dispatch inside a trigger also fails the final comparison.
 pub(crate) const FROZEN: &[&str] = &[
+    "SELECT rowid,* FROM agent_worker_expiry_issuance_seals WHERE root_run_id=?1 ORDER BY rowid",
+    "SELECT rowid,* FROM agent_worker_expiry_receipts WHERE root_run_id=?1 ORDER BY rowid",
     "SELECT * FROM agent_coordinator_leases WHERE root_run_id=?1 ORDER BY rowid",
     "SELECT * FROM agent_budget_ledger WHERE root_run_id=?1 ORDER BY rowid",
     "SELECT * FROM agent_budget_limits WHERE root_run_id=?1 ORDER BY rowid",

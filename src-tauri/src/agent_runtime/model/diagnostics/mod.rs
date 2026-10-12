@@ -1,6 +1,7 @@
 //! Safe SDK stages, independent of process streams, model bytes and accounting.
 mod owner;
 mod owner_coordinator;
+mod owner_mapper_loop;
 mod owner_saved;
 mod persist;
 pub(crate) mod replay;
@@ -114,6 +115,14 @@ impl ModelLog {
         Self::begin(path, |db| {
             owner::Owner::child(db, lease, child, round, tool)
         })
+    }
+    pub(crate) fn mapper_loop(
+        path: &Path,
+        lease: &CoordinatorLease,
+        child: &ScheduledChild,
+        round: i64,
+    ) -> Self {
+        Self::begin(path, |db| owner_mapper_loop::load(db, lease, child, round))
     }
     pub(crate) fn observer(&self) -> StageObserver {
         let state = self.state.clone();

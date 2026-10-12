@@ -8,6 +8,9 @@ pub(crate) mod audit_rows;
 mod cleanup;
 mod expired_saved;
 mod expiry;
+mod new_withdrawal;
+pub(crate) mod withdrawal_receipt;
+pub(super) use new_withdrawal::withdraw_new_for_supervision;
 pub(crate) mod expiry_proof;
 pub(crate) use expired_saved::{verify_expired_closed_audit, ExpiredSavedProof};
 pub(crate) use expiry::try_expire_original_in_transaction;
@@ -98,6 +101,7 @@ pub(crate) fn issue_first(
     assignment: &str,
     child_run: &str,
 ) -> Result<AssignmentAttempt, String> {
+    super::budget::continuation::migration::require_plain_root_boundary(tx, &lease.root_run_id)?;
     super::lease::validate_coordinator_lease(tx, lease)?;
     let fresh: bool = tx
         .query_row(
@@ -162,7 +166,13 @@ pub(crate) fn require_live_for_run(
           AND a.lease_expires_at>datetime('now','localtime') AND r.lease_expires_at>datetime('now','localtime')
           AND r.cancel_requested_at='' AND r.role=a.role AND r.lane=a.lane
           AND ((x.state='leased' AND a.state='leased' AND r.status='prepared')
-            OR (x.state='running' AND a.state IN ('running','waiting_review') AND r.status='running')))",
+            OR (x.state='running' AND a.state IN ('running','waiting_review') AND r.status='running')
+            -- Phase 1 审核 P0-2：同质 Worker 的执行载体。只对
+            -- scheduling_model='homogeneous_workers' 生效，legacy 两支条件保持原样。
+            OR (a.scheduling_model='homogeneous_workers' AND x.state='leased' AND a.state='assigned' AND r.status='prepared')
+            OR (a.scheduling_model='homogeneous_workers' AND x.state='running' AND a.state='running' AND r.status='running')
+            -- 重派：assignment 回到 assigned 时 attempt 仍是上一次存活的 running 行（不能违例回退状态）
+            OR (a.scheduling_model='homogeneous_workers' AND x.state='running' AND a.state='assigned' AND r.status='running')))",
         params![attempt.id,run_id],|r|r.get(0)).map_err(|e|e.to_string())?;
     if !live {
         return Err("assignment_attempt_expired_or_not_executable".into());

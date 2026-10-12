@@ -129,6 +129,7 @@ async function mount(overrides = {}, initialProps = {}, host = {}) {
     if (name === '../features/sentinel/workbench/WorkbenchSkillsCatalog.vue') return { default: icon };
     if (name === '../features/sentinel/workbench/WorkbenchOverview.vue') return { default: icon };
     if (name === '../features/sentinel/workbench/WorkbenchSkillSelection.vue') return { default: icon };
+    if (name === '../features/sentinel/workbench/WorkbenchToolSelection.vue') return { default: icon };
     if (name === '../features/sentinel/workbench/WorkbenchBrowserAuth.vue') return { default: browserAuthPanel };
     if (name === '../features/sentinel/workbench/WorkbenchTaskNotices.vue') return { default: noticesPanel };
     if (name === '../features/sentinel/workbench/WorkbenchWebPolicy.vue') return { default: webPolicyPanel };

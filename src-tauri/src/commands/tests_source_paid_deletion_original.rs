@@ -210,12 +210,31 @@ fn source_paid_deletion_original_accepted_sarif_and_independent_review_survive_c
     assert_eq!(file_bytes(&artifact_dir), files);
     let raw: String = db
         .query_row(
-            "SELECT audit_json FROM native_deleted_scan_audits WHERE scan_id=?1",
+            "SELECT audit_json FROM native_deleted_scan_audits_v2 WHERE scan_id=?1",
             [&record.scan_id],
             |r| r.get(0),
         )
         .unwrap();
+    assert_eq!(
+        db.query_row(
+            "SELECT version FROM native_deleted_scan_audits_v2 WHERE scan_id=?1",
+            [&record.scan_id],
+            |r| r.get::<_, i64>(0)
+        )
+        .unwrap(),
+        2
+    );
+    assert_eq!(
+        db.query_row(
+            "SELECT count(*) FROM native_deleted_scan_audits WHERE scan_id=?1",
+            [&record.scan_id],
+            |r| r.get::<_, i64>(0)
+        )
+        .unwrap(),
+        0
+    );
     let audit: JsonValue = serde_json::from_str(&raw).unwrap();
+    assert_eq!(audit["version"], 2);
     let retained = audit["tables"]
         .as_array()
         .unwrap()

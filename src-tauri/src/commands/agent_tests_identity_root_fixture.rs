@@ -6,7 +6,11 @@ fn identity_root_fixture(tag: &str, forbidden: bool, invalid: bool, boundary: Id
     let original=database.clone();
     let (port,seen,stop)=spawn_endpoint(std::sync::Arc::new(move |wire| {
         let text=if wire.contains("You are the Root Coordinator") {
-            if wire.contains("identity-session-output") {
+            let body: JsonValue = serde_json::from_str(wire.split_once("\r\n\r\n").unwrap().1).unwrap();
+            let input: JsonValue = serde_json::from_str(body["messages"][1]["content"].as_str().unwrap()).unwrap();
+            if input["basis"]["phase"] == "lease-expired" {
+                json!({"schemaVersion":1,"observed":["original signed expired identity metadata"],"missing":[],"suggestions":["assess:lease_expired"],"costNotes":[],"risks":[]}).to_string()
+            } else if input["basis"]["phase"] == "identity-session-output" {
                 if let Some(apply)=boundary.lock().unwrap().take() {
                     let db=db::open(original.lock().unwrap().as_ref().unwrap()).unwrap(); apply(&db);
                 }
@@ -18,14 +22,16 @@ fn identity_root_fixture(tag: &str, forbidden: bool, invalid: bool, boundary: Id
             }
         } else if wire.contains("SPA/API Mapper") {
             r#"{"summary":"frozen authenticated hints only","priorityContracts":[],"risks":[]}"#.into()
-        } else {
-            assert!(wire.contains("IdentitySession"));
+        } else if wire.contains("IdentitySession") {
             json!({"summary":"validated metadata only; no target effect proven","observedAuthentication":["one validated handle"],
                 "evidenceGaps":["missing actual identity comparison"],"authorizationProven":invalid}).to_string()
+        } else {
+            return (200,"application/json",model_round(&[],10));
         };
         (200,"application/json",proposal_model_response(&text))
     }));
-    let mut f=root_tick_fixture(tag,&format!("http://127.0.0.1:{port}/v1"));
+    let fixture=web_mode_fixture("multi","https://authorized.example.test");
+    let mut f=root_tick_fixture_from_web_mode_turns(tag,&format!("http://127.0.0.1:{port}/v1"),true,(60_000,20),None,fixture,Some(1));
     *database.lock().unwrap()=Some(f.context.db_path.clone());
     drop(f.parent.take());
     let db=db::open(&f.context.db_path).unwrap();

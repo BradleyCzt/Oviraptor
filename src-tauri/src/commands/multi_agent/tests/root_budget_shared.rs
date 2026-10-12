@@ -172,11 +172,18 @@ fn root_budget_late_original_multi_invoice_does_not_adopt_replacement_coordinato
             .terminal(&tx, "received", Some(&late_web_model_response()), "")
             .unwrap());
         tx.commit().unwrap();
+        let received: i64 = db.query_row("SELECT count(*) FROM agent_root_model_journal WHERE root_run_id=?1 AND phase='received'", [&root], |r|r.get(0)).unwrap();
+        let exact_cache: i64 = db.query_row("SELECT count(*) FROM agent_root_model_cache_provenance p JOIN agent_root_model_journal j
+         ON p.call_id=j.call_id AND p.root_run_id=j.root_run_id AND p.lease_attempt_id=j.lease_attempt_id
+         AND p.round=j.round AND p.request_hash=j.request_hash AND p.response_hash=json_extract(j.receipt_json,'$.responseHash')
+         WHERE j.root_run_id=?1 AND j.phase='received' AND p.cached_usage_reported=0", [&root], |r|r.get(0)).unwrap();
+        assert_eq!(exact_cache, received);
+        assert_eq!(db.query_row("SELECT count(*) FROM agent_root_model_cache_provenance", [], |r|r.get::<_,i64>(0)).unwrap(), received);
         let after = super::tests::application_table_snapshot(&db);
         for (table, rows) in &before {
             if !matches!(
                 table.as_str(),
-                "agent_root_model_journal" | "agent_budget_entries"
+                "agent_root_model_journal" | "agent_budget_entries" | "agent_root_model_cache_provenance"
             ) {
                 assert_eq!(
                     after

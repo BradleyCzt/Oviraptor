@@ -5,7 +5,7 @@ fn coordinator_tick_paid_process_probe() {
         return;
     };
     let (mut context, actor) = root_tick_reload_probe(Path::new(&path));
-    let parent = crate::agent_runtime::multi_agent::supervisor::WorkerSupervisor::start(
+    let parent = start_original_fixture_supervisor(
         &context.db_path,
         &actor,
     )
@@ -58,9 +58,16 @@ fn coordinator_tick_actual_sigkill_recovers_original_decision_without_new_sdk() 
     let killed = process.kill();
     let exit = process.wait().unwrap();
     drop(stdin);
+    let mut child_error = String::new();
+    if !paid {
+        if let Some(stderr) = process.stderr.take() {
+            let mut bounded = std::io::Read::take(stderr, 8192);
+            std::io::Read::read_to_string(&mut bounded, &mut child_error).unwrap();
+        }
+    }
     assert!(
         paid,
-        "actual production paid SDK checkpoint was not reached"
+        "actual production paid SDK checkpoint was not reached: {exit}; {child_error}"
     );
     assert!(killed.is_ok());
     assert_eq!(exit.signal(), Some(libc::SIGKILL));
@@ -78,7 +85,7 @@ fn coordinator_tick_actual_sigkill_recovers_original_decision_without_new_sdk() 
     let (mut context, original) = root_tick_reload_probe(&input);
     assert_eq!(original.lease_epoch, f.actor.lease_epoch);
     assert_eq!(original.fencing_token, f.actor.fencing_token);
-    let parent = crate::agent_runtime::multi_agent::supervisor::WorkerSupervisor::start(
+    let parent = start_original_fixture_supervisor(
         &context.db_path,
         &original,
     )

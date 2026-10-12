@@ -1,7 +1,10 @@
 //! Multi Root diagnostics bind one already-committed original financial call.
 //! These reads never initialize a Root, adopt C, authorize transport or store bodies.
 use super::owner::{Domain, Owner};
-use crate::agent_runtime::{multi_agent::budget::root::{model::tick::Tick, RootOwner}, store::stable_hash};
+use crate::agent_runtime::{
+    multi_agent::budget::root::{model::tick::Tick, RootOwner},
+    store::stable_hash,
+};
 use rusqlite::{params, Connection};
 use serde_json::{json, Value};
 

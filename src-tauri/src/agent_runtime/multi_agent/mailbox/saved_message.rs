@@ -54,6 +54,25 @@ pub(super) fn verify(
         }
         return Ok(());
     }
+    if role == AgentRole::SpaApiMapper
+        && crate::agent_runtime::web_mode::root::read(db, &lease.root_run_id)?
+            .and_then(|mode| mode.bootstrap_dispatch())
+            .is_some_and(|contract| contract["schemaVersion"] == 15)
+    {
+        let output = super::super::specialist::mapper_loop::verified_original_output_on(db, lease, &child)?;
+        if worker.state == "expired" {
+            super::super::specialist::mapper_loop::expired_saved::read_closed_original_on(db, lease, &child)?;
+        } else {
+            super::super::specialist::mapper_loop::require_settled_output_on(db, lease, &child, &output)?;
+        }
+        if from != child.run_id || to != lease.root_run_id || to_role != "coordinator"
+            || kind != "evidence_summary" || correlation != format!("mapper:{}", child.assignment_id)
+            || *payload != serde_json::json!({"summary":output.text()})
+        {
+            return Err("mailbox_saved_mapper_loop_original_mismatch".into());
+        }
+        return Ok(());
+    }
     let received = super::super::specialist::received_for_local_delivery(db, lease, &child)?;
     if !received.rejection.is_empty() {
         return Err("mailbox_saved_response_rejected".into());
@@ -117,6 +136,19 @@ pub(super) fn verify(
         | (AgentRole::IdentitySession, "identity_assessment") => {
             from == child.run_id && payload["summary"].as_str() == Some(received.text.as_str())
         }
+        (AgentRole::BusinessLogic, "evidence_summary") => {
+            super::super::budget::root::RootOwner::load_original(db, &lease.root_run_id)?
+                .require_original_coordinator(db, lease)?;
+            let directory = crate::commands::resolve_agent_evidence_location(db, &lease.root_run_id)?;
+            let collection = crate::commands::native_business_logic_output_collection_on(
+                db, lease, &child, &directory,
+            )?;
+            from == child.run_id
+                && to == lease.root_run_id
+                && to_role == "coordinator"
+                && correlation == format!("business-logic:{}", child.assignment_id)
+                && *payload == collection.fact()["payload"]
+        }
         (AgentRole::ClientSide, "evidence_summary") => {
             let task = super::super::client_side::assignment(db, lease, &child)?;
             super::super::client_side::validate_assessment(&received.text, &task)?;
@@ -128,6 +160,35 @@ pub(super) fn verify(
                 && payload.as_object().is_some_and(|v| v.len() == 2)
                 && payload["summary"].as_str() == Some(received.text.as_str())
                 && payload["clientSideTask"] == frozen
+        }
+        (AgentRole::InputParser, "input_assessment") => {
+            // U178: the saved InputParser result stays inside the readonly surface
+            // it was minted for. Re-bind the surface to this lease and the paid
+            // frame decision hash, then re-check the strict parameter schema.
+            let slice_text: String = db
+                .query_row(
+                    "SELECT task_slice_json FROM agent_assignments WHERE id=?1 AND child_run_id=?2",
+                    params![child.assignment_id, child.run_id],
+                    |r| r.get(0),
+                )
+                .map_err(|_| "input_parser_assignment_invalid")?;
+            let slice: JsonValue =
+                serde_json::from_str(&slice_text).map_err(|_| "input_parser_task_invalid")?;
+            let decision_hash = slice["frame"]["decisionHash"]
+                .as_str()
+                .ok_or("input_parser_task_scope_invalid")?;
+            let task = super::super::input_parser::Task::from_value(
+                &payload["inputParserTask"],
+                lease,
+                decision_hash,
+            )?;
+            super::super::input_parser::validate_assessment(&received.text, &task)?;
+            from == child.run_id
+                && to == lease.root_run_id
+                && to_role == "coordinator"
+                && correlation == format!("input-parser:{}", child.assignment_id)
+                && payload.as_object().is_some_and(|v| v.len() == 2)
+                && payload["summary"].as_str() == Some(received.text.as_str())
         }
         (AgentRole::EvidenceReviewer, "source_review_result") => {
             from == child.run_id

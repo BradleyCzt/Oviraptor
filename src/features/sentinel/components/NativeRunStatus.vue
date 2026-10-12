@@ -7,6 +7,8 @@ import { createNativeRunStatusLabels } from "./nativeRunStatusLabels";
 import { useCommittedRefresh } from "../../../composables/useCommittedRefresh";
 import { validCollaborationEvent } from "../timeline/eventContract";
 import NativeBudgetDiagnostics from "./NativeBudgetDiagnostics.vue";
+import NativeRootReconciliation from "./NativeRootReconciliation.vue";
+import NativeProtectionRecovery from "./NativeProtectionRecovery.vue";
 import NativeSourcePauseRecovery from "./NativeSourcePauseRecovery.vue";
 
 const props = defineProps<{ scanId: string; attempt: number; status: string }>();
@@ -367,6 +369,8 @@ onUnmounted(() => { disposed = true; generation++; actionGeneration++; });
       </aside>
     </template>
   </section>
+  <NativeRootReconciliation v-if="props.scanId" :key="`cost:${props.scanId}`" :scan-id="props.scanId" :attempt="props.attempt" />
+  <NativeProtectionRecovery v-if="props.scanId" :key="`recovery:${props.scanId}`" :scan-id="props.scanId" />
 </template>
 
 <style scoped src="./nativeRunStatus.css"></style>

@@ -9,7 +9,7 @@ use rusqlite::{params, Connection};
 use serde_json::{json, Value};
 use std::time::Duration;
 impl Tick {
-    fn original_request_for_projection(
+    pub(super) fn original_request_for_projection(
         db: &Connection,
         root: &str,
         selected: &str,
@@ -50,7 +50,11 @@ impl Tick {
             || fact["request"]["basisHash"] != basis
             || !matches!(
                 fact["request"]["purpose"].as_str(),
-                Some("coordinator_decision_v1" | "coordinator_changed_fact_v1")
+                Some(
+                    "coordinator_decision_v1"
+                        | "coordinator_changed_fact_v1"
+                        | "coordinator_financial_continuation_v1"
+                )
             )
             || round <= 0
             || id
@@ -133,11 +137,15 @@ impl Tick {
                     let unknown = tick.cost_unknown(db, &response)?;
                     tick.cost_rows(db, Some(&response))?;
                     let saved = tick.load_decision(db)?;
-                    if let Some(saved) = &saved { tick.verify_paid(db, saved)?; }
+                    if let Some(saved) = &saved {
+                        tick.verify_paid(db, saved)?;
+                    }
                     // Cold Native history without an original proof is not a
                     // verified bill and cannot be upgraded from current rows.
-                    let proven = matches!(tick.request_fact["version"].as_i64(), Some(2 | 3)) || saved.is_some();
-                    if proven && response.usage_reported
+                    let proven = matches!(tick.request_fact["version"].as_i64(), Some(2 | 3))
+                        || saved.is_some();
+                    if proven
+                        && response.usage_reported
                         && invoice["usage"].as_object().is_some_and(|o| {
                             o.values().all(|v| {
                                 v.as_i64()
@@ -266,6 +274,8 @@ pub(super) fn invoice_response(invoice: &Value) -> Result<ModelResponse, String>
     }
     let n = |k: &str| usage[k].as_i64().ok_or(invalid.to_string());
     Ok(ModelResponse {
+        // Never infer explicit cache reporting from a legacy numeric invoice.
+        cached_usage_reported: false,
         text: String::new(),
         tool_calls: vec![],
         finish_reason: "stop".into(),

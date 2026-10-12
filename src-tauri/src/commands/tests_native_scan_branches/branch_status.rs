@@ -99,6 +99,15 @@ fn native_branch_reducer_serializes_concurrent_connections() {
 fn native_branch_worker_exit_is_a_failure_but_cannot_overwrite_completed_receipts() {
     let (root, _, path) = source_regression_fixture();
     let connection = db::open(&path).unwrap();
+    // Workbench startup registers the repository itself as this attempt's
+    // scanning target; the Source finalizer only publishes when that row
+    // carries the branch result for the same attempt.
+    connection.execute_batch(
+        "INSERT INTO projects(id,name) VALUES(1,'branch exit fixture');
+         UPDATE sentinel_scans SET project_id=1 WHERE id='source-regression';
+         INSERT INTO sentinel_targets(project_id,scan_id,company,url,status,last_attempt_number)
+         SELECT project_id,id,project_name,source_path,'scanning',attempt_count FROM sentinel_scans WHERE id='source-regression';",
+    ).unwrap();
     register_native_branches(&connection, "source-regression", 1, &["source", "web"]).unwrap();
     let guard = NativeBranchGuard::claim(&path, "source-regression", 1, "source").unwrap();
     drop(guard);
@@ -109,6 +118,34 @@ fn native_branch_worker_exit_is_a_failure_but_cannot_overwrite_completed_receipt
     assert_eq!(status,"partial");
     let web: String = connection.query_row("SELECT status FROM native_scan_branches WHERE branch='web'", [], |r| r.get(0)).unwrap();
     assert_eq!(web,"completed");
+    let source: (String, String) = connection.query_row(
+        "SELECT b.status,t.status FROM native_scan_branches b JOIN sentinel_scans s ON s.id=b.scan_id
+         JOIN sentinel_targets t ON t.scan_id=s.id AND t.url=s.source_path AND t.last_attempt_number=b.attempt_number
+         WHERE b.branch='source'", [], |r| Ok((r.get(0)?, r.get(1)?))).unwrap();
+    assert_eq!(source, ("failed".to_string(), "failed".to_string()), "the unpaid worker exit is a recorded failure");
+    fs::remove_dir_all(root).unwrap();
+}
+
+/// Guard still bites: without the attempt's own Source target row the Source
+/// finalizer cannot prove its projection, so a worker exit publishes nothing and
+/// the branch stays pending for recovery instead of inventing a failure.
+#[test]
+fn native_source_worker_exit_without_its_attempt_target_is_not_published() {
+    let (root, _, path) = source_regression_fixture();
+    let connection = db::open(&path).unwrap();
+    register_native_branches(&connection, "source-regression", 1, &["source", "web"]).unwrap();
+    assert_eq!(
+        finish_native_source_branch(&path, "source-regression", 1, &json!({"error":"branch_worker_exited"})),
+        Err("source_branch_projection_unconfirmed".to_string())
+    );
+    let guard = NativeBranchGuard::claim(&path, "source-regression", 1, "source").unwrap();
+    drop(guard);
+    let branches: Vec<(String, String)> = connection
+        .prepare("SELECT branch,status FROM native_scan_branches ORDER BY branch").unwrap()
+        .query_map([], |r| Ok((r.get(0)?, r.get(1)?))).unwrap().collect::<Result<_, _>>().unwrap();
+    assert_eq!(branches, vec![("source".to_string(), "pending".to_string()), ("web".to_string(), "pending".to_string())]);
+    let status: String = connection.query_row("SELECT status FROM sentinel_scans", [], |r| r.get(0)).unwrap();
+    assert_eq!(status, "scanning");
     fs::remove_dir_all(root).unwrap();
 }
 

@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onUnmounted, watch } from "vue";
 import RootDecisionSummary from "./RootDecisionSummary.vue";
+import AgentIdentityMaterial from "./AgentIdentityMaterial.vue";
 import { useAgentDialogTasks } from "../composables/useAgentDialogTasks";
 import { useAgentDialogReading } from "../composables/useAgentDialogReading";
 import { useAgentDialogStatus } from "../composables/useAgentDialogStatus";
@@ -9,7 +10,7 @@ import { useAgentDialogFollowup } from "../composables/useAgentDialogFollowup";
 import { agentDialogLabels, dialogContextPresentation, humanReviewPresentation } from "./agentDialogLabels";
 import { timelineIdentity } from "../timeline/projectionContract";
 import { humanAssessmentRows } from "../timeline/humanAssessmentContract";
-import type { RootHumanAssessmentObligation } from "../../../types";
+import type { AgentTimelineItem, RootHumanAssessmentObligation } from "../../../types";
 import type { GapFollowupPreview, SentinelScan } from "../../../types";
 import { useI18n } from "../../../i18n";
 
@@ -42,7 +43,7 @@ const { draft, actionError, sending, selectedHistoricalReceipt, directiveDrafts,
   send, canConfirmDirective, canCancelDirective, confirmDirective, cancelDirective, reconcileReceipt, reconcileHistoricalReceipt,
   resetForTask: resetDirectivesForTask } = useAgentDialogDirectives({
   projectId: () => props.projectId, scanId, state, threadFilter, captureTaskView,
-  isDisposed: () => disposed, loadStatus, tr,
+  isDisposed: () => disposed, loadStatus: () => loadStatus(undefined, true), tr,
 });
 const { preparingFollowup, prepareFollowup } = useAgentDialogFollowup({
   projectId: () => props.projectId, scanId, state, captureTaskView, actionError,
@@ -80,10 +81,17 @@ const { roleLabel, eventLabel, diagnosticLabel, gapStepLabel, gapReasonLabel } =
 const { reviewLabel, actionLabel, actionReasonLabel, decisionLabel, validationLabel, effectLabel, directiveReasonLabel } = humanReviewPresentation(tr);
 const { statusLabel, reviewStatusLabel, stageLabel, nextActionLabel, timestampLabel } = dialogContextPresentation(tr);
 
+function homogeneousGuidanceStatus(item: AgentTimelineItem) {
+  const source = item.eventType === 'user_directive' ? item.id : item.humanReview?.directiveId;
+  if (!source) return undefined;
+  return state.value?.timeline.find((row) => row.eventType === 'homogeneous_guidance'
+    && row.sourceUserDirectiveId === source)?.status;
+}
+
 void installCollaborationListener();
 watch(() => props.projectId, () => {
   resetForProject();
-  void loadScans().then(() => loadStatus());
+  void loadScans().then(() => loadStatus(undefined, true));
 }, { immediate: true, flush: "sync" });
 watch(() => props.initialScanId, (id) => {
   if (id) void selectScan(id);
@@ -93,7 +101,7 @@ watch([() => props.projectId, scanId], () => {
   resetForTask();
   resetDirectivesForTask();
   threadFilter.value = "";
-  void loadStatus();
+  void loadStatus(undefined, true);
 }, { flush: "sync" });
 onUnmounted(() => {
   disposed = true;
@@ -109,11 +117,14 @@ onUnmounted(() => {
         <h2>{{ tr("调查对话", "Investigation dialog") }}</h2>
         <p>{{ tr("采集、调查和检查的话出现在这里。你的修正进入正在跑或下一次继续的调查，不能扩大域名或预算。", "Collector, investigator and checker notes appear here. Your correction enters the running or next resumed investigation and cannot widen scope or budget.") }}</p>
       </div>
-      <button class="button primary" type="button" @click="emit('start')">{{ tr("新调查", "New investigation") }}</button>
+      <div class="button-row">
+        <button class="button ghost" type="button" @click="loadScans().then(() => loadStatus(undefined, true))">{{ tr("刷新消息", "Refresh messages") }}</button>
+        <button class="button primary" type="button" @click="emit('start')">{{ tr("新调查", "New investigation") }}</button>
+      </div>
     </header>
     <div v-if="error" class="form-error" role="alert">
       <p>{{ error }}</p>
-      <button v-if="listError || statusError" class="button ghost compact" type="button" @click="loadScans().then(() => loadStatus())">{{ tr("重新读取", "Retry loading") }}</button>
+      <button v-if="listError || statusError" class="button ghost compact" type="button" @click="loadScans().then(() => loadStatus(undefined, true))">{{ tr("重新读取", "Retry loading") }}</button>
     </div>
     <div v-if="selectionNotice || selectionBusy || selectionError" class="dialog-selection-status">
       <p v-if="selectionNotice" role="status">{{ selectionNotice }}</p>
@@ -185,6 +196,7 @@ onUnmounted(() => {
                 ? tr('漏洞候选已确认', 'Finding confirmed')
                 : tr('漏洞候选审查中', 'Finding review pending') }}</span>
         </div>
+        <AgentIdentityMaterial :project-id="selected?.projectId ?? props.projectId" :scan-id="scanId" />
         <div v-if="state" class="dialog-thread-filter">
           <label for="dialog-thread-select">{{ tr("协作线程", "Collaboration thread") }}</label>
           <select id="dialog-thread-select" v-model="threadFilter" :disabled="dialogViewBusy" @change="saveDialogView()">
@@ -227,11 +239,13 @@ onUnmounted(() => {
         >
           <header>
             <span class="dialog-role-mark" aria-hidden="true">{{ roleLabel(item.fromRole)?.slice(0, 1) || '·' }}</span>
-            <b>{{ roleLabel(item.fromRole) }}</b>
+            <b>{{ ['homogeneous_decision', 'homogeneous_guidance'].includes(item.eventType) ? tr('主管', 'Coordinator') : roleLabel(item.fromRole) }}</b>
             <span>{{ eventLabel(item.eventType) }}</span>
           </header>
           <RootDecisionSummary v-if="item.eventType === 'root_decision'" :chat-item="item" />
           <p v-else>{{ item.summary || item.messageKind }}</p>
+          <small v-if="item.workerId">Worker {{ item.workerId.slice(-8) }} · {{ tr('切片', 'Slice') }} {{ item.sliceId?.slice(-8) }}<template v-if="item.eventType === 'worker_report'"> · {{ item.modelRequests }} {{ tr('次模型请求', 'model request(s)') }} · {{ item.totalTokens }} tokens</template></small>
+          <p v-if="item.zeroIntent" class="dialog-message-meta">{{ item.zeroIntent.reason === 'blocked_on_inflight_output' ? tr('等待正在执行的汇报', 'Waiting for running workers') : tr('已有任务覆盖本轮目标', 'Existing work covers this turn') }} · {{ item.zeroIntent.evidence_assignment_ids.length }} {{ tr('条在途分派', 'inflight assignments') }}</p>
           <div v-if="item.humanReview" class="human-review-summary">
             <span class="dialog-state-pill">{{ reviewLabel(item.humanReview.kind) }}</span>
             <span v-if="item.humanReview.requiresConfirmation" class="dialog-state-pill pending">{{ tr("新草案待确认", "New draft awaits confirmation") }}</span>
@@ -295,6 +309,10 @@ onUnmounted(() => {
             <strong>{{ tr("本目标任务已结束", "This target task has ended") }}</strong>
             <p v-if="item.taskClosure.disposition === 'not_started'">{{ tr("评估子任务尚未启动，已取消并释放其未用预算。", "Assessment never started; cancelled and its unused reservation released.") }}</p>
             <p v-else-if="item.taskClosure.disposition === 'analysis_guidance_delivered' && item.sourceGuidance">{{ tr("分析建议的送达已核验并归档；仅完成建议送达，不代表建议被采纳或检查通过。", "Analysis guidance delivery is verified and archived; only delivery is complete, not adoption or a passed check.") }}</p>
+            <template v-else-if="item.taskClosure.disposition === 'not_applied' && homogeneousGuidanceStatus(item)">
+              <p v-if="homogeneousGuidanceStatus(item) === 'applied'">{{ tr("主管批准的分析约束已被 Worker 读取。独立动作执行和验证结果请查看对应回执。", "Workers read the coordinator-approved analysis constraint. Consult the corresponding receipts for independent actions and verification.") }}</p>
+              <p v-else>{{ tr("主管引导状态见对应回执；本轮没有确认 Worker 已读取该约束。", "Consult the coordinator guidance receipt; worker reading of this constraint is unconfirmed for this attempt.") }}</p>
+            </template>
             <p v-else-if="item.taskClosure.disposition === 'not_applied'">{{ tr("指令未取得动作落实回执，不视为已执行。", "No action receipt was recorded; this instruction is not treated as executed.") }}</p>
             <p v-else-if="item.taskClosure.disposition === 'outcome_unknown'">{{ tr("模型调用结果未知，预算预留保留，需核对后处理。", "Model outcome unknown; reservation retained for reconciliation.") }}</p>
             <template v-else-if="item.taskClosure.disposition === 'receipt_pending'">
@@ -371,7 +389,7 @@ onUnmounted(() => {
           <p v-if="pendingDraft.intent !== 'source_analysis_focus' && pendingDraft.reasonCodes.includes('source_guidance_tool_round_eligible') && pendingDraft.status !== 'rejected'" class="directive-warning">{{ tr("这是源码分析关注点，只进入下一尚未冻结的适用阶段或工具轮次；不新增模型请求、不改变权限和已发出的请求。没有后续阶段时不会送达，送达不代表采纳或执行完成。", "This source analysis focus can enter only the next unfrozen applicable phase or tool round. It adds no model request or permissions and cannot alter dispatched requests. No remaining phase means no delivery; delivery is not adoption or completed execution.") }}</p>
           <p v-if="pendingDraft.intent === 'source_analysis_focus' && pendingDraft.status !== 'rejected'" class="directive-warning">{{ tr("仅发送给指定源码角色下一次尚未冻结的阶段（含工具阶段后续轮次）；不新增 Agent 或模型请求。已经发出的请求保持不变，后续轮次仍受原预算约束。若该角色没有后续阶段，则不会送达，也不会改投其他角色。送达不代表采纳建议或作出裁决。", "Only the requested source role's next unfrozen phase, including later tool rounds, may receive this focus. No new Agent or model request is created. Dispatched requests remain unchanged and later rounds keep the original budget. If no phase remains, it is not delivered or rerouted. Delivery is not adoption or a verdict.") }}</p>
           <p v-if="pendingDraft.reasonCodes.includes('host_boundary_not_supported')" class="directive-warning">{{ tr("当前任务仅限 Web；主机验证、远程命令和经 Web 参数触发的系统命令均不会执行。当前没有主机审批后端或执行器，聊天确认不能开通。", "This task is Web-only. Host verification, remote commands and OS commands triggered through Web parameters will not run. No host approval backend or executor exists; chat confirmation cannot enable them.") }}</p>
-          <p v-else-if="pendingDraft.status === 'rejected'" class="directive-warning">{{ tr("已失败关闭：草案不会进入 Coordinator 队列。凭证请使用专用身份捕获流程。", "Fail closed: this draft cannot enter the Coordinator queue. Use the dedicated identity capture flow for credentials.") }}</p>
+          <p v-else-if="pendingDraft.status === 'rejected'" class="directive-warning">{{ tr("草案被拒绝，不会进入主管队列；请查看原因。", "Draft rejected; it cannot enter the supervisor queue. Inspect the reason.") }}</p>
           <div v-if="reviewingDraft?.id === pendingDraft.id" class="directive-review-editor">
             <p>{{ reviewKind === 'revise' ? tr("保存后重新解释并生成待确认草案，不会执行。", "Saving reparses a new draft for confirmation; it does not execute.") : tr("拒绝原因将保存到终态回执。", "The rejection reason is saved in a terminal receipt.") }}</p>
             <textarea v-model="reviewText" :aria-label="reviewKind === 'revise' ? tr('修改草案内容', 'Revised draft text') : tr('拒绝理由', 'Rejection reason')" rows="3" :maxlength="reviewKind === 'revise' ? 2000 : 500" :disabled="sending"></textarea>
@@ -388,7 +406,7 @@ onUnmounted(() => {
         <form class="dialog-composer" @submit.prevent="send">
           <p class="input-hint">{{ tr("发送到", "Send to") }}：{{ !threadFilter || threadFilter === "team" ? tr("团队频道", "Team") : selectedThreadLabel }}</p>
           <textarea v-model="draft" :aria-label="tr('调查方向与补充说明', 'Investigation correction')" rows="3" maxlength="2000" :placeholder="tr('写下要修正的方向，例如先验证登录接口，不要停在 404', 'Write a correction, for example keep testing the login endpoint instead of stopping on 404')"></textarea>
-          <p class="input-hint">{{ tr("不要在这里粘贴 Cookie、Token、密码或其他凭证。发送只生成草案，不会立即执行。", "Do not paste cookies, tokens, passwords, or credentials here. Send creates a draft and does not execute it.") }}</p>
+          <p class="input-hint">{{ tr("新建同质任务保留用于身份比对的 Cookie、Token、密码等原文。发送生成草案，确认后由主管处理。", "New homogeneous tasks preserve original cookies, tokens and passwords for identity comparison. Send creates a draft; the supervisor handles it after confirmation.") }}</p>
           <button class="button" type="submit" :disabled="sending || !draft.trim() || directiveDrafts.some((item) => item.status !== 'rejected')">{{ sending ? tr("解析中", "Parsing") : tr("解析指令", "Parse directive") }}</button>
         </form>
       </div>

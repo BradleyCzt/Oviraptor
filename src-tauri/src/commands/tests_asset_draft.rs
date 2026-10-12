@@ -41,8 +41,17 @@ fn asset_draft_commits_exact_scoped_deduplicated_targets_without_starting() {
     ]);
     drop(statement);
     let policy: String = connection.query_row("SELECT policy_json FROM sentinel_scan_contexts WHERE scan_id=?1", [&scan.id], |row| row.get(0)).unwrap();
-    let expected = build_web_investigation_policy(Some("deep"),None,Vec::new(),&[],"","asset-workspace",Some("breadth")).unwrap();
+    let mut expected = build_web_investigation_policy(Some("deep"),None,Vec::new(),&[],"","asset-workspace",Some("breadth")).unwrap();
+    // Every new ordinary Web draft freezes its orchestration mode in the same
+    // creation transaction (web_mode::draft::register_new); asset drafts have no
+    // mode input and take the new-draft default, Multi. Nothing else is added.
+    expected.as_object_mut().unwrap().insert("orchestration".into(), serde_json::json!({"version":1,"mode":"multi"}));
     assert_eq!(serde_json::from_str::<JsonValue>(&policy).unwrap(), expected);
+    assert_eq!(
+        crate::agent_runtime::web_mode::draft::read(&connection, &scan.id).unwrap().1,
+        crate::agent_runtime::web_mode::WebMode::Multi,
+        "the declared mode and its draft receipt agree"
+    );
     let after = web_draft_snapshot(&connection);
     assert_eq!(after["sentinel_scans"], 2);
     assert_eq!(after["sentinel_scan_contexts"], 1);

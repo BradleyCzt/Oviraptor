@@ -65,6 +65,20 @@ fn native_coordinator_human_assessments(
     }
     Ok(assessments)
 }
+/// DESIGN §5.5：这条 root 若是同质任务，引导本轮是否已由主管全部裁决。
+/// `None` 表示不是同质任务，继续走 legacy 的 suggestions 判定；读取失败一律上抛，
+/// 不静默退回 legacy（避免同质 run 在库异常时被当成 legacy 轮次放过）。
+pub(crate) fn homogeneous_directives_decided(
+    db: &rusqlite::Connection,
+    root_run_id: &str,
+) -> Result<Option<bool>, String> {
+    use crate::agent_runtime::multi_agent::homogeneous::{apply, store};
+    if !apply::task_exists_for_root(db, root_run_id)? {
+        return Ok(None);
+    }
+    Ok(Some(store::all_directives_decided(db, root_run_id)?))
+}
+
 impl NativeHumanAssessment {
     fn verify(
         &self,
@@ -79,6 +93,15 @@ impl NativeHumanAssessment {
             return Err("root_human_original_publication_changed".into());
         }
         let summary = self.paid.summary.as_json();
+        // DESIGN §5.5：同质路径的引导裁决以 gated 表为准（新决策结构独立，
+        // 不复用 camelCase 的 DecisionSummary）。已裁决 → 本轮继续；未裁决 → 保持 deferred。
+        if let Some(decided) = homogeneous_directives_decided(db, &actor.root_run_id)? {
+            return if decided {
+                Ok(())
+            } else {
+                Err("root_human_directive_deferred".into())
+            };
+        }
         let suggestions = summary["suggestions"]
             .as_array()
             .ok_or("root_decision_schema_invalid")?;

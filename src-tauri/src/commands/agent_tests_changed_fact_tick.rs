@@ -1,6 +1,12 @@
 fn changed_fact_response(request: &str, allow: bool) -> String {
     if request.contains("You are the Root Coordinator") {
-        let suggestion = if request.contains("budget-allocation") {
+        let body: JsonValue = serde_json::from_str(request.split_once("\r\n\r\n").unwrap().1).unwrap();
+        let input: JsonValue = serde_json::from_str(body["messages"][1]["content"].as_str().unwrap()).unwrap();
+        let suggestion = if input["basis"]["phase"] == "http-budget-consumption" {
+            "assess:http_budget_consumption"
+        } else if input["basis"]["phase"] == "budget-consumption" {
+            "assess:budget_consumption"
+        } else if request.contains("budget-allocation") {
             "assess:budget_allocation"
         } else if request.contains("identity-session-output") {
             "assess:identity_session_metadata"
@@ -36,12 +42,15 @@ fn coordinator_changed_mapper_fact_actual_sdk_and_same_fact_zero_sdk_replay() {
         (
             200,
             "application/json",
-            changed_fact_response(&request, true),
+            if request.contains("You are the Root Coordinator") || request.contains("SPA/API Mapper") {
+                changed_fact_response(&request, true)
+            } else { model_round(&[], 10) },
         )
     }));
-    let mut f = root_tick_fixture(
-        "changed-fact-mapper",
-        &format!("http://127.0.0.1:{port}/v1"),
+    let fixture = web_mode_fixture("multi", "https://authorized.example.test");
+    let mut f = root_tick_fixture_from_web_mode_turns(
+        "changed-fact-mapper", &format!("http://127.0.0.1:{port}/v1"),
+        true, (60_000,20), None, fixture, Some(1),
     );
     drop(f.parent.take());
     let mut session = multi_agent_prepare(&mut f.context).unwrap();
@@ -89,12 +98,10 @@ fn coordinator_changed_mapper_fact_actual_sdk_and_same_fact_zero_sdk_replay() {
         .consumed,
         2
     );
-    multi_agent_finish_execution(
-        &f.context,
-        &mut session,
-        &AgentTargetOutcome::incomplete("changed fact proof"),
-    )
-    .unwrap();
+    let outcome = run_native_agent(&f.context);
+    assert!(matches!(outcome, AgentTargetOutcome::BoundedCompleted(_) | AgentTargetOutcome::Incomplete(_)), "{}", outcome.detail());
+    multi_agent_finish_execution(&f.context, &mut session, &outcome).unwrap();
+    assert_eq!(seen.lock().unwrap().len(), 5, "original budget feedback and one actual empty Web round exit naturally");
     drop(session);
 }
 
@@ -185,15 +192,20 @@ fn coordinator_dispatch_last_write_cannot_change_original_closed_mapper() {
 fn coordinator_changed_fact_cannot_replace_original_provider_credential_before_new_fee() {
     let _real = RealSpecialistTransport::enter();
     let (port, seen, _) = spawn_endpoint(std::sync::Arc::new(|request| {
+        if specialist_original_is_web_sdk(&request) {
+            return (200, "application/json", proposal_model_response("actual bounded Web exit; no target tool"));
+        }
         (
             200,
             "application/json",
             changed_fact_response(&request, true),
         )
     }));
-    let mut f = root_tick_fixture(
+    let mut f = root_tick_fixture_from_web_mode_turns(
         "changed-fact-model-owner",
         &format!("http://127.0.0.1:{port}/v1"),
+        true, (60_000, 20), None,
+        web_mode_fixture("multi", "https://authorized.example.test"), Some(1),
     );
     drop(f.parent.take());
     let mut session = multi_agent_prepare(&mut f.context).unwrap();
@@ -215,12 +227,15 @@ fn coordinator_changed_fact_cannot_replace_original_provider_credential_before_n
         "no provider/credential adoption or new invoice"
     );
     web_mode_assert_rows(&db, &before);
-    multi_agent_finish_execution(
-        &f.context,
-        &mut session,
-        &AgentTargetOutcome::incomplete("model owner proof"),
-    )
-    .unwrap();
+    let original_web = run_native_agent(&f.context);
+    assert!(matches!(original_web, AgentTargetOutcome::BoundedCompleted(_) | AgentTargetOutcome::Incomplete(_)), "{original_web:?}");
+    multi_agent_finish_execution(&f.context, &mut session, &original_web).unwrap();
+    assert_eq!(seen.lock().unwrap().iter().filter(|wire| specialist_original_is_web_sdk(wire)).count(), 1);
+    let usage: (i64, i64, i64) = db.query_row(
+        "SELECT used_tokens,used_cached_tokens,used_requests FROM agent_runs WHERE id=?1",
+        [&session.executor.run_id], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+    ).unwrap();
+    assert_eq!(usage, (20, 0, 1), "only the unchanged original context can pay and exit");
     drop(session);
 }
 

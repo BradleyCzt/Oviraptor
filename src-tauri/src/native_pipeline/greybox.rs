@@ -325,6 +325,7 @@ pub fn read_only_lane_holders(
         .prepare(
             "SELECT DISTINCT child_run_id FROM agent_assignments
              WHERE lane='read_only_analysis' AND target_key=?1
+               AND scheduling_model='legacy_role_pipeline'
                AND state NOT IN ('completed','failed','cancelled','rejected')
              ORDER BY child_run_id",
         )

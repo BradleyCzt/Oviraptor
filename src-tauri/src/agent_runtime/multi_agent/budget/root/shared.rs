@@ -58,22 +58,37 @@ pub(super) fn available(db: &Connection, root: &str) -> Result<(Option<i64>, Opt
     if token_limit < 0 || request_limit < 0 || !matches!(policy.as_str(), "single" | "multi") {
         return Err("budget_limit_invalid".into());
     }
-    for (dimension, expected) in [
-        ("model_input_tokens", token_limit),
-        ("model_output_tokens", token_limit),
-        ("model_requests", request_limit),
-    ] {
-        let saved: Option<i64> = db
-            .query_row(
+    let migrated = super::super::continuation::migration::read(db, root)?;
+    let (token_cap, request_cap) = if let Some(declaration) = &migrated {
+        let caps = super::super::continuation::migration::shared_caps_on(db, root)?
+            .ok_or("migration_shared_contract_missing")?;
+        for (dimension, expected) in super::super::DIMENSIONS.iter().zip(declaration.limits) {
+            let saved: Option<i64> = db.query_row(
                 "SELECT hard_limit FROM agent_budget_limits WHERE root_run_id=?1 AND dimension=?2",
-                params![root, dimension],
-                |r| r.get(0),
-            )
-            .map_err(|e| e.to_string())?;
-        if saved != (expected > 0).then_some(expected) {
-            return Err("budget_frozen_limit_changed".into());
+                params![root,dimension],|r|r.get(0)).map_err(|e|e.to_string())?;
+            if saved != expected {
+                return Err("budget_frozen_limit_changed".into());
+            }
         }
-    }
+        caps
+    } else {
+        for (dimension, expected) in [
+            ("model_input_tokens", token_limit),
+            ("model_output_tokens", token_limit),
+            ("model_requests", request_limit),
+        ] {
+            let saved: Option<i64> = db.query_row(
+                "SELECT hard_limit FROM agent_budget_limits WHERE root_run_id=?1 AND dimension=?2",
+                params![root,dimension], |r|r.get(0)).map_err(|e|e.to_string())?;
+            if saved != (expected > 0).then_some(expected) {
+                return Err("budget_frozen_limit_changed".into());
+            }
+        }
+        (
+            (token_limit > 0).then_some(token_limit),
+            (request_limit > 0).then_some(request_limit),
+        )
+    };
     let coarse: Option<[i64; 6]> = db.query_row("SELECT total_tokens,total_requests,spent_tokens,spent_requests,reserved_tokens,reserved_requests FROM agent_budget_ledger WHERE root_run_id=?1", [root], |r|Ok([r.get(0)?,r.get(1)?,r.get(2)?,r.get(3)?,r.get(4)?,r.get(5)?])).optional().map_err(|e|e.to_string())?;
     let fine = child_gross(db, root)?;
     let child = if let Some(coarse) = coarse {
@@ -87,7 +102,7 @@ pub(super) fn available(db: &Connection, root: &str) -> Result<(Option<i64>, Opt
         let total = (add(coarse[2], coarse[4])?, add(coarse[3], coarse[5])?);
         // Unlimited invoices can top up their class receipts before the legacy
         // projection is published. A finite original grant cannot grow.
-        if token_limit > 0 && total.0 != fine.0 || request_limit > 0 && total.1 != fine.1 {
+        if token_cap.is_some() && total.0 != fine.0 || request_cap.is_some() && total.1 != fine.1 {
             return Err("budget_projection_balance_conflict".into());
         }
         (total.0.max(fine.0), total.1.max(fine.1))
@@ -106,10 +121,10 @@ pub(super) fn available(db: &Connection, root: &str) -> Result<(Option<i64>, Opt
     )?;
     let root_requests = add(model.consumed, held(&model)?)?;
     let occupied = (add(child.0, root_tokens)?, add(child.1, root_requests)?);
-    let remaining = |limit: i64, used: i64| -> Result<Option<i64>, String> {
-        if limit == 0 {
+    let remaining = |limit: Option<i64>, used: i64| -> Result<Option<i64>, String> {
+        let Some(limit) = limit else {
             return Ok(None);
-        }
+        };
         limit
             .checked_sub(used)
             .filter(|v| *v >= 0)
@@ -117,13 +132,16 @@ pub(super) fn available(db: &Connection, root: &str) -> Result<(Option<i64>, Opt
             .ok_or_else(|| "budget_hard_limit_exceeded".into())
     };
     Ok((
-        remaining(token_limit, occupied.0)?,
-        remaining(request_limit, occupied.1)?,
+        remaining(token_cap, occupied.0)?,
+        remaining(request_cap, occupied.1)?,
     ))
 }
 
-pub(crate) fn remaining_child_capacity(db:&Connection,root:&str)->Result<(Option<i64>,Option<i64>),String> {
-    available(db,root)
+pub(crate) fn remaining_child_capacity(
+    db: &Connection,
+    root: &str,
+) -> Result<(Option<i64>, Option<i64>), String> {
+    available(db, root)
 }
 
 pub(crate) fn require_child_capacity(

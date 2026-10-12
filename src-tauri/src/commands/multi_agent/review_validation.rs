@@ -57,6 +57,11 @@ fn replay_frozen_review(
     outcome: AgentTargetOutcome,
 ) -> Result<AgentTargetOutcome, String> {
     let connection = db::open(&context.db_path)?;
+    {
+        let tx=connection.unchecked_transaction().map_err(|e|e.to_string())?;
+        let frozen:JsonValue=serde_json::from_str(candidate_text).map_err(|_|"review_authorization_original_candidate_invalid")?;
+        native_authorization_original_candidate_on(&tx,&session.lease,&context.target_dir,&frozen)?;
+    }
     let failed: bool = connection.query_row(
         "SELECT EXISTS(SELECT 1 FROM agent_review_requests WHERE root_run_id=?1 \
          AND candidate_id=?2 AND candidate_revision=?3 AND candidate_json=?4 AND status='failed')",
@@ -70,9 +75,11 @@ fn replay_frozen_review(
     let transaction = connection.unchecked_transaction()
         .map_err(|error| format!("review_replay_snapshot:{error}"))?;
     let connection = &transaction;
+    let frozen:JsonValue=serde_json::from_str(candidate_text).map_err(|_|"review_authorization_original_candidate_invalid")?;
+    native_authorization_original_candidate_on(connection,&session.lease,&context.target_dir,&frozen)?;
     crate::agent_runtime::multi_agent::lease::validate_coordinator_lease(connection, &session.lease)?;
-    let prior: Option<(String, String, String, String)> = connection.query_row(
-        "SELECT d.verdict,d.missing_evidence_json,m.payload_json,q.reviewer_run_id \
+    let prior: Option<(String, String, String, String, String, f64)> = connection.query_row(
+        "SELECT d.verdict,d.missing_evidence_json,m.payload_json,q.reviewer_run_id,d.reason_codes_json,d.confidence \
          FROM agent_review_requests q \
          JOIN agent_review_decisions d ON d.id=q.decision_id AND d.root_run_id=q.root_run_id \
            AND d.candidate_id=q.candidate_id AND d.candidate_revision=q.candidate_revision \
@@ -89,12 +96,12 @@ fn replay_frozen_review(
          WHERE q.root_run_id=?1 AND q.candidate_id=?2 AND q.candidate_revision=?3 \
            AND q.candidate_json=?4 LIMIT 1",
         params![session.lease.root_run_id, candidate_id, revision, candidate_text],
-        |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+        |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?, row.get(4)?, row.get(5)?)),
     ).optional().map_err(|error| format!("review_replay_lookup_failed:{error}"))?;
     // Another local reader may have completed the same receipt between the
     // failed-state lookup and our recovery lock. Validate its completed result
     // normally; never schedule a replacement model call on this race.
-    let (verdict, missing_text, payload_text, reviewer_run_id) = prior.ok_or_else(||
+    let (verdict, missing_text, payload_text, reviewer_run_id, reasons_text, confidence) = prior.ok_or_else(||
         recovery_error.unwrap_or_else(|| "review_replay_incomplete_requires_recovery".into()))?;
     if !matches!(verdict.as_str(), "confirmed" | "rejected" | "insufficient_evidence") {
         return Err("review_replay_invalid_verdict".into());
@@ -121,6 +128,39 @@ fn replay_frozen_review(
         || payload["verdict"] != verdict || !missing.is_array()
     {
         return Err("review_replay_decision_mismatch".into());
+    }
+    // A completed replay consumes the original paid decision; mutable mailbox
+    // fields cannot replace its summary or add executable payload fields.
+    let (assignment_id, message_id): (String, String) = connection.query_row(
+        "SELECT q.assignment_id,m.id FROM agent_review_requests q JOIN agent_messages m ON m.assignment_id=q.assignment_id AND m.correlation_id=q.id AND m.kind='review_decision' AND m.root_run_id=q.root_run_id WHERE q.root_run_id=?1 AND q.candidate_id=?2 AND q.candidate_revision=?3 AND q.reviewer_run_id=?4",
+        params![session.lease.root_run_id,candidate_id,revision,reviewer_run_id],
+        |row| Ok((row.get(0)?,row.get(1)?)),
+    ).map_err(|error| format!("review_replay_original_lookup:{error}"))?;
+    let reviewer = crate::agent_runtime::multi_agent::scheduler::ScheduledChild {
+        assignment_id,
+        run_id: reviewer_run_id.clone(),
+        role: crate::agent_runtime::contract::AgentRole::EvidenceReviewer,
+    };
+    let receipt = crate::agent_runtime::multi_agent::specialist::received_for_local_delivery(
+        connection, &session.lease, &reviewer,
+    )?;
+    let original = validated_review_decision(&receipt.text)?;
+    let message = crate::agent_runtime::multi_agent::mailbox::verified_completed_output(
+        connection, &session.lease, &message_id,
+    )?;
+    let expected = crate::agent_runtime::secrets::redact_json(&json!({
+        "verdict":original.verdict,"summary":original.summary,
+        "candidateId":candidate_id,"candidateRevision":revision,
+    }));
+    let reasons: JsonValue = serde_json::from_str(&reasons_text)
+        .map_err(|_| "review_replay_invalid_reasons")?;
+    if !receipt.rejection.is_empty() || original.verdict != verdict
+        || original.missing_evidence != missing || original.reason_codes != reasons
+        || !confidence.is_finite() || (original.confidence - confidence).abs() > f64::EPSILON
+        || message.payload != expected
+        || payload != expected
+    {
+        return Err("review_replay_original_decision_conflict".into());
     }
     let frozen: JsonValue = serde_json::from_str(candidate_text)
         .map_err(|_| "review_replay_invalid_candidate")?;
@@ -163,6 +203,9 @@ fn replay_frozen_review(
         }
     }
     transaction.commit().map_err(|error| format!("review_replay_snapshot_commit:{error}"))?;
+    native_coordinator_original_review_expired_feedback(
+        context, &session.lease, candidate_id, revision,
+    )?;
     if verdict == "insufficient_evidence" && !outcome_requires_manual_execution_resolution(&outcome) {
         multi_agent_investigate_review_gap(context, session, candidate_id, revision, &missing)?;
     }

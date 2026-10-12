@@ -370,6 +370,176 @@
             1,
             "only the challenging request may reach the site"
         );
+        // Durable denial survives a new DB connection and cleared runtime
+        // memory. It is neither a signed source claim nor a resume grant.
+        drop(connection);
+        let reopened = db::open(&harness.db_path).unwrap();
+        let original = super::tests::application_table_snapshot(&reopened);
+        let sdk_before = harness.model_seen.lock().unwrap().len();
+        let target_before = harness.site_seen.lock().unwrap().clone();
+        let run = harness.context.run.as_ref().unwrap();
+        let invocation: String = reopened.query_row(
+            "SELECT invocation_id FROM agent_http_request_claims WHERE scan_id=?1 AND target_url=?2 AND run_id=?3 AND response_status<>0 AND received_at<>''",
+            params![harness.context.scan_id,target_url,run.run_id], |row| row.get(0),
+        ).unwrap();
+        let mut runtime = AgentToolRuntime {
+            protected_stop: Some(stop.clone()),
+            current_invocation: invocation,
+            target_requests: 1,
+            ..Default::default()
+        };
+        runtime.protected_stop = None;
+        assert!(runtime.protected_stop.is_none());
+        let persisted = agent_protection_stop_on(&reopened, &harness.context)
+            .unwrap().expect("the original actual challenge must remain a durable denial");
+        assert_eq!(persisted.code, AGENT_STOP_WAF);
+        assert!(persisted.requires_fuse());
+        let mut other_target = harness.context.clone();
+        other_target.target_url = format!("{target_url}/different-protection-target");
+        assert!(agent_protection_stop_on(&reopened, &other_target).unwrap().is_none());
+        let mut other_scan = harness.context.clone();
+        other_scan.scan_id = "different-protection-scan".into();
+        assert!(agent_protection_stop_on(&reopened, &other_scan).unwrap().is_none());
+        let mut later_attempt = harness.context.clone();
+        later_attempt.attempt_number = later_attempt.attempt_number.checked_add(1).unwrap();
+        assert_eq!(agent_protection_stop_on(&reopened, &later_attempt)
+            .unwrap().expect("a new attempt must not clear the target denial").code, AGENT_STOP_WAF);
+        let request = AgentHttpRequest {
+            identity: AgentIdentity::anonymous(),
+            method: "GET".into(),
+            url: format!("{target_url}/api/orders"),
+            extra_headers: vec![],
+            body: None,
+            content_type: None,
+            contract_key: String::new(),
+            family: "authorization".into(),
+            source: ScopeSource::HttpReplay,
+            tool: "replay_http".into(),
+            timeout_seconds: 5,
+        };
+        for context in [&harness.context, &later_attempt] {
+            let tx = reopened.unchecked_transaction().unwrap();
+            let error = claim_agent_http_request_on(
+                &tx, context, &runtime, &request, &request.url, &[],
+            ).expect_err("durable protection must deny before auth, invocation or journal writes");
+            assert_eq!(error, "http_protection_stop_active");
+            assert!(super::tests::application_table_snapshot(&tx) == original);
+            tx.commit().unwrap();
+            assert!(super::tests::application_table_snapshot(&reopened) == original);
+            assert_eq!(harness.model_seen.lock().unwrap().len(), sdk_before);
+            assert_eq!(*harness.site_seen.lock().unwrap(), target_before);
+        }
+        let tx = reopened.unchecked_transaction().unwrap();
+        let target_request = tx.query_row(
+            "SELECT scan_id,attempt_number,target_url,budget_attempt,ordinal,invocation_id,request_index,request_hash FROM agent_http_request_claims WHERE run_id=?1 AND invocation_id=?2 AND response_status<>0 AND received_at<>''",
+            params![run.run_id,runtime.current_invocation], |row| Ok(
+                crate::agent_runtime::multi_agent::budget::root::target::RootTargetRequest {
+                    scan: row.get(0)?, attempt: row.get(1)?, target: row.get(2)?,
+                    budget_attempt: row.get(3)?, ordinal: row.get(4)?,
+                    invocation: row.get(5)?, request_index: row.get(6)?, request_hash: row.get(7)?,
+                }),
+        ).unwrap();
+        let source = format!("http:{}:{}:{}:{}",run.run_id,target_request.invocation,
+            target_request.request_index,target_request.request_hash);
+        // Single has no multi assignment or Coordinator grant. This value is
+        // only a scope carrier proving the first deny guard; empty C fields
+        // cannot authorize execution, and no lease/grant is inserted or renewed.
+        let scope_only = crate::agent_runtime::multi_agent::lease::CoordinatorLease {
+            scan_id: target_request.scan.clone(), attempt_number: target_request.attempt,
+            target_key: target_request.target.clone(), root_run_id: run.run_id.clone(),
+            lease_epoch: 0, fencing_token: String::new(), lease_expires_at: String::new(),
+        };
+        assert_eq!(crate::agent_runtime::multi_agent::budget::target::claim(
+            &tx,&scope_only,"",&source,
+        ).unwrap_err(),"target_protection_stop_active");
+        assert!(super::tests::application_table_snapshot(&tx) == original);
+        // Historical owner loading is pure read even after protected closure.
+        // Reusing the actual received claim tuple tests denial before live-owner
+        // admission; it does not assert that a received call is new work.
+        let owner = crate::agent_runtime::multi_agent::budget::root::RootOwner::load_single(
+            &tx,&run.run_id,
+        ).unwrap();
+        let denial = match crate::agent_runtime::multi_agent::budget::root::target::RootTargetCall::claim(
+            &tx,owner,target_request,false,0,
+        ) {
+            Err(error) => error,
+            Ok(_) => panic!("shared protection must deny before original Root admission"),
+        };
+        assert_eq!(denial, "target_protection_stop_active");
+        assert!(super::tests::application_table_snapshot(&tx) == original);
+        tx.commit().unwrap();
+        assert!(super::tests::application_table_snapshot(&reopened) == original);
+        assert_eq!(harness.model_seen.lock().unwrap().len(), sdk_before);
+        assert_eq!(*harness.site_seen.lock().unwrap(), target_before);
+        let usage = agent_request_accounting(&reopened, &harness.context.scan_id,
+            harness.context.attempt_number, &target_url).unwrap();
+        assert_eq!((usage.executor_recorded, usage.executor_unresolved), (1, 0));
+        let target_cost = crate::agent_runtime::multi_agent::budget::balance(
+            &reopened, &run.run_id, Some(""), "target_requests",
+        ).unwrap();
+        assert_eq!((target_cost.consumed, target_cost.reserved, target_cost.indeterminate), (1, 0, 0));
+        // The actual protected response is retained privately as an unsealed
+        // transport observation. Its public digest does not prove signed origin.
+        let artifact_dir = harness.context.target_dir.join(AGENT_HTTP_DIRECTORY);
+        let directory = open_agent_artifact_directory(&artifact_dir).unwrap();
+        let mut names = fs::read_dir(&artifact_dir).unwrap()
+            .map(|entry| entry.unwrap().file_name().into_string().unwrap())
+            .collect::<Vec<_>>();
+        names.sort();
+        assert_eq!(names, vec!["0001.body", "0001.json"]);
+        let (record_bytes, record_len) = read_agent_artifact_file(
+            &directory,"0001.json",1_048_576,
+        ).unwrap();
+        assert_eq!(record_len,record_bytes.len() as u64);
+        let record: JsonValue = serde_json::from_slice(&record_bytes).unwrap();
+        assert_eq!(record_bytes,record.to_string().as_bytes());
+        let (body, body_len) = read_agent_artifact_file(
+            &directory,"0001.body",AGENT_MAX_RESPONSE_BYTES as u64,
+        ).unwrap();
+        let (expected_status, expected_type, expected_body) = mock_site(
+            "GET /api/gated HTTP/1.1\r\n\r\n".into(),
+        );
+        assert_eq!(body,expected_body.as_bytes());
+        assert_eq!(body_len,expected_body.len() as u64);
+        assert_eq!(record["payloadFile"],"0001.body");
+        assert_eq!(record["payloadBytes"],body_len);
+        assert!(record["requestPayloadFile"].is_null());
+        assert_eq!(record["request"]["method"],"GET");
+        assert_eq!(record["request"]["identity"],"anonymous");
+        assert_eq!(record["request"]["url"],format!("{target_url}/api/gated"));
+        let response = &record["response"];
+        assert_eq!(response["schemaVersion"],1);
+        assert_eq!(response["status"],expected_status);
+        assert_eq!(response["contentType"],expected_type);
+        assert_eq!(response["truncated"],false);
+        assert_eq!(response["bodySha256"],format!("{:x}",sha2::Sha256::digest(&body)));
+        assert_eq!(response["protectionCode"],AGENT_STOP_WAF);
+        assert_eq!(response["provenance"],"transport_observed_unsealed");
+        assert!(response.get("originalArtifactSealed").is_none());
+        let original_claim: JsonValue = reopened.query_row(
+            "SELECT run_id,invocation_id,request_index,budget_attempt,ordinal,request_hash,response_status FROM agent_http_request_claims WHERE run_id=?1 AND invocation_id=?2 AND received_at<>''",
+            params![run.run_id,runtime.current_invocation], |row| {
+                assert_eq!(row.get::<_,i64>(6)?,i64::from(expected_status));
+                Ok(json!({"runId":row.get::<_,String>(0)?,"invocationId":row.get::<_,String>(1)?,
+                    "requestIndex":row.get::<_,i64>(2)?,"budgetAttempt":row.get::<_,i64>(3)?,
+                    "ordinal":row.get::<_,i64>(4)?,"requestHash":row.get::<_,String>(5)?}))
+            },
+        ).unwrap();
+        for key in ["runId","invocationId","requestIndex","budgetAttempt","ordinal","requestHash"] {
+            assert_eq!(response["httpClaim"][key],original_claim[key]);
+        }
+        #[cfg(unix)] {
+            use std::os::unix::fs::PermissionsExt;
+            assert_eq!(directory.metadata().unwrap().permissions().mode() & 0o777,0o700);
+            for name in &names {
+                let metadata = fs::symlink_metadata(artifact_dir.join(name)).unwrap();
+                assert!(metadata.is_file());
+                assert_eq!(metadata.permissions().mode() & 0o777,0o600);
+            }
+        }
+        assert_eq!(harness.model_seen.lock().unwrap().len(),sdk_before);
+        assert_eq!(*harness.site_seen.lock().unwrap(),target_before);
+        assert!(super::tests::application_table_snapshot(&reopened) == original);
     }
 
     // ------------------------------------------------------------------

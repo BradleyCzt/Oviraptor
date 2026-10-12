@@ -1,4 +1,5 @@
 """Recognize exactly the two reviewed Native receipt schemas, with every guard."""
+import re
 import sqlite3
 from pathlib import Path
 from native_tick_migration_snapshot import catalogue, quote
@@ -17,6 +18,37 @@ def statements(sql):
             yield pending
             pending = ''
     if pending.strip():
+        raise ValueError('native_tick_trusted_ddl_incomplete')
+
+
+def managed_statements(sql):
+    """Only the two receipt tables and their six guards are this tool's scope.
+
+    The trusted tick DDL also defines other Root tables (for example terminal
+    proofs). Those are created by the app itself and are outside the private
+    writer's authority, so they are skipped here; anything unrecognized fails
+    closed, and every managed table/guard must be present exactly once.
+    """
+    seen = []
+    for statement in statements(sql):
+        body = ' '.join(line for line in statement.splitlines() if not line.lstrip().startswith('--')).strip()
+        if not body:
+            continue
+        table = re.match(r'CREATE TABLE IF NOT EXISTS (\w+)\s*\(', body)
+        trigger = re.match(r'CREATE TRIGGER IF NOT EXISTS (\w+)\s.*?\bON (\w+)\b', body, re.S)
+        if table:
+            name, managed_object = table.group(1), table.group(1) in TABLES
+        elif trigger:
+            name = trigger.group(1)
+            managed_object = trigger.group(2) in TABLES
+            if managed_object and name not in GUARDS:
+                raise ValueError('native_tick_trusted_ddl_unrecognized')
+        else:
+            raise ValueError('native_tick_trusted_ddl_unrecognized')
+        if managed_object:
+            seen.append(name)
+            yield statement
+    if sorted(seen) != sorted((*TABLES, *GUARDS)):
         raise ValueError('native_tick_trusted_ddl_incomplete')
 
 

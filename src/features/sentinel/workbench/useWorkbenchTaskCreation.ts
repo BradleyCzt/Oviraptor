@@ -10,7 +10,18 @@ type CreationForm = Omit<WorkbenchScanInput, "scanType" | "urls" | "authSessionS
   urls: string;
   closure: "breadth" | "proof";
   orchestrationMode: "single" | "multi";
+  homogeneousWorkers?: boolean;
+  homogeneousExecution?: boolean;
+  approvedToolIds?: string[];
 };
+
+export function canonicalApprovedToolIds(ids: readonly string[]): string[] {
+  if (ids.length > 16) throw new Error("工具批准 ID 最多 16 个 / At most 16 approval IDs");
+  const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+  if (ids.some(id => !uuid.test(id))) throw new Error("请输入小写完整 UUID 批准 ID / Use canonical lowercase UUID approval IDs");
+  if (new Set(ids).size !== ids.length) throw new Error("批准 ID 重复，请主动移除重复项 / Remove duplicate approval IDs");
+  return [...ids].sort();
+}
 
 export function useWorkbenchTaskCreation(context: {
   mode: Ref<WorkbenchMode>;
@@ -37,6 +48,17 @@ export function useWorkbenchTaskCreation(context: {
 
   async function start(saveDraftOnly = false) {
     if (busy.value || context.isDisposed()) return;
+    let approvedToolIds: string[];
+    try {
+      approvedToolIds = canonicalApprovedToolIds(form.approvedToolIds || []);
+      if (form.homogeneousExecution && (!form.homogeneousWorkers || !approvedToolIds.length || form.authSessionIds.length < 2))
+        throw new Error(tr("受控执行需要同质多智能体、至少一个批准工具和两个测试登录身份。", "Controlled execution requires homogeneous Multi, an approved tool and two test identities."));
+      if (form.homogeneousExecution) saveDraftOnly = true;
+      if (form.homogeneousWorkers && (context.mode.value !== "web" || (approvedToolIds.length && !form.homogeneousExecution) || context.followup() || context.hasHandoff() || form.orchestrationMode !== "multi"))
+        throw new Error(tr("同质 Worker 需要新的多智能体任务，使用内置只读能力。请先清空工具选择。", "Homogeneous workers require a new Multi task with built-in read-only capabilities. Clear tool selection first."));
+      if (approvedToolIds.length && (context.mode.value !== "web" || form.orchestrationMode !== "multi" || context.followup() || context.hasHandoff()))
+        throw new Error(tr("工具选择仅支持新的多智能体 Web 任务，请主动清空选择后再切换任务类型。", "Tool selection requires a new Multi Web task. Clear the selection explicitly before changing task type."));
+    } catch (error) { notify("error", String(error)); return; }
     if (context.hasHandoff()) { await context.saveClosureHandoff(); return; }
     if (context.followup()) {
       const generation = context.generation();
@@ -96,7 +118,7 @@ export function useWorkbenchTaskCreation(context: {
         if (!urls.length) {
           throw new Error(tr("至少添加一个 http:// 或 https:// URL", "Add at least one http:// or https:// URL"));
         }
-        const submitted = { projectId: form.projectId, taskName: form.taskName, urls: form.urls, scopeId: authSessionScopeId.value };
+        const submitted = { projectId: form.projectId, taskName: form.taskName, urls: form.urls, scopeId: authSessionScopeId.value, approvedToolIds: [...(form.approvedToolIds || [])] };
         if (followup && !pendingFollowupInput.value) {
           pendingFollowupInput.value = {
             requestId: globalThis.crypto.randomUUID(), sourceScanId: followup.sourceScanId,
@@ -106,10 +128,15 @@ export function useWorkbenchTaskCreation(context: {
             skillIds: [...form.skillIds], instruction: form.instruction, closure: form.closure,
           };
         }
+        const createOrdinaryDraft = form.homogeneousWorkers
+          ? (...args: Parameters<typeof api.createSentinelUrlScan>) => api.createSentinelHomogeneousUrlScan(...args, Boolean(form.homogeneousExecution), approvedToolIds)
+          : approvedToolIds.length
+          ? (...args: Parameters<typeof api.createSentinelUrlScan>) => api.createSentinelUrlScanWithToolSelection(...args, approvedToolIds)
+          : api.createSentinelUrlScan;
         const draft = followup && pendingFollowupInput.value
           ? await api.createAgentGapFollowup({ ...pendingFollowupInput.value,
             authSessionIds: [...pendingFollowupInput.value.authSessionIds], skillIds: [...pendingFollowupInput.value.skillIds] })
-          : await api.createSentinelUrlScan(
+          : await createOrdinaryDraft(
             form.projectId, form.taskName, urls, form.scanMode, form.maxBudgetUsd,
             form.authSessionId || undefined, [...form.authSessionIds], authSessionScopeId.value,
             [...form.skillIds], form.instruction, form.closure, form.orchestrationMode,
@@ -121,6 +148,7 @@ export function useWorkbenchTaskCreation(context: {
         reload();
         if (form.projectId === submitted.projectId && authSessionScopeId.value === submitted.scopeId) {
           resetIdentitySelection();
+          if (JSON.stringify(form.approvedToolIds || []) === JSON.stringify(submitted.approvedToolIds)) form.approvedToolIds = [];
           if (form.taskName === submitted.taskName) form.taskName = "";
           if (form.urls === submitted.urls) form.urls = "";
         }

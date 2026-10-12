@@ -1040,3 +1040,29 @@ include!("stage1a_tests.rs");
 
 #[path = "tests_backend_retirement.rs"]
 mod backend_retirement;
+
+
+#[test]
+fn readonly_bootstrap_role_sets_keep_input_parser_and_business_logic_on_floor() {
+    assert!(AgentRole::InputParser.is_readonly_bootstrap_role());
+    assert!(AgentRole::BusinessLogic.requires_web_reviewer_floor_on_bootstrap());
+    assert!(!AgentRole::Upload.is_readonly_bootstrap_role());
+    assert!(!AgentRole::Concurrency.requires_web_reviewer_floor_on_bootstrap());
+    assert_eq!(
+        AgentRole::InputParser.specialist_readonly_binding_lane(),
+        Some("read_only_analysis")
+    );
+    assert!(AgentRole::SpaApiMapper.is_readonly_bootstrap_role());
+    assert!(!AgentRole::SpaApiMapper.requires_web_reviewer_floor_on_bootstrap());
+    assert!(AgentRole::InputParser.allows_undispatched_worker_replacement());
+    assert!(AgentRole::BusinessLogic.allows_undispatched_worker_replacement());
+    assert!(AgentRole::ClientSide.allows_undispatched_worker_replacement());
+    assert!(AgentRole::ExternalSurface.allows_undispatched_worker_replacement());
+    assert!(!AgentRole::Upload.allows_undispatched_worker_replacement());
+    assert!(!AgentRole::EvidenceReviewer.allows_undispatched_worker_replacement());
+    assert!(AgentRole::InputParser.allows_supervised_readonly_bootstrap());
+    assert!(AgentRole::BusinessLogic.allows_supervised_readonly_bootstrap());
+    assert!(AgentRole::ClientSide.allows_supervised_readonly_bootstrap());
+    assert!(!AgentRole::DeepInvestigator.allows_supervised_readonly_bootstrap());
+    assert!(!AgentRole::RepoMapper.allows_supervised_readonly_bootstrap());
+}

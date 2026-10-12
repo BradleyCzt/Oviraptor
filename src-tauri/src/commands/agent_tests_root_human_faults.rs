@@ -69,17 +69,28 @@ fn root_human_actual_inflight_consumer_cancellation_stops_transport_keeps_unknow
     let actor = &f.f.session.as_ref().unwrap().lease;
     let id = confirm_queue_directive(&db, actor, "prioritize authorization");
     let child = f.f.h.context.run.as_ref().unwrap().run_id.clone();
+    // The provider accepts the in-flight Human Root request, the consumer is
+    // cancelled at that same instant, then the reply is held for two seconds.
+    // Measure from that instant so prior Root ticks (slower when the suite runs
+    // in parallel) cannot be mistaken for waiting on the provider.
+    let cancelled_at = std::sync::Arc::new(std::sync::Mutex::new(None));
+    let mark = cancelled_at.clone();
     *f.f.boundary.lock().unwrap() = Some(Box::new(move |db| {
         db.execute(
             "UPDATE agent_runs SET cancel_requested_at=datetime('now','localtime') WHERE id=?1",
             [&child],
         )
         .unwrap();
+        *mark.lock().unwrap() = Some(std::time::Instant::now());
     }));
-    let started = std::time::Instant::now();
     let outcome = NativeAgentBackend.execute(&f.f.h.context);
+    let returned_at = std::time::Instant::now();
+    let cancelled_at = cancelled_at
+        .lock()
+        .unwrap()
+        .expect("the in-flight Human Root request reached the provider and was cancelled");
     assert!(
-        started.elapsed() < Duration::from_millis(1500),
+        returned_at.saturating_duration_since(cancelled_at) < Duration::from_millis(1500),
         "cancelled Root waited for the two-second provider: {outcome:?}"
     );
     assert_eq!(f.human.lock().unwrap().len(), 1);

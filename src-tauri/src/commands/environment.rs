@@ -4,31 +4,8 @@ pub fn check_environment(
     state: State<AppState>,
     profile_id: Option<i64>,
 ) -> Result<EnvironmentReport, String> {
-    let connection = db::open(&state.db_path)?;
-    let profile_json: String = if let Some(id) = profile_id {
-        connection
-            .query_row(
-                "SELECT settings_json FROM config_profiles WHERE id=?1",
-                [id],
-                |r| r.get(0),
-            )
-            .unwrap_or_else(|_| "{}".into())
-    } else {
-        connection
-            .query_row(
-                "SELECT settings_json FROM config_profiles ORDER BY is_default DESC,id LIMIT 1",
-                [],
-                |r| r.get(0),
-            )
-            .unwrap_or_else(|_| "{}".into())
-    };
-    let profile = json(profile_json);
-    let configured_python = profile
-        .get("pythonExecutable")
-        .and_then(JsonValue::as_str)
-        .filter(|s| !s.is_empty())
-        .unwrap_or("python3")
-        .to_string();
+    // Preserve the IPC input contract; current native helpers need no legacy executable settings.
+    let _ = (&state, profile_id);
     let runtime_path = std::env::var_os("PATH").unwrap_or_default();
     let command_check = |command: &str, args: &[&str]| -> (bool, String) {
         match Command::new(command)
@@ -49,50 +26,6 @@ pub fn check_environment(
             Err(error) => (false, error.to_string()),
         }
     };
-    let home = std::env::var("HOME")
-        .or_else(|_| std::env::var("USERPROFILE"))
-        .unwrap_or_default();
-    let generic_python = matches!(configured_python.as_str(), "python" | "python3" | "py");
-    let mut python_candidates: Vec<String> = Vec::new();
-    if !generic_python {
-        python_candidates.push(configured_python.clone());
-    }
-    if !home.is_empty() {
-        python_candidates.extend([
-            format!("{home}/oviraptor/runtime/python/bin/python3"),
-            format!("{home}/.pyenv/shims/python"),
-            format!("{home}/.pyenv/shims/python3"),
-            format!("{home}/.pyenv/versions/3.12.10/bin/python"),
-            format!("{home}/.local/bin/python3"),
-        ]);
-    }
-    if cfg!(target_os = "windows") {
-        let runtime = profile
-            .get("windowsRuntimeDirectory")
-            .and_then(JsonValue::as_str)
-            .filter(|value| !value.trim().is_empty())
-            .unwrap_or("C:\\oviraptor\\runtime")
-            .trim_end_matches(&['\\', '/'][..]);
-        python_candidates.extend([
-            format!("{runtime}\\python\\Scripts\\python.exe"),
-            format!("{runtime}\\python\\python.exe"),
-            format!("{runtime}\\python.exe"),
-            format!("{home}\\.pyenv\\pyenv-win\\shims\\python.exe"),
-        ]);
-    }
-    python_candidates.extend([configured_python.clone(), "python3".into(), "python".into()]);
-    let mut python = "python3".to_string();
-    let mut python_ok = false;
-    let mut python_version = String::new();
-    for candidate in python_candidates {
-        let (ok, version) = command_check(&candidate, ["--version"].as_ref());
-        if ok {
-            python = candidate;
-            python_ok = true;
-            python_version = version;
-            break;
-        }
-    }
     let mut node = "node".to_string();
     let mut node_ok = false;
     let mut node_version = String::new();
@@ -107,49 +40,6 @@ pub fn check_environment(
             node = candidate.to_string();
             node_ok = true;
             node_version = version;
-            break;
-        }
-    }
-    let configured_redis = profile
-        .get("redisCliExecutable")
-        .and_then(JsonValue::as_str)
-        .filter(|value| !value.trim().is_empty())
-        .map(str::to_string);
-    let windows_runtime = profile
-        .get("windowsRuntimeDirectory")
-        .and_then(JsonValue::as_str)
-        .filter(|value| !value.trim().is_empty())
-        .unwrap_or("C:\\oviraptor\\runtime");
-    let mut redis_candidates: Vec<String> = if cfg!(target_os = "macos") {
-        vec![
-            "redis-cli".into(),
-            "/opt/homebrew/bin/redis-cli".into(),
-            "/usr/local/bin/redis-cli".into(),
-        ]
-    } else if cfg!(target_os = "windows") {
-        vec![
-            "redis-cli".into(),
-            "memurai-cli.exe".into(),
-            format!(
-                "{}\\redis-cli.exe",
-                windows_runtime.trim_end_matches(&['\\', '/'][..])
-            ),
-            "C:\\Program Files\\Redis\\redis-cli.exe".into(),
-            "C:\\Program Files\\Memurai\\memurai-cli.exe".into(),
-        ]
-    } else {
-        vec!["redis-cli".into(), "/usr/bin/redis-cli".into()]
-    };
-    if let Some(configured) = configured_redis {
-        redis_candidates.insert(0, configured);
-    }
-    let mut redis_ok = false;
-    let mut redis_version = String::new();
-    for candidate in redis_candidates {
-        let (ok, version) = command_check(&candidate, ["--version"].as_ref());
-        if ok {
-            redis_ok = true;
-            redis_version = format!("{} · {}", candidate, version);
             break;
         }
     }
@@ -195,20 +85,10 @@ pub fn check_environment(
         }
         .into(),
         arch: std::env::consts::ARCH.into(),
-        python: if python_ok {
-            format!("{python} · {python_version}")
-        } else {
-            format!("不可用 · {python_version}")
-        },
         node: if node_ok {
             format!("{} · {}", node, node_version)
         } else {
             format!("不可用 · {}", node_version)
-        },
-        redis_cli: if redis_ok {
-            redis_version
-        } else {
-            format!("不可用 · {}", redis_version)
         },
         dependencies,
         checked_at: chrono::Utc::now().to_rfc3339(),
@@ -272,8 +152,8 @@ fn ensure_environment_install_idle(connection: &rusqlite::Connection) -> Result<
 
 fn install_windows_environment(
     output: &EnvironmentInstallOutput<'_>,
-    state: &AppState,
-    profile_id: Option<i64>,
+    _state: &AppState,
+    _profile_id: Option<i64>,
 ) -> Result<String, String> {
     output.record(
         "prepare",
@@ -291,7 +171,6 @@ fn install_windows_environment(
         );
     }
     for (stage, package, description) in [
-        ("python", "Python.Python.3.12", "Python 3.12"),
         ("node", "OpenJS.NodeJS.LTS", "Node.js LTS"),
         ("tailscale", "Tailscale.Tailscale", "Tailscale"),
     ] {
@@ -313,68 +192,6 @@ fn install_windows_environment(
         )?;
     }
 
-    let profile = {
-        let connection = db::open(&state.db_path)?;
-        let text: String = if let Some(id) = profile_id {
-            connection
-                .query_row(
-                    "SELECT settings_json FROM config_profiles WHERE id=?1",
-                    [id],
-                    |row| row.get(0),
-                )
-                .unwrap_or_else(|_| "{}".into())
-        } else {
-            connection
-                .query_row(
-                    "SELECT settings_json FROM config_profiles ORDER BY is_default DESC,id LIMIT 1",
-                    [],
-                    |row| row.get(0),
-                )
-                .unwrap_or_else(|_| "{}".into())
-        };
-        json(text)
-    };
-    let runtime_root = profile
-        .get("windowsRuntimeDirectory")
-        .and_then(JsonValue::as_str)
-        .filter(|value| !value.trim().is_empty())
-        .unwrap_or(r"C:\oviraptor\runtime");
-    let runtime_python_dir = PathBuf::from(runtime_root).join("python");
-    let runtime_python = runtime_python_dir.join("Scripts/python.exe");
-    if !runtime_python.is_file() {
-        let mut venv = Command::new("py");
-        venv.args(["-3.12", "-m", "venv"]).arg(&runtime_python_dir);
-        run_environment_install_step(output, "python-venv", "创建 Oviraptor Python 环境", venv)?;
-    }
-
-    if let Some(id) = profile_id {
-        let connection = db::open(&state.db_path)?;
-        let existing: String = connection
-            .query_row(
-                "SELECT settings_json FROM config_profiles WHERE id=?1",
-                [id],
-                |row| row.get(0),
-            )
-            .unwrap_or_else(|_| "{}".into());
-        let mut settings = json(existing);
-        if let Some(object) = settings.as_object_mut() {
-            object.insert(
-                "pythonExecutable".into(),
-                JsonValue::String(runtime_python.to_string_lossy().to_string()),
-            );
-            connection
-                .execute(
-                    "UPDATE config_profiles SET settings_json=?1,updated_at=datetime('now','localtime') WHERE id=?2",
-                    params![settings.to_string(), id],
-                )
-                .map_err(|error| error.to_string())?;
-        }
-    }
-    output.record(
-        "manual",
-        "stderr",
-        "Windows 没有官方 redis-cli 安装包；如扫描流程需要，请安装 Memurai CLI 并在运行方案中填写 C:\\Program Files\\Memurai\\memurai-cli.exe。Tailscale 首次使用需要打开并登录。",
-    )?;
     let result = "Windows Native Runtime 基础环境已安装；请登录 Tailscale 并重新执行环境检测";
     output.record("complete", "success", result)?;
     Ok(result.into())
@@ -445,31 +262,6 @@ fn install_environment_dependencies_while_locked(
         "status",
         "开始检查并安装 Oviraptor 运行环境",
     )?;
-    let connection = db::open(&state.db_path)?;
-    let settings_text: String = if let Some(id) = profile_id {
-        connection
-            .query_row(
-                "SELECT settings_json FROM config_profiles WHERE id=?1",
-                [id],
-                |r| r.get(0),
-            )
-            .unwrap_or_else(|_| "{}".into())
-    } else {
-        connection
-            .query_row(
-                "SELECT settings_json FROM config_profiles ORDER BY is_default DESC,id LIMIT 1",
-                [],
-                |r| r.get(0),
-            )
-            .unwrap_or_else(|_| "{}".into())
-    };
-    let profile = json(settings_text);
-    let configured_python = profile
-        .get("pythonExecutable")
-        .and_then(JsonValue::as_str)
-        .filter(|s| !s.is_empty())
-        .unwrap_or("python3");
-    let home = std::env::var("HOME").unwrap_or_default();
     let brew = ["/opt/homebrew/bin/brew", "/usr/local/bin/brew", "brew"]
         .into_iter()
         .find(|candidate| {
@@ -495,81 +287,16 @@ fn install_environment_dependencies_while_locked(
     };
     let mut brew_install = Command::new(&brew);
     brew_install
-        .args(["install", "python", "node", "redis"])
+        .args(["install", "node"])
         .env("HOMEBREW_NO_AUTO_UPDATE", "1")
         .env("HOMEBREW_NO_ENV_HINTS", "1");
     run_environment_install_step(
         output,
         "packages",
-        "安装 Python、Node.js 和 redis-cli",
+        "安装 Node.js",
         brew_install,
     )?;
-    messages.push("Python、Node.js、redis-cli 安装完成".to_string());
-
-    let runtime_dir = PathBuf::from(&home).join("oviraptor/runtime/python");
-    let runtime_python = runtime_dir.join("bin/python3");
-    let python_candidates = [
-        runtime_python.to_string_lossy().to_string(),
-        configured_python.to_string(),
-        "/opt/homebrew/bin/python3".to_string(),
-        "/usr/local/bin/python3".to_string(),
-        "python3".to_string(),
-    ];
-    let python = python_candidates
-        .iter()
-        .find(|candidate| {
-            Command::new(candidate)
-                .args(["--version"])
-                .output()
-                .is_ok_and(|result| result.status.success())
-        })
-        .ok_or_else(|| "Python 安装完成但找不到 python3".to_string())?;
-    if !runtime_python.exists() {
-        fs::create_dir_all(
-            runtime_dir
-                .parent()
-                .ok_or_else(|| "无法确定 Python runtime 目录".to_string())?,
-        )
-        .map_err(|error| format!("创建 Python runtime 目录失败：{error}"))?;
-        let mut venv = Command::new(python);
-        venv.args(["-m", "venv"]).arg(&runtime_dir);
-        run_environment_install_step(output, "python-venv", "创建 Oviraptor Python 虚拟环境", venv)?;
-    } else {
-        output.record(
-            "python-venv",
-            "success",
-            &format!("Python 虚拟环境已存在：{}", runtime_dir.display()),
-        )?;
-    }
-    let runtime_python = runtime_python.to_string_lossy().to_string();
-    if let Some(id) = profile_id.or_else(|| {
-        connection
-            .query_row(
-                "SELECT id FROM config_profiles ORDER BY is_default DESC,id LIMIT 1",
-                [],
-                |row| row.get::<_, i64>(0),
-            )
-            .ok()
-    }) {
-        let existing: String = connection
-            .query_row(
-                "SELECT settings_json FROM config_profiles WHERE id=?1",
-                [id],
-                |row| row.get(0),
-            )
-            .unwrap_or_else(|_| "{}".into());
-        let mut settings = json(existing);
-        if let Some(object) = settings.as_object_mut() {
-            object.insert("pythonExecutable".into(), JsonValue::String(runtime_python));
-            connection
-                .execute(
-                    "UPDATE config_profiles SET settings_json=?1,updated_at=datetime('now','localtime') WHERE id=?2",
-                    params![settings.to_string(), id],
-                )
-                .map_err(|error| error.to_string())?;
-        }
-    }
-    messages.push("Python 模块安装完成".to_string());
+    messages.push("Node.js 安装完成".to_string());
 
     let tailscale_app = Path::new("/Applications/Tailscale.app");
     if !tailscale_app.exists() {

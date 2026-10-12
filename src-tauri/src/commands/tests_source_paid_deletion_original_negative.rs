@@ -80,11 +80,11 @@ fn source_paid_deletion_original_protected_cascade_and_write_faults_preserve_all
     db.execute_batch("DROP TABLE source_private_business; CREATE TABLE private_business(payload TEXT);
         INSERT INTO private_business VALUES('preserve');INSERT INTO assets(id,asset_key) VALUES(987654321,'source-delete-preserve')").unwrap();
     for sql in [
-        "CREATE TRIGGER source_delete_fault BEFORE INSERT ON native_deleted_scan_audits BEGIN SELECT RAISE(IGNORE); END",
+        "CREATE TRIGGER source_delete_fault BEFORE INSERT ON native_deleted_scan_audits_v2 BEGIN SELECT RAISE(IGNORE); END",
         "CREATE TRIGGER source_delete_fault BEFORE INSERT ON native_deleted_scan_anchors BEGIN SELECT RAISE(IGNORE); END",
         "CREATE TRIGGER source_delete_fault BEFORE DELETE ON sentinel_scans BEGIN SELECT RAISE(IGNORE); END",
         "CREATE TRIGGER source_delete_fault AFTER DELETE ON sentinel_scans BEGIN UPDATE private_business SET payload='changed'; END",
-        "CREATE TRIGGER source_delete_fault AFTER INSERT ON native_deleted_scan_audits BEGIN DELETE FROM assets; END",
+        "CREATE TRIGGER source_delete_fault AFTER INSERT ON native_deleted_scan_audits_v2 BEGIN DELETE FROM assets; END",
     ] {
         db.execute_batch(sql).unwrap();let before=source_exit_snapshot(&db);
         assert!(delete_sentinel_scan_inner(&path,&record.scan_id).is_err(),"{sql}");assert_eq!(source_exit_snapshot(&db),before,"{sql}");

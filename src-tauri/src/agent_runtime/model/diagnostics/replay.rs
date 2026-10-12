@@ -148,7 +148,8 @@ pub(super) fn read_snapshot(
             .map_err(|_| "native_sdk_log_read_failed")?;
         let mut rows = Vec::new();
         for value in values {
-            let (row, identity) = value.map_err(|_| "native_sdk_log_read_failed")?;
+            let (mut row, identity) = value.map_err(|_| "native_sdk_log_read_failed")?;
+            super::owner_mapper_loop::restore_logical(tx, &mut row.owner, &identity)?;
             if row.owner.scan_id != scan
                 || row.owner.attempt != actual
                 || stable_hash(

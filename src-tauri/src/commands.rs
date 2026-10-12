@@ -4,7 +4,7 @@ use rusqlite::{params, params_from_iter, types::Value as SqlValue, OptionalExten
 use serde_json::Value as JsonValue;
 use sha2::{Digest, Sha256};
 use std::{
-    collections::{HashMap, HashSet, VecDeque},
+    collections::{HashMap, HashSet},
     ffi::OsString,
     fs::{self, File, OpenOptions},
     io::{BufRead, BufReader, Read, Seek, SeekFrom, Write},
@@ -44,9 +44,17 @@ include!("commands/agent_instruction.rs");
 include!("commands/workspace_projects.rs");
 include!("commands/assets.rs");
 include!("commands/asset_ownership.rs");
+include!("commands/ownership_directory.rs");
+include!("commands/ownership_public_suffix.rs");
+include!("commands/ownership_review.rs");
+include!("commands/ownership_operations.rs");
+include!("commands/ownership_authorization.rs");
+include!("commands/ownership_unit_projection.rs");
+include!("commands/ownership_o3_tests.rs");
 include!("commands/exposure.rs");
 include!("commands/hackerone.rs");
 include!("commands/environment.rs");
+include!("commands/tool_administrator.rs");
 include!("commands/src_assurance.rs");
 include!("commands/web_investigation_policy.rs");
 include!("commands/native_agent_trace.rs");
@@ -75,19 +83,30 @@ include!("commands/runtime_environment.rs");
 include!("commands/agent_contract.rs");
 include!("commands/role_config.rs");
 include!("commands/agent_authorization_control.rs");
-include!("commands/agent_authorization_broker.rs");
+#[path = "commands/agent_authorization_broker.rs"]
+pub(crate) mod authorization_side;
+use authorization_side::execute_authorization_side;
+#[cfg(test)]
+use authorization_side::{authorization_identity_binding, claim_authorization_probe, authorization_probe_authority};
 include!("commands/agent_runtime.rs");
 include!("commands/agent_model_client.rs");
+#[path = "commands/agent_native/http_budget_receipt.rs"]
+pub(crate) mod http_budget_receipt;
+include!("commands/agent_http_sealed_transport.rs");
 include!("commands/agent_tools.rs");
 include!("commands/agent_tools_specs.rs");
 include!("commands/agent_tools_schema.rs");
 include!("commands/agent_tools_scope.rs");
 include!("commands/agent_tools_http.rs");
+#[path = "commands/agent_tools_http/exchange.rs"]
+pub(crate) mod http_exchange;
+use http_exchange::agent_http_exchange;
 include!("commands/agent_tools_replay.rs");
 include!("commands/agent_tools_identity_diff.rs");
 include!("commands/agent_tools_discovery.rs");
 include!("commands/agent_tools_browser.rs");
 include!("commands/agent_tools_verdict.rs");
+include!("commands/agent_tools_budget_preflight.rs");
 include!("commands/agent_tools_dispatch.rs");
 include!("commands/agent_tools_source.rs");
 include!("commands/agent_native.rs");
@@ -96,8 +115,10 @@ include!("commands/agent_backend_storage.rs");
 include!("commands/agent_request_accounting.rs");
 include!("commands/agent_request_review.rs");
 include!("commands/agent_http_journal.rs");
+include!("commands/agent_protection_stop.rs");
 include!("commands/multi_agent_runtime.rs");
 include!("commands/multi_agent_external_surface.rs");
+include!("commands/multi_agent_business_logic.rs");
 include!("commands/multi_agent_child_delivery.rs");
 include!("commands/agent_gap_followup.rs");
 include!("commands/agent_gap_submission.rs");
@@ -123,6 +144,7 @@ include!("commands/native_source_initial.rs");
 include!("commands/native_source_coordinator.rs");
 include!("commands/native_source_heartbeat.rs");
 include!("commands/native_source_tools.rs");
+include!("commands/native_source_controlled_adapter.rs");
 include!("commands/native_source_tool_reentry.rs");
 include!("commands/native_source_completion.rs");
 include!("commands/native_source_review_accounting.rs");
@@ -130,6 +152,18 @@ include!("commands/native_source_reviewer.rs");
 include!("commands/native_source_expired_review.rs");
 include!("commands/native_source_coverage_reviewer.rs");
 include!("commands/native_scan_branches.rs");
+include!("commands/native_protection_recovery_contract.rs");
+include!("commands/native_protection_recovery_scope_budget.rs");
+include!("commands/native_protection_recovery_sources.rs");
+include!("commands/native_protection_recovery_approval.rs");
+include!("commands/native_single_continuation_preview.rs");
+include!("commands/native_single_continuation_model_contract.rs");
+include!("commands/native_protection_recovery_priced.rs");
+include!("commands/native_protection_recovery_priced_cancel.rs");
+include!("commands/native_protection_recovery_draft.rs");
+include!("commands/native_protection_recovery_cancel.rs");
+#[path = "commands/native_protection_recovery_signature.rs"]
+pub(crate) mod recovery_approval_signature;
 include!("commands/agent_dialog_view.rs");
 include!("commands/agent_dialog_selection.rs");
 include!("commands/native_execution_history.rs");
@@ -148,7 +182,9 @@ include!("commands/scan_control.rs");
 include!("commands/scan_startup.rs");
 include!("commands/web_dispatch_binding.rs");
 include!("commands/native_web_mode_binding.rs");
+include!("commands/native_tool_selection_policy_source.rs");
 include!("commands/native_web_mode_plan.rs");
+include!("commands/native_tool_supply_reentry.rs");
 include!("commands/web_draft_id.rs");
 include!("commands/web_dispatch_recovery.rs");
 include!("commands/web_dispatch_closure.rs");
@@ -172,3 +208,6 @@ include!("commands/tests.rs");
 include!("commands/agent_tests.rs");
 include!("commands/agent_acceptance.rs");
 include!("commands/agent_entries.rs");
+
+#[path="commands/agent_homogeneous_execution.rs"]
+pub(crate) mod homogeneous_execution;

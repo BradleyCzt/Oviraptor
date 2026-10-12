@@ -12,6 +12,12 @@ fn native_coordinator_gap_feedback(
     }
     let root = native_coordinator_root_context(context, &session.lease);
     let db = db::open(&context.db_path)?;
+    // Every first-delivery, local recovery and completed replay reaches this
+    // foreground entry. A saved expired result must be supervised exactly once.
+    let child=db.query_row("SELECT id,child_run_id FROM agent_assignments WHERE coordinator_run_id=?1 AND role='deep_investigator' AND trigger_code='reviewer_insufficient_evidence' AND evidence_revision=?2",params![session.lease.root_run_id,revision],|row|Ok(crate::agent_runtime::multi_agent::scheduler::ScheduledChild {
+        assignment_id:row.get(0)?,run_id:row.get(1)?,role:crate::agent_runtime::contract::AgentRole::DeepInvestigator,
+    })).map_err(|_|"root_proposal_frame_missing")?;
+    native_coordinator_original_expired_feedback(context,&session.lease,&child)?;
     let tx = rusqlite::Transaction::new_unchecked(&db, rusqlite::TransactionBehavior::Immediate)
         .map_err(|e| e.to_string())?;
     native_coordinator_tick_authority(&tx, &root, &session.lease)?;

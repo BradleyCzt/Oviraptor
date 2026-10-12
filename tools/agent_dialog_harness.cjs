@@ -175,6 +175,7 @@ const directive = (scanId, state = 'need_confirmation') => ({
 
 async function mount(overrides = {}, options = {}) {
   const api = {
+    getSentinelScanIdentityMaterial: async () => [],
     listSentinelScans: async (projectId) => [scan('A', projectId), scan('B', projectId)],
     getNativeScanStatus: async (id) => status(id),
     getAgentDialogSelection: async (projectId) => ({ projectId: projectId ?? null, revision: 0,
@@ -255,6 +256,9 @@ async function mount(overrides = {}, options = {}) {
     if (name === './agentDialogLabels') return labelsExports;
     if (name === './RootDecisionSummary.vue')
       return loadWorkspaceModule('src/features/sentinel/components/RootDecisionSummary.vue');
+    if (name === './AgentIdentityMaterial.vue')
+      return loadWorkspaceModule('src/features/sentinel/components/AgentIdentityMaterial.vue',
+        { '../../../api': { api } });
     if (name === '../timeline/projectionContract') return projectionExports;
     if (name === '../timeline/humanAssessmentContract') return loadWorkspaceModule('src/features/sentinel/timeline/humanAssessmentContract.ts');
     if (name === '../../../i18n') return { useI18n: () => ({ tr: (zh) => zh }) };

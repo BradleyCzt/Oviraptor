@@ -218,7 +218,9 @@ fn directive_proposal_native_loop_receives_actual_specialist_result() {
     let id = confirm_queue_directive(&db, &session.lease, "@investigator 请分析已有证据");
     let outcome = NativeAgentBackend.execute(&harness.context);
     let wire = seen.lock().unwrap().clone();
-    assert_eq!(wire.len(), 8, "four original paid Root including HumanDirective, one Mapper, one human specialist, two actual WebExecutor rounds: {outcome:?}");
+    let root_calls=wire.iter().filter(|r|fresh_multi_wire_system(r).contains("You are the Root Coordinator")).count();
+    assert_eq!(root_calls,5,"existing business-logic assessment plus HumanDirective and feedback rounds");
+    assert_eq!(wire.len(),root_calls+4,"one Mapper, one human specialist, two WebExecutor rounds: {outcome:?}");
     let executor = wire
         .iter()
         .filter(|r| {
@@ -256,15 +258,15 @@ fn directive_proposal_native_loop_receives_actual_specialist_result() {
         )
         .unwrap()
         .consumed,
-        4
+        root_calls as i64
     );
     let root_calls: i64 = db.query_row("SELECT COUNT(*) FROM agent_root_model_journal WHERE root_run_id=?1 AND phase='received'", [&root_id], |r| r.get(0)).unwrap();
-    assert_eq!(root_calls, 4);
+    assert_eq!(root_calls, 5);
     assert_eq!(
         wire.iter()
             .filter(|raw| fresh_multi_wire_system(raw).contains("You are the Root Coordinator"))
             .count(),
-        4
+        5
     );
     multi_agent_finish_execution(&harness.context, &mut session, &outcome).unwrap();
     drop(session);

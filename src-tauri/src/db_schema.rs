@@ -1,7 +1,7 @@
 // The whole SQLite schema: every table, index and view the app creates on open.
 // Included from db.rs so the schema text stays one contiguous block (§12).
 
-const SCHEMA: &str = r#"
+const SCHEMA: &str = concat!(r#"
 CREATE TABLE IF NOT EXISTS projects (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     name TEXT NOT NULL UNIQUE,
@@ -711,6 +711,8 @@ CREATE TABLE IF NOT EXISTS assets (
     probe_hash TEXT NOT NULL DEFAULT '',
     canonical_key TEXT NOT NULL DEFAULT '',
     extra_json TEXT NOT NULL DEFAULT '{}',
+    has_login INTEGER NOT NULL DEFAULT -1,
+    has_register INTEGER NOT NULL DEFAULT -1,
     first_seen TEXT NOT NULL DEFAULT (datetime('now','localtime')),
     last_seen TEXT NOT NULL DEFAULT (datetime('now','localtime')),
     last_alive TEXT
@@ -726,6 +728,7 @@ CREATE TABLE IF NOT EXISTS project_assets (
     first_seen TEXT NOT NULL DEFAULT (datetime('now','localtime')),
     last_seen TEXT NOT NULL DEFAULT (datetime('now','localtime')),
     last_run_id INTEGER REFERENCES runs(id) ON DELETE SET NULL,
+    entry_opened_at TEXT,
     PRIMARY KEY(project_id, asset_id)
 );
 
@@ -774,6 +777,224 @@ CREATE TABLE IF NOT EXISTS asset_ownership_rules (
     UNIQUE(project_id,rule_type,pattern,action)
 );
 CREATE INDEX IF NOT EXISTS idx_asset_ownership_rules_project ON asset_ownership_rules(project_id,enabled,rule_type);
+
+-- O1 shared organization directory (the single directory; exposure must reference
+-- these entity ids instead of creating a second one). It records organization
+-- facts only and never carries or copies authorization between projects.
+CREATE TABLE IF NOT EXISTS org_directory_state (
+    id INTEGER PRIMARY KEY CHECK(id=1),
+    version INTEGER NOT NULL DEFAULT 0 CHECK(version>=0),
+    updated_at TEXT NOT NULL DEFAULT (datetime('now','localtime'))
+);
+CREATE TABLE IF NOT EXISTS org_entities (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    group_id INTEGER REFERENCES org_entities(id) ON DELETE RESTRICT,
+    parent_id INTEGER REFERENCES org_entities(id) ON DELETE RESTRICT,
+    entity_kind TEXT NOT NULL CHECK(entity_kind IN ('group','headquarters','province_company','city_branch','county_branch','professional_subsidiary','overseas_entity','supplier','unknown')),
+    legal_name TEXT NOT NULL CHECK(length(legal_name)>0),
+    normalized_name TEXT NOT NULL CHECK(length(normalized_name)>0),
+    unified_code TEXT NOT NULL DEFAULT '',
+    region_code TEXT NOT NULL DEFAULT '',
+    status TEXT NOT NULL DEFAULT 'confirmed' CHECK(status IN ('confirmed','retired')),
+    source TEXT NOT NULL DEFAULT 'manual',
+    source_ref TEXT NOT NULL DEFAULT '',
+    directory_version INTEGER NOT NULL CHECK(directory_version>0),
+    created_at TEXT NOT NULL DEFAULT (datetime('now','localtime')),
+    updated_at TEXT NOT NULL DEFAULT (datetime('now','localtime')),
+    UNIQUE(normalized_name)
+);
+CREATE INDEX IF NOT EXISTS idx_org_entities_group ON org_entities(group_id,entity_kind,status);
+CREATE TABLE IF NOT EXISTS org_entity_identifiers (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    entity_id INTEGER NOT NULL REFERENCES org_entities(id) ON DELETE CASCADE,
+    kind TEXT NOT NULL CHECK(kind IN ('short_name','english_name','historical_name','brand','official_domain','shared_domain')),
+    value TEXT NOT NULL CHECK(length(value)>0),
+    normalized_value TEXT NOT NULL CHECK(length(normalized_value)>0),
+    source TEXT NOT NULL DEFAULT 'manual',
+    source_ref TEXT NOT NULL DEFAULT '',
+    directory_version INTEGER NOT NULL CHECK(directory_version>0),
+    created_at TEXT NOT NULL DEFAULT (datetime('now','localtime')),
+    UNIQUE(entity_id,kind,normalized_value)
+);
+CREATE INDEX IF NOT EXISTS idx_org_identifiers_value ON org_entity_identifiers(kind,normalized_value);
+-- Per-project binding to the shared directory. Binding a project grants nothing:
+-- authorization stays in that project's own asset_ownership_decisions.
+CREATE TABLE IF NOT EXISTS project_org_bindings (
+    project_id INTEGER PRIMARY KEY REFERENCES projects(id) ON DELETE CASCADE,
+    project_kind TEXT NOT NULL CHECK(project_kind IN ('group_ledger','unit')),
+    group_entity_id INTEGER NOT NULL REFERENCES org_entities(id) ON DELETE RESTRICT,
+    unit_entity_id INTEGER REFERENCES org_entities(id) ON DELETE RESTRICT,
+    binding_version INTEGER NOT NULL CHECK(binding_version>0),
+    updated_at TEXT NOT NULL DEFAULT (datetime('now','localtime'))
+);
+-- Directory audit: which version added what, and from which page (via_project_id
+-- is provenance only; the directory itself is not project-owned data).
+CREATE TABLE IF NOT EXISTS org_directory_changes (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    directory_version INTEGER NOT NULL,
+    via_project_id INTEGER,
+    change_type TEXT NOT NULL,
+    entity_id INTEGER,
+    payload_json TEXT NOT NULL DEFAULT '{}' CHECK(json_valid(payload_json)),
+    created_at TEXT NOT NULL DEFAULT (datetime('now','localtime'))
+);
+
+-- O2 ownership review (design 2026-10-08 §6–§10). Analysis runs are durable and bound to
+-- the project/scope/data/policy/directory/binding/algorithm versions they used; at most one
+-- queued/running run per project. Group membership is per snapshot: PRIMARY KEY(run_id,asset_id)
+-- means an asset belongs to exactly one primary review group in a snapshot. Nothing here
+-- grants authorization; group operations only write ownership facts through
+-- asset_ownership_decisions and audit every row in ownership_operation_items.
+CREATE TABLE IF NOT EXISTS ownership_analysis_runs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+    status TEXT NOT NULL DEFAULT 'queued' CHECK(status IN ('queued','running','completed','cancelled','failed')),
+    scope_version TEXT NOT NULL,
+    data_revision TEXT NOT NULL,
+    data_revision_at_finish TEXT NOT NULL DEFAULT '',
+    policy_version INTEGER NOT NULL,
+    directory_version INTEGER NOT NULL,
+    binding_version INTEGER NOT NULL,
+    algorithm_version TEXT NOT NULL,
+    cancel_requested INTEGER NOT NULL DEFAULT 0 CHECK(cancel_requested IN (0,1)),
+    worker_token TEXT NOT NULL DEFAULT '',
+    heartbeat_epoch INTEGER NOT NULL DEFAULT 0,
+    total_assets INTEGER NOT NULL DEFAULT 0,
+    processed_assets INTEGER NOT NULL DEFAULT 0,
+    last_asset_id INTEGER NOT NULL DEFAULT 0,
+    group_count INTEGER NOT NULL DEFAULT 0,
+    member_count INTEGER NOT NULL DEFAULT 0,
+    members_pruned INTEGER NOT NULL DEFAULT 0 CHECK(members_pruned IN (0,1)),
+    error TEXT NOT NULL DEFAULT '',
+    created_at TEXT NOT NULL DEFAULT (datetime('now','localtime')),
+    started_at TEXT NOT NULL DEFAULT '',
+    finished_at TEXT NOT NULL DEFAULT '',
+    -- O3: rules are part of the bound versions; incremental runs reuse an unchanged base
+    -- snapshot's classification for rows below the data-change watermark.
+    rules_version TEXT NOT NULL DEFAULT '',
+    run_kind TEXT NOT NULL DEFAULT 'full' CHECK(run_kind IN ('full','incremental')),
+    base_run_id INTEGER,
+    mode_reason TEXT NOT NULL DEFAULT '',
+    watermark_at TEXT NOT NULL DEFAULT '',
+    reclassified_assets INTEGER NOT NULL DEFAULT 0,
+    carried_assets INTEGER NOT NULL DEFAULT 0,
+    resume_count INTEGER NOT NULL DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS idx_ownership_runs_project ON ownership_analysis_runs(project_id,status,id);
+CREATE UNIQUE INDEX IF NOT EXISTS ux_ownership_runs_active ON ownership_analysis_runs(project_id) WHERE status IN ('queued','running');
+CREATE TABLE IF NOT EXISTS ownership_review_groups (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    run_id INTEGER NOT NULL REFERENCES ownership_analysis_runs(id) ON DELETE CASCADE,
+    project_id INTEGER NOT NULL,
+    group_key TEXT NOT NULL,
+    lane TEXT NOT NULL CHECK(lane IN ('consistent','insufficient','counter_evidence','conflict','unknown','manual')),
+    nav_bucket TEXT NOT NULL,
+    candidate_entity_id INTEGER,
+    candidate_label TEXT NOT NULL DEFAULT '',
+    candidate_source TEXT NOT NULL DEFAULT '',
+    relation_kind TEXT NOT NULL DEFAULT '',
+    region_clue TEXT NOT NULL DEFAULT '',
+    boundary_kind TEXT NOT NULL,
+    boundary_value TEXT NOT NULL DEFAULT '',
+    support_kind TEXT NOT NULL DEFAULT '',
+    counter_kind TEXT NOT NULL DEFAULT '',
+    decision_status TEXT NOT NULL,
+    decision_source TEXT NOT NULL,
+    authorization_status TEXT NOT NULL,
+    exposure_eligible INTEGER NOT NULL,
+    member_count INTEGER NOT NULL DEFAULT 0 CHECK(member_count>=0),
+    distinct_hosts INTEGER NOT NULL DEFAULT 0,
+    sample_asset_ids_json TEXT NOT NULL DEFAULT '[]' CHECK(json_valid(sample_asset_ids_json)),
+    sample_rule TEXT NOT NULL DEFAULT '',
+    reason TEXT NOT NULL DEFAULT '',
+    priority INTEGER NOT NULL DEFAULT 50,
+    sort_rank INTEGER NOT NULL DEFAULT 0,
+    group_version INTEGER NOT NULL DEFAULT 1 CHECK(group_version>0),
+    applied_operations INTEGER NOT NULL DEFAULT 0,
+    -- O3 display index: members whose authorization was revoked after this snapshot.
+    authorization_revoked INTEGER NOT NULL DEFAULT 0,
+    UNIQUE(run_id,group_key)
+);
+CREATE INDEX IF NOT EXISTS idx_ownership_groups_rank ON ownership_review_groups(run_id,sort_rank);
+CREATE INDEX IF NOT EXISTS idx_ownership_groups_lane ON ownership_review_groups(run_id,lane,sort_rank);
+CREATE TABLE IF NOT EXISTS ownership_review_group_members (
+    run_id INTEGER NOT NULL REFERENCES ownership_analysis_runs(id) ON DELETE CASCADE,
+    asset_id INTEGER NOT NULL,
+    project_id INTEGER NOT NULL,
+    group_id INTEGER NOT NULL,
+    host TEXT NOT NULL DEFAULT '',
+    registrable_domain TEXT NOT NULL DEFAULT '',
+    suffix_section TEXT NOT NULL DEFAULT '',
+    company TEXT NOT NULL DEFAULT '',
+    decision_state TEXT NOT NULL,
+    evidence_hash TEXT NOT NULL,
+    PRIMARY KEY(run_id,asset_id)
+);
+CREATE INDEX IF NOT EXISTS idx_ownership_members_group ON ownership_review_group_members(run_id,group_id,asset_id);
+-- O3: operations are a state machine. Group decisions/reverts stage their frozen plan in
+-- ownership_operation_staging and apply it in bounded chunks (applying -> completed);
+-- authorization revocation blocks downstream first (blocked) and only then updates the
+-- display index (completed). At most one applying decision/revert per group; a decision
+-- operation can be reverted at most once.
+CREATE TABLE IF NOT EXISTS ownership_operations (
+    operation_id TEXT PRIMARY KEY,
+    project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+    run_id INTEGER NOT NULL,
+    group_id INTEGER NOT NULL,
+    kind TEXT NOT NULL DEFAULT 'group_decision' CHECK(kind IN ('group_decision','group_revert','authorization_revoke')),
+    action TEXT NOT NULL CHECK(action IN ('confirm_ownership','related','third_party','excluded','revert','revoke_authorization')),
+    status TEXT NOT NULL DEFAULT 'completed' CHECK(status IN ('applying','blocked','completed','failed')),
+    target_operation_id TEXT NOT NULL DEFAULT '',
+    payload_hash TEXT NOT NULL,
+    expected_action_hash TEXT NOT NULL,
+    total_items INTEGER NOT NULL DEFAULT 0,
+    done_items INTEGER NOT NULL DEFAULT 0,
+    last_seq INTEGER NOT NULL DEFAULT 0,
+    worker_token TEXT NOT NULL DEFAULT '',
+    heartbeat_epoch INTEGER NOT NULL DEFAULT 0,
+    resume_count INTEGER NOT NULL DEFAULT 0,
+    applied INTEGER NOT NULL DEFAULT 0,
+    skipped INTEGER NOT NULL DEFAULT 0,
+    conflicted INTEGER NOT NULL DEFAULT 0,
+    failed INTEGER NOT NULL DEFAULT 0,
+    result_json TEXT NOT NULL CHECK(json_valid(result_json)),
+    error TEXT NOT NULL DEFAULT '',
+    created_at TEXT NOT NULL DEFAULT (datetime('now','localtime')),
+    updated_at TEXT NOT NULL DEFAULT (datetime('now','localtime'))
+);
+CREATE INDEX IF NOT EXISTS idx_ownership_operations_run ON ownership_operations(run_id,group_id);
+CREATE INDEX IF NOT EXISTS idx_ownership_operations_status ON ownership_operations(status,project_id);
+CREATE UNIQUE INDEX IF NOT EXISTS ux_ownership_operations_group_active ON ownership_operations(run_id,group_id) WHERE status='applying' AND kind IN ('group_decision','group_revert');
+CREATE UNIQUE INDEX IF NOT EXISTS ux_ownership_operations_revert_once ON ownership_operations(target_operation_id) WHERE kind='group_revert';
+CREATE TABLE IF NOT EXISTS ownership_operation_staging (
+    operation_id TEXT NOT NULL REFERENCES ownership_operations(operation_id) ON DELETE CASCADE,
+    seq INTEGER NOT NULL CHECK(seq>0),
+    asset_id INTEGER NOT NULL,
+    planned TEXT NOT NULL CHECK(planned IN ('apply','skipped','conflicted')),
+    reason TEXT NOT NULL DEFAULT '',
+    expected_state TEXT NOT NULL,
+    evidence_hash TEXT NOT NULL DEFAULT '',
+    old_json TEXT NOT NULL DEFAULT '{}' CHECK(json_valid(old_json)),
+    restore_json TEXT NOT NULL DEFAULT '{}' CHECK(json_valid(restore_json)),
+    evidence_json TEXT NOT NULL DEFAULT '[]',
+    evidence_ref TEXT NOT NULL DEFAULT '',
+    PRIMARY KEY(operation_id,seq),
+    UNIQUE(operation_id,asset_id)
+);
+CREATE TABLE IF NOT EXISTS ownership_operation_items (
+    operation_id TEXT NOT NULL REFERENCES ownership_operations(operation_id) ON DELETE CASCADE,
+    asset_id INTEGER NOT NULL,
+    outcome TEXT NOT NULL CHECK(outcome IN ('applied','skipped','conflicted','failed')),
+    reason TEXT NOT NULL DEFAULT '',
+    old_json TEXT NOT NULL DEFAULT '{}' CHECK(json_valid(old_json)),
+    new_json TEXT NOT NULL DEFAULT '{}' CHECK(json_valid(new_json)),
+    evidence_ref TEXT NOT NULL DEFAULT '',
+    before_state TEXT NOT NULL DEFAULT '',
+    after_state TEXT NOT NULL DEFAULT '',
+    created_at TEXT NOT NULL DEFAULT (datetime('now','localtime')),
+    PRIMARY KEY(operation_id,asset_id)
+);
+CREATE INDEX IF NOT EXISTS idx_ownership_operation_items_asset ON ownership_operation_items(asset_id,operation_id);
 
 CREATE TABLE IF NOT EXISTS exposure_findings (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -1465,6 +1686,32 @@ WHEN OLD.response_status<>0 OR NEW.response_status=0 OR NEW.received_at=''
  OR NEW.request_hash<>OLD.request_hash OR NEW.created_at<>OLD.created_at
 BEGIN SELECT RAISE(ABORT,'immutable_http_request_claim'); END;
 
+-- Deny-only target fuse. It survives later attempts of this same scan; it
+-- confers no original response signature, SDK permission or recovery grant.
+CREATE TABLE IF NOT EXISTS agent_protection_stops (
+    scan_id TEXT NOT NULL CHECK(length(scan_id)>0),
+    target_url TEXT NOT NULL CHECK(length(target_url)>0),
+    source_attempt_number INTEGER NOT NULL CHECK(source_attempt_number>0),
+    source_run_id TEXT NOT NULL CHECK(length(source_run_id)>0),
+    stop_code TEXT NOT NULL CHECK(stop_code IN ('confirmed_waf_or_challenge','persistent_rate_limit')),
+    reason TEXT NOT NULL CHECK(length(reason)>0 AND length(reason)<=2000),
+    claim_json TEXT NOT NULL CHECK(json_valid(claim_json)),
+    claim_hash TEXT NOT NULL CHECK(length(claim_hash)=64),
+    created_at TEXT NOT NULL DEFAULT (datetime('now','localtime')),
+    PRIMARY KEY(scan_id,target_url)
+);
+CREATE TRIGGER IF NOT EXISTS protection_stop_no_update
+BEFORE UPDATE ON agent_protection_stops
+BEGIN SELECT RAISE(ABORT,'protection_stop_immutable'); END;
+CREATE TRIGGER IF NOT EXISTS protection_stop_no_delete
+BEFORE DELETE ON agent_protection_stops
+BEGIN SELECT RAISE(ABORT,'protection_stop_immutable'); END;
+CREATE TRIGGER IF NOT EXISTS protection_stop_no_replace
+BEFORE INSERT ON agent_protection_stops
+WHEN EXISTS(SELECT 1 FROM agent_protection_stops old WHERE old.rowid=NEW.rowid
+    OR (old.scan_id=NEW.scan_id AND old.target_url=NEW.target_url))
+BEGIN SELECT RAISE(ABORT,'protection_stop_immutable'); END;
+
 CREATE TABLE IF NOT EXISTS agent_external_surface_captures (
     scan_id TEXT NOT NULL,
     attempt_number INTEGER NOT NULL,
@@ -1501,6 +1748,49 @@ CREATE TABLE IF NOT EXISTS agent_authorization_probe_claims (
     FOREIGN KEY(scan_id,attempt_number,target_url,contract_key)
       REFERENCES agent_authorization_controls(scan_id,attempt_number,target_url,contract_key)
 );
+
+-- First-response Authorization seals are append-only. This table grants no
+-- authority; the private issuer must validate and sign the original facts.
+-- No migration/backfill turns existing artifacts into first-write receipts.
+CREATE TABLE IF NOT EXISTS agent_authorization_side_receipts (
+    storage_id INTEGER PRIMARY KEY CHECK(storage_id>0),
+    receipt_id TEXT NOT NULL UNIQUE CHECK(length(receipt_id)>0),
+    root_run_id TEXT NOT NULL CHECK(length(root_run_id)>0),
+    scan_id TEXT NOT NULL,
+    attempt_number INTEGER NOT NULL CHECK(attempt_number>0),
+    target_url TEXT NOT NULL,
+    contract_key TEXT NOT NULL,
+    side TEXT NOT NULL CHECK(side IN ('owner','cross','tester')),
+    claim_rowid INTEGER NOT NULL CHECK(claim_rowid>0),
+    assignment_id TEXT NOT NULL,
+    child_run_id TEXT NOT NULL,
+    worker_attempt_id TEXT NOT NULL,
+    artifact_id TEXT NOT NULL CHECK(length(artifact_id)>0),
+    fact_json TEXT NOT NULL CHECK(json_valid(fact_json)),
+    fact_hash TEXT NOT NULL CHECK(length(fact_hash)=64),
+    signature BLOB NOT NULL CHECK(typeof(signature)='blob' AND length(signature)=32),
+    created_at TEXT NOT NULL DEFAULT (datetime('now','localtime')),
+    UNIQUE(scan_id,attempt_number,target_url,contract_key,side),
+    UNIQUE(claim_rowid),
+    UNIQUE(root_run_id,artifact_id)
+);
+CREATE TRIGGER IF NOT EXISTS authorization_side_receipt_no_update
+BEFORE UPDATE ON agent_authorization_side_receipts
+BEGIN SELECT RAISE(ABORT,'authorization_side_receipt_immutable'); END;
+CREATE TRIGGER IF NOT EXISTS authorization_side_receipt_no_delete
+BEFORE DELETE ON agent_authorization_side_receipts
+BEGIN SELECT RAISE(ABORT,'authorization_side_receipt_immutable'); END;
+-- REPLACE may bypass delete triggers when recursive_triggers is off. Reject
+-- every conflicting physical or logical identity before conflict resolution.
+CREATE TRIGGER IF NOT EXISTS authorization_side_receipt_no_replace
+BEFORE INSERT ON agent_authorization_side_receipts
+WHEN EXISTS(SELECT 1 FROM agent_authorization_side_receipts old
+    WHERE old.rowid=NEW.rowid OR old.receipt_id=NEW.receipt_id
+       OR old.claim_rowid=NEW.claim_rowid
+       OR (old.root_run_id=NEW.root_run_id AND old.artifact_id=NEW.artifact_id)
+       OR (old.scan_id=NEW.scan_id AND old.attempt_number=NEW.attempt_number
+           AND old.target_url=NEW.target_url AND old.contract_key=NEW.contract_key AND old.side=NEW.side))
+BEGIN SELECT RAISE(ABORT,'authorization_side_receipt_immutable'); END;
 
 -- Human attestations never replace wire receipts or authorize replay. Revisions
 -- are append-only; the source snapshot remains available after a late receipt.
@@ -2046,4 +2336,4 @@ CREATE TABLE IF NOT EXISTS native_scan_plans (
     created_at TEXT NOT NULL DEFAULT (datetime('now','localtime')),
     PRIMARY KEY(scan_id,attempt_number)
 );
-"#;
+"#, include_str!("agent_runtime/web_mode/protection_receipt.sql"), include_str!("agent_runtime/web_mode/http_budget_receipt.sql"), include_str!("agent_runtime/web_mode/web_expiry_delivery.sql"), include_str!("agent_runtime/web_mode/capability_transition_receipt.sql"), include_str!("commands/agent_native/coordinator_authorization_output_receipt.sql"), include_str!("commands/agent_native/external_surface_response_receipt.sql"), include_str!("commands/agent_native/external_surface_output_receipt.sql"), include_str!("commands/agent_native/business_logic_output_receipt.sql"), include_str!("commands/agent_native/business_logic_dispatch_receipt.sql"), include_str!("agent_runtime/multi_agent/homogeneous/schema.sql"),include_str!("agent_runtime/multi_agent/homogeneous/parser_execution.sql"),include_str!("agent_runtime/multi_agent/homogeneous/execution_facts.sql"));

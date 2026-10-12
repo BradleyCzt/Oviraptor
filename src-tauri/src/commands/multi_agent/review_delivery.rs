@@ -174,6 +174,9 @@ fn complete_review_delivery_in_transaction(
         scheduler,
     };
     require_executable_coordinator(tx, lease)?;
+    let frozen:String=tx.query_row("SELECT candidate_json FROM agent_review_requests WHERE id=?1 AND root_run_id=?2 AND candidate_id=?3 AND candidate_revision=?4",params![request_id,lease.root_run_id,candidate_id,revision],|r|r.get(0)).map_err(|_|"review_authorization_original_candidate_missing")?;
+    let frozen:JsonValue=serde_json::from_str(&frozen).map_err(|_|"review_authorization_original_candidate_invalid")?;
+    native_authorization_original_candidate_on(tx,lease,target_dir,&frozen)?;
     let event_floor: i64 = tx
         .query_row(
             "SELECT COALESCE(MAX(sequence),0) FROM agent_collaboration_events",
@@ -281,6 +284,7 @@ fn complete_review_delivery_in_transaction(
     if let Some(proof) = expired {
         proof.verify(tx, lease, reviewer)?;
     }
+    native_authorization_original_candidate_on(tx,lease,target_dir,&frozen)?;
     validate_coordinator_lease(tx, lease)?;
     require_executable_coordinator(tx, lease)
 }

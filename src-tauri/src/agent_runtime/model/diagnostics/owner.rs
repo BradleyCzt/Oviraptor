@@ -12,13 +12,22 @@ pub(crate) enum Domain {
     Root,
     Specialist,
     SourceRound,
+    MapperLoop,
 }
 impl Domain {
+    pub(super) fn storage(self) -> Self {
+        if self == Self::MapperLoop {
+            Self::Specialist
+        } else {
+            self
+        }
+    }
     fn as_str(self) -> &'static str {
         match self {
             Self::Root => "root",
             Self::Specialist => "specialist",
             Self::SourceRound => "source_round",
+            Self::MapperLoop => "mapper_loop",
         }
     }
 }
@@ -33,6 +42,7 @@ impl rusqlite::types::FromSql for Domain {
             "root" => Ok(Self::Root),
             "specialist" => Ok(Self::Specialist),
             "source_round" => Ok(Self::SourceRound),
+            "mapper_loop" => Ok(Self::MapperLoop),
             _ => Err(rusqlite::types::FromSqlError::InvalidType),
         }
     }
@@ -180,6 +190,9 @@ impl Owner {
         Ok(())
     }
     pub(super) fn verify_pristine(&self, db: &Connection) -> Result<(), String> {
+        if self.domain == Domain::MapperLoop {
+            return super::owner_mapper_loop::verify(db, self, true);
+        }
         let next = if self.domain == Domain::Root {
             Self::root(db, &self.run_id, self.round)
                 .or_else(|_| super::owner_coordinator::load(db, &self.run_id, self.round))?
@@ -229,6 +242,9 @@ impl Owner {
         Ok(())
     }
     pub(super) fn cost_phase(&self, db: &Connection) -> Result<Option<String>, String> {
+        if self.domain == Domain::MapperLoop {
+            return super::owner_mapper_loop::cost_phase(db, self);
+        }
         if self.domain == Domain::Root {
             return db
                 .query_row(

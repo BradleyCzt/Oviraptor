@@ -2,6 +2,60 @@ use super::*;
 use uuid::Uuid;
 
 #[test]
+fn initializes_phase_one_homogeneous_control_plane() {
+    // DESIGN §4：Phase 1 新表与 agent_assignments 增列必须在一次 initialize 后齐备。
+    let root = std::env::temp_dir().join(format!("oviraptor-homogeneous-schema-{}", Uuid::new_v4()));
+    let path = initialize(&root).unwrap();
+    let connection = Connection::open(path).unwrap();
+    for table in [
+        "agent_homogeneous_tasks",
+        "agent_task_slices",
+        "agent_lane_quotas",
+        "agent_lane_slots",
+        "agent_acceptance_verdicts",
+        "agent_human_directive_gated",
+        "agent_worker_instances",
+        "agent_worker_reports",
+        "agent_evidence_aliases",
+    ] {
+        let present: i64 = connection
+            .query_row(
+                "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name=?1",
+                [table],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(present, 1, "缺少 Phase 1 新表：{table}");
+    }
+    for column in [
+        "slice_id",
+        "scheduling_model",
+        "worker_profile_id",
+        "homogeneous_worker_id",
+        "attempt",
+    ] {
+        assert!(
+            column_exists(&connection, "agent_assignments", column).unwrap(),
+            "agent_assignments 缺少增列：{column}"
+        );
+    }
+    assert!(column_exists(&connection, "agent_runs", "scheduling_model").unwrap());
+    // 旧 lane 互斥表结构必须一字不变（DESIGN §5.1：homogeneous 不写它）。
+    let pk: String = connection
+        .query_row(
+            "SELECT sql FROM sqlite_master WHERE type='table' AND name='agent_lane_leases'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert!(
+        pk.contains("PRIMARY KEY(scan_id,attempt_number,target_key,lane)"),
+        "agent_lane_leases 主键被改动：{pk}"
+    );
+    let _ = fs::remove_dir_all(root);
+}
+
+#[test]
 fn initializes_complete_exposure_workflow_schema() {
     let root = std::env::temp_dir().join(format!("oviraptor-exposure-schema-{}", Uuid::new_v4()));
     let path = initialize(&root).unwrap();

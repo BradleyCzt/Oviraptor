@@ -120,7 +120,7 @@ fn scan_deletion_paid_single_closed_branch_deletes_task_without_losing_financial
     );
     let audit: String = db
         .query_row(
-            "SELECT audit_json FROM native_deleted_scan_audits WHERE scan_id=?1",
+            "SELECT audit_json FROM native_deleted_scan_audits_v2 WHERE scan_id=?1",
             [&f.scan],
             |r| r.get(0),
         )
@@ -129,7 +129,7 @@ fn scan_deletion_paid_single_closed_branch_deletes_task_without_losing_financial
     delete_sentinel_scan_inner(&f.path, &f.scan).unwrap();
     assert_eq!(
         db.query_row(
-            "SELECT audit_json FROM native_deleted_scan_audits WHERE scan_id=?1",
+            "SELECT audit_json FROM native_deleted_scan_audits_v2 WHERE scan_id=?1",
             [&f.scan],
             |r| r.get::<_, String>(0)
         )
@@ -151,7 +151,7 @@ fn scan_deletion_paid_single_audit_trigger_cannot_write_business_or_foreign_task
         let (f, context, _root) = paid_single_deletion_fixture();
         let db = db::open(&f.path).unwrap();
         db.execute_batch("CREATE TABLE private_business(value TEXT);INSERT INTO private_business VALUES('original');INSERT INTO sentinel_scans(id,project_id,project_name,status,task_name) VALUES('other-scan',9001,'Mode test','draft','original');").unwrap();
-        db.execute_batch(&format!("CREATE TRIGGER audit_fault AFTER INSERT ON native_deleted_scan_audits BEGIN {mutation}; END;")).unwrap();
+        db.execute_batch(&format!("CREATE TRIGGER audit_fault AFTER INSERT ON native_deleted_scan_audits_v2 BEGIN {mutation}; END;")).unwrap();
         let before = single_finally_physical(&db);
         let source = fs::read(context.target_dir.join("frontend-evidence.json")).unwrap();
         assert!(
@@ -176,7 +176,7 @@ fn scan_deletion_paid_single_archive_includes_original_sdk_log_rows_and_rowids()
     delete_sentinel_scan_inner(&f.path, &f.scan).unwrap();
     let text: String = db
         .query_row(
-            "SELECT audit_json FROM native_deleted_scan_audits WHERE scan_id=?1",
+            "SELECT audit_json FROM native_deleted_scan_audits_v2 WHERE scan_id=?1",
             [&f.scan],
             |r| r.get(0),
         )

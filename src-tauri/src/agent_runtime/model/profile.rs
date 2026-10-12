@@ -77,6 +77,20 @@ impl GatewayProfile {
         !self.api_key.is_empty()
     }
 
+    /// Small, frozen structured-output calls need the answer to fit inside
+    /// their original completion reservation. DeepSeek V4 defaults to thinking
+    /// and can spend that entire reservation without returning any content.
+    /// Larger/unbounded calls retain the configured provider default.
+    pub fn bounded_wire_options(&self) -> JsonValue {
+        if matches!(self.model.as_str(), "deepseek-v4-flash" | "deepseek-v4-pro" | "deepseek-flash")
+            && self.max_output_tokens.is_some_and(|cap| cap > 0 && cap <= 2_048)
+        {
+            serde_json::json!({"thinking":{"type":"disabled"}})
+        } else {
+            serde_json::json!({})
+        }
+    }
+
     pub fn bearer(&self) -> Option<&str> {
         if self.has_key() {
             Some(self.api_key.as_str())
@@ -91,9 +105,11 @@ impl GatewayProfile {
         if self.max_context_tokens == 0 {
             return 6_000_000;
         }
-        let reserve = self.max_output_tokens.unwrap_or(2_048) as i64;
-        let usable = (self.max_context_tokens as i64 - reserve - 512).max(4_096);
-        (usable * super::usage::CHARS_PER_TOKEN) as usize
+        let reserve = self.max_output_tokens.unwrap_or(2_048);
+        let usable = self.max_context_tokens.saturating_sub(reserve).saturating_sub(512).max(4_096);
+        // Keep the transport ceiling even for corrupt or extreme local policy.
+        // This byte approximation is not a provider token or financial bound.
+        usable.saturating_mul(super::usage::CHARS_PER_TOKEN as u64).min(6_000_000) as usize
     }
 
     /// Deliberately key-free: safe for events and the UI.

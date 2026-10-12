@@ -17,6 +17,37 @@ pub(crate) struct DecisionProjection {
     pub(crate) record: Value,
 }
 impl Tick {
+    pub(crate) fn original_publication_for_continuation(
+        db: &Connection,
+        root: &str,
+        event: i64,
+    ) -> Result<(Tick, super::SavedDecision), String> {
+        if db.is_autocommit() {
+            return Err("root_tick_projection_requires_snapshot".into());
+        }
+        Self::project_publication(db, root, event)?;
+        let call: String = db
+            .query_row(
+                "SELECT call_id FROM agent_root_tick_receipts
+            WHERE root_run_id=?1 AND phase='publication' AND round=1
+            AND json_extract(fact_json,'$.eventSequence')=?2",
+                params![root, event],
+                |r| r.get(0),
+            )
+            .map_err(|_| "financial_continuation_publication_unverified")?;
+        let tick = Self::original_request_for_projection(db, root, &call)?;
+        if tick.request_fact["request"]["purpose"] != super::financial_purpose::PURPOSE {
+            return Err("financial_continuation_publication_scope_changed".into());
+        }
+        let saved = tick
+            .load_decision(db)?
+            .ok_or("root_tick_decision_missing")?;
+        if saved.unknown || saved.local_step.is_some() || tick.published(db, &saved)? != Some(event)
+        {
+            return Err("financial_continuation_publication_unverified".into());
+        }
+        Ok((tick, saved))
+    }
     pub(crate) fn project_publication(
         db: &Connection,
         root: &str,
@@ -66,7 +97,11 @@ impl Tick {
             || fact["request"]["basisHash"] != basis
             || !matches!(
                 fact["request"]["purpose"].as_str(),
-                Some("coordinator_decision_v1" | "coordinator_changed_fact_v1")
+                Some(
+                    "coordinator_decision_v1"
+                        | "coordinator_changed_fact_v1"
+                        | "coordinator_financial_continuation_v1"
+                )
             )
             || round <= 0
             || id

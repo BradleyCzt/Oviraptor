@@ -61,7 +61,8 @@ fn ordered_execution_tight_original_pool_defers_unstarted_plan_without_aborting_
             .unwrap_or_else(|| model_round(&[], 10)))
     }));
     h.context.environment.api_base = format!("http://127.0.0.1:{port}/v1");
-    freeze_fresh_multi_production_harness(&mut h);
+    // Six-request legacy regression retains its original v5 birth contract.
+    freeze_fresh_multi_production_harness_original_v5(&mut h);
     let connection = db::open(&h.db_path).unwrap();
     let root_id = h.context.run.as_ref().unwrap().run_id.clone();
     let native = ordered_exec_native(&connection, &root_id);

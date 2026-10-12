@@ -81,6 +81,15 @@ fn launch_frontend_recon_producer(
     mpsc::Receiver<FrontendQueueItem>,
     Option<mpsc::SyncSender<()>>,
 ),String> {
+    // This producer performs direct HTTP/JS/CDP before Root publication.
+    // Recovery scopes require their dedicated shared-budget consumer first.
+    let route_db = rusqlite::Connection::open_with_flags(
+        &db_path, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY,
+    ).map_err(|e| e.to_string())?;
+    if ordinary_web_recovery_scope_on(&route_db, &scan_id)? {
+        return Err("protection_recovery_requires_dedicated_frontend_budget".into());
+    }
+    drop(route_db);
     let producer_owner = ScanWorkerOwner::claim(&db_path,&scan_id,attempt_number,"frontend_producer","web")?;
     let (sender, receiver) = mpsc::channel();
     let (ack_sender, ack_receiver) = mpsc::sync_channel(0);

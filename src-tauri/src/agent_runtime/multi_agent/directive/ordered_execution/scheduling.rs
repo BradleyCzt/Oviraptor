@@ -89,9 +89,9 @@ pub(crate) fn prepare_next(
         };
         let room:bool=tx.query_row("SELECT NOT EXISTS(SELECT 1 FROM agent_assignments WHERE coordinator_run_id=?1 AND role='web_executor'
           AND state IN ('leased','running','waiting_review')) OR EXISTS(SELECT 1 FROM agent_budget_ledger WHERE root_run_id=?1
-          AND (total_tokens=0 OR total_tokens-spent_tokens-reserved_tokens>=?2+8000)
+          AND (total_tokens=0 OR total_tokens-spent_tokens-reserved_tokens>=?2+?4)
           AND (total_requests=0 OR total_requests-spent_requests-reserved_requests>=?3+1))",
-          params![scope.root_run_id,need,requests],|r|r.get(0)).map_err(|e|e.to_string())?;
+          params![scope.root_run_id,need,requests,crate::agent_runtime::multi_agent::client_side::REVIEWER_FLOOR_TOKENS],|r|r.get(0)).map_err(|e|e.to_string())?;
         let role = match action.role.as_str() {
             "spa_api_mapper" => AgentRole::SpaApiMapper,
             "deep_investigator" => AgentRole::DeepInvestigator,

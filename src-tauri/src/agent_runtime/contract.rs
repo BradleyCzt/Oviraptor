@@ -110,6 +110,25 @@ pub enum AgentRole {
 }
 
 impl AgentRole {
+    /// Exhaustive inventory — keep in lockstep with the enum variants (U39).
+    pub const ALL: &'static [AgentRole] = &[
+        Self::Coordinator,
+        Self::SpaApiMapper,
+        Self::RepoMapper,
+        Self::SourceAnalyst,
+        Self::WebExecutor,
+        Self::ExternalSurface,
+        Self::IdentitySession,
+        Self::Authorization,
+        Self::InputParser,
+        Self::Upload,
+        Self::BusinessLogic,
+        Self::Concurrency,
+        Self::ClientSide,
+        Self::DeepInvestigator,
+        Self::EvidenceReviewer,
+    ];
+
     pub fn as_str(self) -> &'static str {
         match self {
             Self::Coordinator => "coordinator",
@@ -170,6 +189,84 @@ impl AgentRole {
     /// Only the coordinator may reduce a terminal state (§19).
     pub fn may_reduce_terminal(self) -> bool {
         matches!(self, Self::Coordinator)
+    }
+
+    /// Roles that must schedule on the read_only_analysis lane (not upload/concurrency stubs).
+    pub fn requires_read_only_analysis_lane(self) -> bool {
+        matches!(
+            self,
+            Self::SpaApiMapper
+                | Self::IdentitySession
+                | Self::RepoMapper
+                | Self::SourceAnalyst
+                | Self::ClientSide
+                | Self::InputParser
+                | Self::BusinessLogic
+        )
+    }
+
+    /// Roles admitted by `prepare_readonly_child` bootstrap.
+    pub fn is_readonly_bootstrap_role(self) -> bool {
+        self.requires_read_only_analysis_lane()
+    }
+
+    /// Web-root bootstrap roles that always preserve EvidenceReviewer floor
+    /// (SpaApiMapper post-checks only when a web_mode projection exists).
+    pub fn requires_web_reviewer_floor_on_bootstrap(self) -> bool {
+        matches!(
+            self,
+            Self::ClientSide
+                | Self::IdentitySession
+                | Self::InputParser
+                | Self::BusinessLogic
+        )
+    }
+
+    /// Readonly specialist model binding lane is read_only_analysis for these
+    /// roles (DeepInvestigator included; ExternalSurface stays target_touching).
+    pub fn specialist_readonly_binding_lane(self) -> Option<&'static str> {
+        match self {
+            Self::SpaApiMapper
+            | Self::IdentitySession
+            | Self::DeepInvestigator
+            | Self::RepoMapper
+            | Self::SourceAnalyst
+            | Self::ClientSide
+            | Self::InputParser
+            | Self::BusinessLogic => Some("read_only_analysis"),
+            Self::EvidenceReviewer => Some("review"),
+            Self::ExternalSurface => Some("target_touching"),
+            _ => None,
+        }
+    }
+
+    /// Roles whose undispatched lease expiry may mint a replacement worker (U17/U38).
+    /// Authorization / Upload / Reviewer / Coordinator keep dedicated recovery paths.
+    pub fn allows_undispatched_worker_replacement(self) -> bool {
+        matches!(
+            self,
+            Self::SpaApiMapper
+                | Self::IdentitySession
+                | Self::DeepInvestigator
+                | Self::ClientSide
+                | Self::InputParser
+                | Self::BusinessLogic
+                | Self::ExternalSurface
+        )
+    }
+
+    /// Web supervised readonly recovery (`prepare_supervised_readonly_child`).
+    /// Source RepoMapper/SourceAnalyst keep dedicated recovery; DeepInvestigator
+    /// is not on this bootstrap entry.
+    pub fn allows_supervised_readonly_bootstrap(self) -> bool {
+        matches!(
+            self,
+            Self::SpaApiMapper
+                | Self::IdentitySession
+                | Self::ClientSide
+                | Self::InputParser
+                | Self::BusinessLogic
+        )
     }
 }
 

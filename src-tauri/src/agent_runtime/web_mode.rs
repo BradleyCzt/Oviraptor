@@ -5,9 +5,15 @@ use serde_json::Value;
 
 pub(crate) mod action;
 pub(crate) mod draft;
-pub(crate) mod root;
 mod finance;
+pub(crate) mod root;
 pub(crate) mod writer;
+pub(crate) mod withdrawal_issuer;
+pub(crate) mod protection_issuer;
+pub(crate) mod http_budget_receipt;
+pub(crate) mod http_budget_storage;
+pub(crate) mod web_expiry_delivery;
+pub(crate) mod capability_transition_receipt;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -108,11 +114,97 @@ impl ModeFact {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, PartialEq, Eq)]
 pub(crate) struct VerifiedMode {
     fact: ModeFact,
+    private_key: [u8; 32],
+}
+impl std::fmt::Debug for VerifiedMode {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("VerifiedMode")
+            .field("fact", &self.fact)
+            .finish_non_exhaustive()
+    }
 }
 impl VerifiedMode {
+    pub(crate) fn sign_fresh_capability_transition_receipt(&self, fresh: &capability_transition_receipt::FreshCapabilityTransitionReceipt) -> Result<Vec<u8>, String> {
+        Ok(self.sign_private(&fresh.message_for_original(&self.fact)?))
+    }
+    pub(crate) fn verify_capability_transition_receipt(&self, message: &[u8], signature: &[u8]) -> Result<(), String> {
+        self.verify_private(message, signature).map_err(|_| "capability_transition_signature_invalid".into())
+    }
+    pub(crate) fn sign_fresh_web_expiry_delivery(&self, fresh: &web_expiry_delivery::FreshWebExpiryDelivery) -> Result<Vec<u8>, String> {
+        Ok(self.sign_private(&fresh.message_for_original(&self.fact)?))
+    }
+    pub(crate) fn verify_web_expiry_delivery(&self, message: &[u8], signature: &[u8]) -> Result<(), String> {
+        self.verify_private(message, signature).map_err(|_| "web_expiry_delivery_signature_invalid".into())
+    }
+
+    pub(crate) fn sign_fresh_http_budget_receipt(
+        &self,
+        fresh: &http_budget_receipt::FreshHttpBudgetReceipt,
+    ) -> Result<Vec<u8>, String> {
+        Ok(self.sign_private(&fresh.message_for_original(&self.fact)?))
+    }
+    pub(crate) fn verify_http_budget_receipt(
+        &self,
+        message: &[u8],
+        signature: &[u8],
+    ) -> Result<(), String> {
+        self.verify_private(message, signature)
+            .map_err(|_| "http_budget_receipt_signature_invalid".into())
+    }
+
+    pub(crate) fn sign_fresh_root_cache(&self, capture: &crate::agent_runtime::multi_agent::budget::root::model::cache_provenance::FreshRootCacheCapture) -> Result<Vec<u8>, String> {
+        Ok(self.sign_private(&capture.message_for_original(&self.fact)?))
+    }
+    pub(crate) fn verify_root_cache(&self, message: &[u8], signature: &[u8]) -> Result<(), String> {
+        self.verify_private(message, signature).map_err(|_| "root_cache_capture_signature_invalid".into())
+    }
+
+    pub(crate) fn sign_new_recovery_approval(
+        &self,
+        approved: &crate::commands::recovery_approval_signature::FreshProtectionRecoveryApproval,
+    ) -> Result<Vec<u8>, String> {
+        Ok(self.sign_private(&approved.message_for_original(&self.fact)?))
+    }
+    pub(crate) fn sign_new_recovery_draft(
+        &self,
+        draft: &crate::commands::recovery_approval_signature::FreshProtectionRecoveryDraft,
+    ) -> Result<Vec<u8>, String> {
+        Ok(self.sign_private(&draft.message_for_original(&self.fact)?))
+    }
+    pub(crate) fn sign_new_recovery_cancellation(
+        &self,
+        cancellation: &crate::commands::recovery_approval_signature::FreshProtectionRecoveryCancellation,
+    ) -> Result<Vec<u8>, String> {
+        Ok(self.sign_private(&cancellation.message_for_original(&self.fact)?))
+    }
+    pub(crate) fn sign_new_priced_recovery_cancellation(
+        &self,
+        cancellation: &crate::commands::recovery_approval_signature::FreshPricedRecoveryCancellation,
+    ) -> Result<Vec<u8>, String> {
+        Ok(self.sign_private(&cancellation.message_for_original(&self.fact)?))
+    }
+    pub(crate) fn verify_saved_recovery_approval(&self, message: &[u8], signature: &[u8]) -> Result<(),String> {
+        self.verify_private(message,signature).map_err(|_|"protection_recovery_approval_signature_invalid".into())
+    }
+    fn sign_private(&self, message: &[u8]) -> Vec<u8> {
+        aws_lc_rs::hmac::sign(
+            &aws_lc_rs::hmac::Key::new(aws_lc_rs::hmac::HMAC_SHA256, &self.private_key),
+            message,
+        )
+        .as_ref()
+        .to_vec()
+    }
+    fn verify_private(&self, message: &[u8], signature: &[u8]) -> Result<(), String> {
+        aws_lc_rs::hmac::verify(
+            &aws_lc_rs::hmac::Key::new(aws_lc_rs::hmac::HMAC_SHA256, &self.private_key),
+            message,
+            signature,
+        )
+        .map_err(|_| "root_mode_birth_signature_invalid".into())
+    }
     pub(crate) fn fact(&self) -> &ModeFact {
         &self.fact
     }
@@ -126,7 +218,12 @@ impl VerifiedMode {
             signature,
         )
         .map_err(|_| "web_mode_private_proof_changed")?;
-        Ok(Self { fact })
+        Ok(Self {
+            fact,
+            private_key: key
+                .try_into()
+                .map_err(|_| "web_mode_private_proof_invalid")?,
+        })
     }
 }
 

@@ -78,6 +78,10 @@ fn migrate_legacy_agent_and_retry_columns(connection: &mut Connection) -> Result
         "ALTER TABLE assets ADD COLUMN canonical_key TEXT NOT NULL DEFAULT ''",
         [],
     );
+    // -1 means the probe has not classified this asset. 0/1 are written only after a body was read.
+    ensure_column(connection, "assets", "has_login", "INTEGER NOT NULL DEFAULT -1")?;
+    ensure_column(connection, "assets", "has_register", "INTEGER NOT NULL DEFAULT -1")?;
+    ensure_column(connection, "project_assets", "entry_opened_at", "TEXT")?;
     let _ = connection.execute("ALTER TABLE sentinel_targets ADD COLUMN scan_id TEXT", []);
     let _ = connection.execute(
         "ALTER TABLE sentinel_targets ADD COLUMN value_score INTEGER NOT NULL DEFAULT 0",
@@ -488,6 +492,9 @@ fn migrate_agent_run_orchestration_columns(connection: &mut Connection) -> Resul
         ("assignment_id", "TEXT NOT NULL DEFAULT ''"),
         ("lane", "TEXT NOT NULL DEFAULT ''"),
         ("orchestration_policy", "TEXT NOT NULL DEFAULT 'single'"),
+        // DESIGN §0.1：任务级调度模式开关。历史行一律落在 legacy 上，
+        // 只有显式写成 homogeneous_workers 的 run 才走新的主管闭环。
+        ("scheduling_model", "TEXT NOT NULL DEFAULT 'legacy_role_pipeline'"),
         ("capability_lease_json", "TEXT NOT NULL DEFAULT '[]'"),
         ("reserved_tokens", "INTEGER NOT NULL DEFAULT 0"),
         ("reserved_requests", "INTEGER NOT NULL DEFAULT 0"),
@@ -511,9 +518,24 @@ fn migrate_agent_run_orchestration_columns(connection: &mut Connection) -> Resul
         ("fencing_token", "TEXT NOT NULL DEFAULT ''"),
         ("lease_expires_at", "TEXT NOT NULL DEFAULT ''"),
         ("budget_settled_at", "TEXT NOT NULL DEFAULT ''"),
+        // DESIGN §4.3：Phase 1 同质 Worker 的切片身份、调度模式与 attempt。
+        // 旧行的默认值保持 legacy vocabulary，读写新列前必须先判 scheduling_model。
+        ("slice_id", "TEXT NOT NULL DEFAULT ''"),
+        ("scheduling_model", "TEXT NOT NULL DEFAULT 'legacy_role_pipeline'"),
+        ("worker_profile_id", "TEXT NOT NULL DEFAULT ''"),
+        ("homogeneous_worker_id", "TEXT NOT NULL DEFAULT ''"),
+        ("attempt", "INTEGER NOT NULL DEFAULT 0"),
     ] {
         ensure_column(&*connection, "agent_assignments", column, definition)?;
     }
+    // DESIGN §4.3 的索引原写作 agent_assignments.attempt_number（现状该列不存在，
+    // attempts 表用 lease_epoch 递增），因此这里按 SPEC §1.4 Assignment.attempt 建索引。
+    connection
+        .execute(
+            "CREATE UNIQUE INDEX IF NOT EXISTS ux_homo_slice_attempt ON agent_assignments(slice_id,attempt) WHERE scheduling_model='homogeneous_workers' AND slice_id<>'';",
+            [],
+        )
+        .map_err(|error| format!("创建同质切片索引失败：{error}"))?;
     for (column, definition) in [
         ("source_draft_id", "TEXT NOT NULL DEFAULT ''"),
         ("confirmed_revision", "INTEGER NOT NULL DEFAULT 0"),

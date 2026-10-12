@@ -151,6 +151,11 @@ export interface BrowserAuthSession {
   updatedAt: string;
 }
 
+export interface ScanIdentityMaterial {
+  session: BrowserAuthSession;
+  document: Record<string, unknown>;
+}
+
 export interface ConfigProfile {
   id: number;
   name: string;
@@ -220,6 +225,9 @@ export interface Asset {
   lastRunId?: number;
   deletedAt?: string;
   projectName: string;
+  hasLogin?: number;
+  hasRegister?: number;
+  entryOpenedAt?: string | null;
 }
 
 export interface ExposureFinding {
@@ -258,6 +266,9 @@ export interface AssetQuery {
   sentinelView?: string;
   decisionView?: string;
   ownershipView?: string;
+  hasLoginView?: string;
+  hasRegisterView?: string;
+  entrySeenView?: string;
   sortBy?: string;
   sortDirection?: "asc" | "desc" | string;
 }
@@ -1226,9 +1237,7 @@ export interface EnvironmentDependency {
 export interface EnvironmentReport {
   os: string;
   arch: string;
-  python: string;
   node: string;
-  redisCli: string;
   dependencies: EnvironmentDependency[];
   checkedAt: string;
 }
@@ -1351,12 +1360,17 @@ export interface NativeBudgetDimension {
   dimension: string;
   hardLimit: number | null;
   reserved: number; consumed: number; indeterminate: number;
-  coverage: "assignment_settlement" | "multi_agent_broker" | "multi_agent_lane" | "admission_samples" | "denied_by_contract";
+  coverage: "assignment_settlement" | "multi_agent_broker" | "multi_agent_lane" | "race_batch_dispatch_unimplemented" | "admission_samples" | "denied_by_contract";
 }
 
 export interface NativeBudgetDiagnostics {
   schema: "summary_gap_v1"; authoritative: false; totalRoots: number; truncated: boolean;
-  roots: Array<{ rootRunId: string; gaps: {
+  roots: Array<{ rootRunId: string; singleOriginalHistory?: {
+    schemaVersion: 1; rootRunId: string;
+    state: "verified_closed_history" | "not_verified";
+    authoritative: false; executionAllowed: false; targetRequestsGranted: 0;
+    basis: "original_runtime_records_not_provider_dollar_invoice";
+  } | null; gaps: {
     ledgerExists: boolean; reservedTokens: number; spentTokens: number;
     reservedRequests: number; spentRequests: number;
     unsettledAssignmentTokens: number; unsettledAssignmentRequests: number;
@@ -1366,6 +1380,17 @@ export interface NativeBudgetDiagnostics {
     coordinatorLeaseFound: boolean; fencingMatchesCoordinator: boolean;
     missingDimensions: string[];
     appendJournal?: NativeBudgetDimension[] | null;
+    supervisionRequestCapacity?: {
+      schemaVersion: 1; authoritative: false; executionAllowed: false;
+      pendingPhysicalRequests: number; minimumFollowupModelRequests: number;
+      nextHttpRequiredModelRequests: number;
+      remainingSharedModelRequests: number | null;
+      remainingSharedModelTokens: number | null;
+      nextHttpRequestBalanceSufficient: boolean;
+      freshWorkBlocked: "cost_reconciliation_required" | "wall_time_exhausted" | "elapsed_finalized" | null;
+      futureTokenCapacityGuaranteed: false;
+      usdCapacityCoverage: "not_enforced_by_this_ledger";
+    } | null;
   } }>;
 }
 
@@ -1543,7 +1568,14 @@ export interface AgentTimelineItem {
   id: string;
   sequence: number;
   timestamp: string;
-  eventType: "directive_draft" | "user_directive" | "mailbox_message" | "agent_run" | "assignment" | "review_gate" | "host_boundary_candidate" | "request_review" | "administrative_closure" | "closure_handoff" | "root_decision";
+  eventType: "directive_draft" | "user_directive" | "mailbox_message" | "agent_run" | "assignment" | "review_gate" | "host_boundary_candidate" | "request_review" | "administrative_closure" | "closure_handoff" | "root_decision" | "worker_report" | "homogeneous_guidance" | "homogeneous_decision";
+  workerId?: string;
+  sourceUserDirectiveId?: string;
+  sliceId?: string;
+  modelRequests?: number;
+  totalTokens?: number;
+  zeroIntent?: { reason: "covered_by_inflight" | "blocked_on_inflight_output"; evidence_assignment_ids: string[]; note_zh: string } | null;
+  producedIntent?: boolean;
   fromRole: string;
   fromRunId: string;
   toRole: string;

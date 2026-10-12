@@ -1,4 +1,8 @@
 // Standalone Native model calls use a typed Root budget owner, not a child grant.
+fn native_single_model_output_cap(profile: &AgentModelProfile) -> u64 {
+    profile.max_output_tokens.unwrap_or(8192)
+}
+
 fn native_root_model_transport(
     context: &AgentRunContext,
     client: &AgentModelClient,
@@ -33,7 +37,7 @@ fn native_root_model_transport(
     }
     agent_require_frozen_web_plan(&db, context).map_err(str::to_string)?;
     let bytes=serde_json::to_vec(&json!({"messages":request.messages,"tools":request.tools.iter().map(|tool|tool.as_function_spec()).collect::<Vec<_>>()})).map_err(|e|e.to_string())?.len();
-    let output = client.profile().max_output_tokens.unwrap_or(8192);
+    let output = native_single_model_output_cap(client.profile());
     if output == 0 {
         return Err("budget_root_model_estimate_invalid".into());
     }

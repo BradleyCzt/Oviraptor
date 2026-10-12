@@ -42,6 +42,10 @@ pub struct Asset {
     pub last_run_id: Option<i64>,
     pub deleted_at: Option<String>,
     pub project_name: String,
+    /// -1 unknown, 0 absent, 1 present. Set only after a probe reads a page.
+    pub has_login: i64,
+    pub has_register: i64,
+    pub entry_opened_at: Option<String>,
 }
 
 #[derive(Debug, Deserialize, Default)]
@@ -70,6 +74,12 @@ pub struct AssetQuery {
     pub decision_view: String,
     #[serde(default)]
     pub ownership_view: String,
+    #[serde(default)]
+    pub has_login_view: String,
+    #[serde(default)]
+    pub has_register_view: String,
+    #[serde(default)]
+    pub entry_seen_view: String,
     #[serde(default)]
     pub sort_by: String,
     #[serde(default)]

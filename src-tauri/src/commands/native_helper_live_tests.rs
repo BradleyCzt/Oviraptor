@@ -139,10 +139,15 @@ fn native_helper_live_cancel_strong_kills_actual_descendant_and_fences_late_logs
   setInterval(()=>{},1000);
  "#);
     let db = f.db.clone();
+    // The precondition (helper + descendant cold-started and their diagnostic
+    // committed) takes ~0.5-0.7 s alone in a debug build and longer when the
+    // suite runs in parallel, so a fixed 800 ms window flaked. Cancel as soon
+    // as it is observed, bounded well inside the helper's 3 s timeout, and
+    // judge cancellation promptness from the cancel instant itself.
     let trigger = thread::spawn(move || {
         let start = Instant::now();
         let mut observed = false;
-        while start.elapsed() < Duration::from_millis(800) {
+        while start.elapsed() < Duration::from_secs(2) {
             let page = serde_json::to_value(
                 read_native_process_log_snapshot(&db, "web-a", 1, None, None, 0, 300).unwrap(),
             )
@@ -158,10 +163,10 @@ fn native_helper_live_cancel_strong_kills_actual_descendant_and_fences_late_logs
             }
             thread::sleep(Duration::from_millis(5));
         }
+        let cancelled_at = Instant::now();
         cancelled.cancel();
-        observed
+        (observed, start.elapsed(), cancelled_at)
     });
-    let started = Instant::now();
     let error = run_native_json_helper(
         &worker,
         &json!({}),
@@ -172,15 +177,24 @@ fn native_helper_live_cancel_strong_kills_actual_descendant_and_fences_late_logs
         &control,
     )
     .unwrap_err();
+    let returned_at = Instant::now();
+    let (observed, waited, cancelled_at) = trigger.join().unwrap();
     assert!(
-        trigger.join().unwrap(),
-        "no live committed diagnostic while actual descendant ran"
+        observed,
+        "no live committed diagnostic while actual descendant ran (waited {waited:?}, descendant started: {})",
+        f.root.join("descendant-started").exists()
     );
     assert!(
         error.contains("取消"),
         "cancellation reason was lost: {error}"
     );
-    assert!(started.elapsed() < Duration::from_secs(2));
+    // Stricter than the former whole-run `< 2 s` (which left >= 1.2 s for the
+    // cancel itself after the 800 ms window): strong cancel must return < 1 s.
+    let cancel_latency = returned_at.saturating_duration_since(cancelled_at);
+    assert!(
+        cancel_latency < Duration::from_secs(1),
+        "strong cancel took {cancel_latency:?} to return"
+    );
     assert!(f.root.join("descendant-started").exists());
     let before = serde_json::to_string(&f.rows()).unwrap();
     thread::sleep(Duration::from_millis(1500));

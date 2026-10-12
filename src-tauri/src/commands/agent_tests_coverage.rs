@@ -469,10 +469,62 @@
     fn agent_harvest_surface_paths_finds_onclick_and_ajax() {
         let html = r##"
             <img onclick="turll('/JschxxMain/Index','0')">
+            <div onclick="goNav('/JschxxMain/CustomNav','1')"></div>
+            <span onclick="jumpTo('/ZOnlyFromOnclick/Home')"></span>
+            <a onclick="navTo('/api.v2/items')"></a>
+            <li data-href="/JschxxMain/FromDataHref">menu</li>
+            <button data-api="/JschxxMain/FromDataApi">go</button>
+            <div data-route="/JschxxMain/FromDataRoute"></div>
+            <meta http-equiv="refresh" content="0;url=/JschxxMain/MetaRefresh">
+            <iframe src="/JschxxMain/EmbeddedFrame"></iframe>
+            <button formaction="/JschxxMain/FormActionSave">save</button>
+            <link rel="modulepreload" href="/JschxxMain/RouteManifest">
+            <embed src="/JschxxMain/EmbedShell">
+            <a href="/JschxxMain/Index" ping="/JschxxMain/PingTrack">x</a>
+            <div hx-get="/JschxxMain/HtmxList"></div>
+            <form hx-post="/JschxxMain/HtmxSave"></form>
+            <button @click="go('/JschxxMain/VueClickNav')">v</button>
+            <button x-on:click="open('/JschxxMain/AlpineClickNav')">a</button>
             <script>
+            router.push("/JschxxMain/SpaRoute");
+            navigate("/JschxxMain/NavigateTo");
+            { path: "/JschxxMain/RouterTablePath", component: X },
+
             url: "/JschxxMain/CheckLogin",
             url: "JschxxMain/getCommission",
+            url = "/JschxxMain/UrlAssignPath";
+            form.action = "/JschxxMain/ActionAssignPath";
+            a.href = "/JschxxMain/HrefAssignPath";
+            el.setAttribute("href", "/JschxxMain/SetAttrHrefPath");
+            el.setAttribute("action", "/JschxxMain/SetAttrActionPath");
+            el.setAttribute("src", "/JschxxMain/SetAttrSrcPath");
+            <a routerLink="/JschxxMain/RouterLinkPath"></a>
+            <a ng-href="/JschxxMain/NgHrefPath"></a>
+            <svg><a xlink:href="/JschxxMain/XlinkHrefPath"></a><use href="/JschxxMain/UseHrefPath"></use></svg>
+            <video poster="/JschxxMain/PosterPath"></video>
+            <blockquote cite="/JschxxMain/CitePath"></blockquote>
             window.location = "/JschxxMain/LoginUser?param=5";
+            location.assign("/JschxxMain/AssignPath");
+            history.pushState({}, "", "/JschxxMain/PushStatePath");
+            $.get("/JschxxMain/GetMenu");
+            $.post("/JschxxMain/SaveDraft");
+            $.load("/JschxxMain/JqueryLoad");
+            $.getScript("/JschxxMain/JqueryScript");
+            axios.get("/JschxxMain/AxiosList");
+            http.post("/JschxxMain/HttpClientSave");
+            fetch("/JschxxMain/FetchStatus");
+            window.open("/JschxxMain/PopupHelp");
+            xhr.open("POST", "/JschxxMain/XhrSave");
+            new WebSocket("/JschxxMain/LiveFeed");
+            new WebSocket("wss://www.jschxx.com/JschxxMain/WssLive");
+            new EventSource("https://www.jschxx.com/JschxxMain/AbsSse");
+            new WebSocket("wss://evil.example/JschxxMain/CrossOriginWs");
+            fetch("https://evil.example/JschxxMain/CrossOriginFetch");
+            new EventSource("/JschxxMain/SseEvents");
+            navigator.sendBeacon("/JschxxMain/BeaconPing");
+            import("/JschxxMain/LazyChunk");
+            new Worker("/JschxxMain/BgWorker");
+            navigator.serviceWorker.register("/JschxxMain/SwRegister");
             </script>
         "##;
         let paths = agent_harvest_surface_paths(html, "https://www.jschxx.com/");
@@ -482,6 +534,348 @@
             .collect::<Vec<_>>()
             .join(",");
         assert!(joined.contains("/JschxxMain/Index"), "{joined}");
+        assert!(joined.contains("/JschxxMain/CustomNav"), "{joined}");
+        assert!(joined.contains("/ZOnlyFromOnclick/Home"), "{joined}");
+        assert!(joined.contains("/api.v2/items"), "{joined}");
         assert!(joined.contains("/JschxxMain/CheckLogin"), "{joined}");
+        assert!(joined.contains("/JschxxMain/UrlAssignPath"), "{joined}");
+        assert!(joined.contains("/JschxxMain/ActionAssignPath"), "{joined}");
+        assert!(joined.contains("/JschxxMain/HrefAssignPath"), "{joined}");
+        assert!(joined.contains("/JschxxMain/SetAttrHrefPath"), "{joined}");
+        assert!(joined.contains("/JschxxMain/SetAttrActionPath"), "{joined}");
+        assert!(joined.contains("/JschxxMain/SetAttrSrcPath"), "{joined}");
+        assert!(joined.contains("/JschxxMain/RouterLinkPath"), "{joined}");
+        assert!(joined.contains("/JschxxMain/NgHrefPath"), "{joined}");
+        assert!(joined.contains("/JschxxMain/XlinkHrefPath"), "{joined}");
+        assert!(joined.contains("/JschxxMain/UseHrefPath"), "{joined}");
+        assert!(joined.contains("/JschxxMain/PosterPath"), "{joined}");
+        assert!(joined.contains("/JschxxMain/CitePath"), "{joined}");
         assert!(joined.contains("LoginUser") || joined.contains("/JschxxMain/LoginUser"), "{joined}");
+        assert!(joined.contains("/JschxxMain/FromDataHref"), "{joined}");
+        assert!(joined.contains("/JschxxMain/FromDataApi"), "{joined}");
+        assert!(joined.contains("/JschxxMain/FromDataRoute"), "{joined}");
+        assert!(joined.contains("/JschxxMain/GetMenu"), "{joined}");
+        assert!(joined.contains("/JschxxMain/SaveDraft"), "{joined}");
+        assert!(joined.contains("/JschxxMain/JqueryLoad"), "{joined}");
+        assert!(joined.contains("/JschxxMain/JqueryScript"), "{joined}");
+        assert!(joined.contains("/JschxxMain/FetchStatus"), "{joined}");
+        assert!(joined.contains("/JschxxMain/PopupHelp"), "{joined}");
+        assert!(joined.contains("/JschxxMain/AxiosList"), "{joined}");
+        assert!(joined.contains("/JschxxMain/HttpClientSave"), "{joined}");
+        assert!(joined.contains("/JschxxMain/MetaRefresh"), "{joined}");
+        assert!(joined.contains("/JschxxMain/SpaRoute"), "{joined}");
+        assert!(joined.contains("/JschxxMain/NavigateTo"), "{joined}");
+        assert!(joined.contains("/JschxxMain/RouterTablePath"), "{joined}");
+        assert!(joined.contains("/JschxxMain/AssignPath"), "{joined}");
+        assert!(joined.contains("/JschxxMain/PushStatePath"), "{joined}");
+        assert!(joined.contains("/JschxxMain/EmbeddedFrame"), "{joined}");
+        assert!(
+            joined.contains("POST|/JschxxMain/FormActionSave")
+                || joined.contains("/JschxxMain/FormActionSave"),
+            "{joined}"
+        );
+        assert!(joined.contains("/JschxxMain/RouteManifest"), "{joined}");
+        assert!(joined.contains("/JschxxMain/EmbedShell"), "{joined}");
+        assert!(joined.contains("/JschxxMain/XhrSave"), "{joined}");
+        assert!(joined.contains("/JschxxMain/LiveFeed"), "{joined}");
+        assert!(joined.contains("/JschxxMain/WssLive"), "{joined}");
+        assert!(joined.contains("/JschxxMain/AbsSse"), "{joined}");
+        assert!(
+            !joined.contains("CrossOriginWs") && !joined.contains("CrossOriginFetch"),
+            "cross-origin must not seed inventory: {joined}"
+        );
+        assert!(joined.contains("/JschxxMain/SseEvents"), "{joined}");
+        assert!(joined.contains("/JschxxMain/BeaconPing"), "{joined}");
+        assert!(joined.contains("/JschxxMain/LazyChunk"), "{joined}");
+        assert!(joined.contains("/JschxxMain/BgWorker"), "{joined}");
+        assert!(joined.contains("/JschxxMain/SwRegister"), "{joined}");
+        assert!(joined.contains("/JschxxMain/PingTrack"), "{joined}");
+        assert!(joined.contains("/JschxxMain/HtmxList"), "{joined}");
+        assert!(joined.contains("/JschxxMain/HtmxSave"), "{joined}");
+        assert!(joined.contains("/JschxxMain/VueClickNav"), "{joined}");
+        assert!(joined.contains("/JschxxMain/AlpineClickNav"), "{joined}");
+    }
+
+    #[test]
+    fn agent_harvest_surface_paths_fixture_stays_rich() {
+        // U84: guard against accidental fixture/pattern regressions collapsing coverage.
+        let html = r##"
+            <img onclick="turll('/JschxxMain/Index','0')">
+            <li data-href="/JschxxMain/FromDataHref">menu</li>
+            <button data-api="/JschxxMain/FromDataApi">go</button>
+            <div hx-get="/JschxxMain/HtmxList"></div>
+            <a href="/JschxxMain/Index" ping="/JschxxMain/PingTrack">x</a>
+            <script>
+            $.get("/JschxxMain/GetMenu");
+            url = "/JschxxMain/UrlAssignPath";
+            fetch("/JschxxMain/FetchStatus");
+            new WebSocket("/JschxxMain/LiveFeed");
+            new WebSocket("wss://www.jschxx.com/JschxxMain/WssLive");
+            navigator.sendBeacon("/JschxxMain/BeaconPing");
+            import("/JschxxMain/LazyChunk");
+            new Worker("/JschxxMain/BgWorker");
+            el.setAttribute("href", "/JschxxMain/RichSetAttr");
+            </script>
+            <a routerLink="/JschxxMain/RichRouter"></a>
+            <video poster="/JschxxMain/RichPoster"></video>
+            <blockquote cite="/JschxxMain/RichCite"></blockquote>
+            <video src="/JschxxRichStream"></video>
+            <track src="/JschxxRichTrack">
+            <img data-src="/JschxxRichLazy">
+            <script>fetch(new Request("/JschxxRichNewReq"));importScripts("/JschxxRichWorker");var c={"api":"/JschxxRichApi"};</script>
+            <frame src="/JschxxRichFrame">
+            <input type="image" src="/JschxxRichCaptcha">
+            <script>fetch(`/JschxxRichTick`);</script>
+        "##;
+        let paths = agent_harvest_surface_paths(html, "https://www.jschxx.com/");
+        assert!(
+            paths.len() >= 26,
+            "expected rich harvest, got {} → {:?}",
+            paths.len(),
+            paths
+        );
+    }
+
+    #[test]
+    fn native_surface_explore_mode_is_string_only_until_cdp_bfs() {
+        assert_eq!(native_surface_explore_mode(), "string_only");
+        assert!(!native_surface_click_explore_ready());
+    }
+
+    #[test]
+    fn native_surface_click_explore_candidates_not_ready() {
+        match native_surface_click_explore_candidates("<a onclick=\"x\">", "https://www.jschxx.com/") {
+            Ok(_) => panic!("click explore must stay not_ready while mode is string_only"),
+            Err(code) => assert_eq!(code, "surface_click_explore_not_ready"),
+        }
+    }
+
+
+
+
+
+
+
+
+
+
+
+
+
+    #[test]
+    fn agent_harvest_surface_paths_normalizes_same_origin_absolutes() {
+        // U129: same-origin absolute http(s)/ws(s) must land as inventory paths.
+        let html = r##"
+            <script>
+            fetch("https://www.jschxx.com/JschxxMain/AbsFetch");
+            new WebSocket("wss://www.jschxx.com/JschxxMain/AbsWss");
+            </script>
+            <a href="https://www.jschxx.com/JschxxMain/AbsHref">x</a>
+        "##;
+        let paths = agent_harvest_surface_paths(html, "https://www.jschxx.com/");
+        let joined = paths
+            .iter()
+            .map(|(m, p)| format!("{m}|{p}"))
+            .collect::<Vec<_>>()
+            .join(",");
+        assert!(joined.contains("/JschxxMain/AbsFetch"), "{joined}");
+        assert!(joined.contains("/JschxxMain/AbsWss"), "{joined}");
+        assert!(joined.contains("/JschxxMain/AbsHref"), "{joined}");
+    }
+
+    #[test]
+    fn agent_harvest_surface_paths_finds_iframe_src() {
+        // U128: same-site iframe shells (classic portal frames).
+        let html = r##"<iframe src="/JschxxMain/IframeShell"></iframe>"##;
+        let paths = agent_harvest_surface_paths(html, "https://www.jschxx.com/");
+        let joined = paths
+            .iter()
+            .map(|(m, p)| format!("{m}|{p}"))
+            .collect::<Vec<_>>()
+            .join(",");
+        assert!(joined.contains("/JschxxMain/IframeShell"), "{joined}");
+    }
+
+    #[test]
+    fn agent_harvest_surface_paths_finds_modulepreload() {
+        // U127: link rel=modulepreload|prefetch|preload same-site hrefs.
+        let html = r##"
+            <link rel="modulepreload" href="/JschxxMain/ModPreload">
+            <link href="/JschxxMain/PrefetchPath" rel="prefetch">
+        "##;
+        let paths = agent_harvest_surface_paths(html, "https://www.jschxx.com/");
+        let joined = paths
+            .iter()
+            .map(|(m, p)| format!("{m}|{p}"))
+            .collect::<Vec<_>>()
+            .join(",");
+        assert!(joined.contains("/JschxxMain/ModPreload"), "{joined}");
+        assert!(joined.contains("/JschxxMain/PrefetchPath"), "{joined}");
+    }
+
+    #[test]
+    fn agent_harvest_surface_paths_finds_base_href() {
+        // U126: <base href="/..."> is a same-site surface / relative-resolution root.
+        let html = r##"<base href="/JschxxMain/BasePath/">"##;
+        let paths = agent_harvest_surface_paths(html, "https://www.jschxx.com/");
+        let joined = paths
+            .iter()
+            .map(|(m, p)| format!("{m}|{p}"))
+            .collect::<Vec<_>>()
+            .join(",");
+        assert!(joined.contains("/JschxxMain/BasePath"), "{joined}");
+    }
+
+    #[test]
+    fn agent_harvest_surface_paths_rejects_cross_origin_absolutes() {
+        // U125: absolute cross-origin URLs must not seed the inventory.
+        let html = r##"
+            <script>
+            fetch("https://evil.example/CrossOriginFetch");
+            new WebSocket("wss://evil.example/CrossOriginWs");
+            </script>
+            <a href="https://evil.example/CrossOriginHref">x</a>
+        "##;
+        let paths = agent_harvest_surface_paths(html, "https://www.jschxx.com/");
+        let joined = paths
+            .iter()
+            .map(|(m, p)| format!("{m}|{p}"))
+            .collect::<Vec<_>>()
+            .join(",");
+        assert!(
+            !joined.contains("evil.example")
+                && !joined.contains("CrossOriginFetch")
+                && !joined.contains("CrossOriginWs")
+                && !joined.contains("CrossOriginHref"),
+            "cross-origin must not seed inventory: {joined}"
+        );
+    }
+
+    #[test]
+    fn agent_harvest_surface_paths_finds_longdesc_usemap() {
+        // U123: legacy longdesc=/usemap="/map" same-site paths.
+        let html = r##"<img longdesc="/JschxxMain/LongdescPath" usemap="/JschxxMain/UsemapPath">"##;
+        let paths = agent_harvest_surface_paths(html, "https://www.jschxx.com/");
+        let joined = paths
+            .iter()
+            .map(|(m, p)| format!("{m}|{p}"))
+            .collect::<Vec<_>>()
+            .join(",");
+        assert!(joined.contains("/JschxxMain/LongdescPath"), "{joined}");
+        assert!(joined.contains("/JschxxMain/UsemapPath"), "{joined}");
+    }
+
+    #[test]
+    fn agent_harvest_surface_paths_finds_embed_object() {
+        // U122: classic <embed src> / <object data> same-site shells.
+        let html = r##"
+            <embed src="/JschxxMain/EmbedPath">
+            <object data="/JschxxMain/ObjectPath"></object>
+        "##;
+        let paths = agent_harvest_surface_paths(html, "https://www.jschxx.com/");
+        let joined = paths
+            .iter()
+            .map(|(m, p)| format!("{m}|{p}"))
+            .collect::<Vec<_>>()
+            .join(",");
+        assert!(joined.contains("/JschxxMain/EmbedPath"), "{joined}");
+        assert!(joined.contains("/JschxxMain/ObjectPath"), "{joined}");
+    }
+
+    #[test]
+    fn agent_harvest_surface_paths_finds_css_url() {
+        // U118: inline CSS url("/...") same-site references.
+        let html = r##"<div style="background-image: url(/JschxxMain/CssUrlPath)"></div>
+            <style>.x{background:url('/JschxxMain/CssUrlQuoted')}</style>"##;
+        let paths = agent_harvest_surface_paths(html, "https://www.jschxx.com/");
+        let joined = paths
+            .iter()
+            .map(|(m, p)| format!("{m}|{p}"))
+            .collect::<Vec<_>>()
+            .join(",");
+        assert!(joined.contains("/JschxxMain/CssUrlPath"), "{joined}");
+        assert!(joined.contains("/JschxxMain/CssUrlQuoted"), "{joined}");
+    }
+
+    #[test]
+    fn agent_harvest_surface_paths_finds_background_attr() {
+        // U117: legacy portal body/td background="/..." same-site paths.
+        let html = r##"<body background="/JschxxMain/BgPath"><td background="/JschxxMain/TdBgPath"></td></body>"##;
+        let paths = agent_harvest_surface_paths(html, "https://www.jschxx.com/");
+        let joined = paths
+            .iter()
+            .map(|(m, p)| format!("{m}|{p}"))
+            .collect::<Vec<_>>()
+            .join(",");
+        assert!(joined.contains("/JschxxMain/BgPath"), "{joined}");
+        assert!(joined.contains("/JschxxMain/TdBgPath"), "{joined}");
+    }
+
+    #[test]
+    fn agent_harvest_surface_paths_finds_og_meta_url() {
+        // U114: Open Graph / Twitter meta content URLs as public surfaces.
+        let html = r##"
+            <meta property="og:url" content="/JschxxMain/OgUrlPath">
+            <meta name="twitter:image" content="/JschxxMain/TwImagePath">
+        "##;
+        let paths = agent_harvest_surface_paths(html, "https://www.jschxx.com/");
+        let joined = paths
+            .iter()
+            .map(|(m, p)| format!("{m}|{p}"))
+            .collect::<Vec<_>>()
+            .join(",");
+        assert!(joined.contains("/JschxxMain/OgUrlPath"), "{joined}");
+        assert!(joined.contains("/JschxxMain/TwImagePath"), "{joined}");
+    }
+
+    #[test]
+    fn agent_harvest_surface_paths_finds_imagesrcset() {
+        // U113: link imagesrcset first same-site candidate.
+        let html = r##"<link rel="preload" as="image" imagesrcset="/JschxxMain/ImageSrcsetPath 1x">"##;
+        let paths = agent_harvest_surface_paths(html, "https://www.jschxx.com/");
+        let joined = paths
+            .iter()
+            .map(|(m, p)| format!("{m}|{p}"))
+            .collect::<Vec<_>>()
+            .join(",");
+        assert!(joined.contains("/JschxxMain/ImageSrcsetPath"), "{joined}");
+    }
+
+    #[test]
+    fn agent_harvest_surface_paths_finds_formaction() {
+        // U112: HTML5 per-control formaction override (classic scanner parity).
+        let html = r##"<button formaction="/JschxxMain/FormActionPath">go</button>"##;
+        let paths = agent_harvest_surface_paths(html, "https://www.jschxx.com/");
+        let joined = paths
+            .iter()
+            .map(|(m, p)| format!("{m}|{p}"))
+            .collect::<Vec<_>>()
+            .join(",");
+        assert!(joined.contains("/JschxxMain/FormActionPath"), "{joined}");
+    }
+
+    #[test]
+    fn agent_harvest_surface_paths_finds_srcset() {
+        // U111: img/source srcset first same-site candidate.
+        let html = r##"<img srcset="/JschxxMain/SrcsetPath 1x, /JschxxMain/Srcset2 2x">"##;
+        let paths = agent_harvest_surface_paths(html, "https://www.jschxx.com/");
+        let joined = paths
+            .iter()
+            .map(|(m, p)| format!("{m}|{p}"))
+            .collect::<Vec<_>>()
+            .join(",");
+        assert!(joined.contains("/JschxxMain/SrcsetPath"), "{joined}");
+    }
+
+    #[test]
+    fn agent_harvest_surface_paths_finds_angular_router_link() {
+        // U106: Angular routerLink="/..." declarative nav targets (classic parity).
+        let html = r##"<a routerLink="/NgRouter/Dashboard">home</a>"##;
+        let paths = agent_harvest_surface_paths(html, "https://www.jschxx.com/");
+        let joined = paths
+            .iter()
+            .map(|(m, p)| format!("{m}|{p}"))
+            .collect::<Vec<_>>()
+            .join(",");
+        assert!(joined.contains("/NgRouter/Dashboard"), "{joined}");
     }

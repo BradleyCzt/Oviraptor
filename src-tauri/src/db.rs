@@ -3,7 +3,7 @@ use serde_json::json;
 use std::{
     fs::{self, OpenOptions},
     path::{Path, PathBuf},
-    time::Duration,
+    time::{Duration, Instant},
 };
 
 const DEFAULT_BUSINESS_FRONTEND_SKILL: &str =
@@ -52,15 +52,94 @@ fn environment_preparation_lock(path: &Path) -> Result<fs::File, String> {
     Ok(file)
 }
 
+/// Bounded wait for references to a just-released preparation lock held only
+/// by children that another thread is spawning right now. std opens the lock
+/// file with O_CLOEXEC, but a spawned child shares every open file description
+/// from fork/spawn until exec closes it, so for a few milliseconds a released
+/// flock still reads as held (measured on macOS with 4 concurrent spawners:
+/// ~3% of immediate re-locks failed). A real preparation holds the lock for the
+/// whole install, far longer than this grace, so it is still refused.
+const PREPARATION_LOCK_SPAWN_SETTLE: Duration = Duration::from_millis(200);
+
+fn try_lock_settled(file: &fs::File) -> Result<(), fs::TryLockError> {
+    let deadline = Instant::now() + PREPARATION_LOCK_SPAWN_SETTLE;
+    loop {
+        match file.try_lock() {
+            Err(fs::TryLockError::WouldBlock) if Instant::now() < deadline => {
+                std::thread::sleep(Duration::from_millis(2));
+            }
+            result => return result,
+        }
+    }
+}
+
 /// The OS lock is released on process death. The SQLite row is the durable
 /// fence seen by every scan activation, including other application processes.
 pub struct EnvironmentPreparationLease {
     db_path: PathBuf,
     owner: String,
     _lock: fs::File,
+    #[cfg(unix)]
+    original_database: fs::File,
 }
 
 impl EnvironmentPreparationLease {
+    /// Authority comes from this held OS guard and its exact durable owner,
+    /// never from the mere presence of a preparation row.
+    pub(crate) fn require_tool_supply_on(
+        &self,
+        tx: &rusqlite::Transaction<'_>,
+    ) -> Result<(), String> {
+        let rejected = || "tool_supply_preparation_owner_mismatch".to_string();
+        let path = tx.path().filter(|path| !path.is_empty()).ok_or_else(rejected)?;
+        if fs::canonicalize(path).map_err(|_| rejected())?
+            != fs::canonicalize(&self.db_path).map_err(|_| rejected())?
+        {
+            return Err(rejected());
+        }
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::MetadataExt;
+            let original = self.original_database.metadata().map_err(|_| rejected())?;
+            let database = fs::metadata(path).map_err(|_| rejected())?;
+            if original.dev() != database.dev() || original.ino() != database.ino() {
+                return Err(rejected());
+            }
+            // Ask SQLite about its opened entity too: checking the current
+            // pathname alone misses a connection still holding a renamed DB.
+            let mut moved: std::os::raw::c_int = 0;
+            let checked = unsafe {
+                rusqlite::ffi::sqlite3_file_control(
+                    tx.handle(), c"main".as_ptr(),
+                    rusqlite::ffi::SQLITE_FCNTL_HAS_MOVED,
+                    (&mut moved as *mut std::os::raw::c_int).cast(),
+                )
+            };
+            if checked != rusqlite::ffi::SQLITE_OK || moved != 0 {
+                return Err(rejected());
+            }
+            let held = self._lock.metadata().map_err(|_| rejected())?;
+            let current = fs::symlink_metadata(self.db_path.with_extension("preparation.lock"))
+                .map_err(|_| rejected())?;
+            if !current.is_file() || current.file_type().is_symlink()
+                || held.dev() != current.dev() || held.ino() != current.ino()
+            {
+                return Err(rejected());
+            }
+        }
+        let shadowed: bool = tx.query_row(
+            "SELECT EXISTS(SELECT 1 FROM sqlite_temp_master WHERE name IN ('environment_preparation_lease','sentinel_scans'))",
+            [], |row| row.get(0),
+        ).map_err(|error| error.to_string())?;
+        if shadowed { return Err(rejected()); }
+        let owns: bool = tx.query_row(
+            "SELECT EXISTS(SELECT 1 FROM main.environment_preparation_lease WHERE singleton=1 AND owner=?1) AND NOT EXISTS(SELECT 1 FROM main.sentinel_scans WHERE status IN ('queued','scanning','pausing'))",
+            [&self.owner], |row| row.get(0),
+        ).map_err(|error| error.to_string())?;
+        if !owns { return Err(rejected()); }
+        Ok(())
+    }
+
     /// An inert tool candidate is not an approved or runnable capability. Log
     /// its exact digest and identity key while this process still owns the
     /// preparation fence. Different signed releases may share package bytes.
@@ -100,6 +179,7 @@ impl EnvironmentPreparationLease {
         let tx = connection
             .transaction_with_behavior(TransactionBehavior::Immediate)
             .map_err(|error| error.to_string())?;
+        self.require_tool_supply_on(&tx)?;
         let removed = tx
             .execute(
                 "DELETE FROM environment_preparation_lease WHERE singleton=1 AND owner=?1",
@@ -130,7 +210,7 @@ pub struct EnvironmentPreparationStatus {
 /// the durable fence visible until an operator explicitly recovers it.
 pub fn environment_preparation_status(path: &Path) -> Result<EnvironmentPreparationStatus, String> {
     let lock = environment_preparation_lock(path)?;
-    let lock_available = lock.try_lock().is_ok();
+    let lock_available = try_lock_settled(&lock).is_ok();
     let connection = open(path)?;
     let lease: Option<(String, String)> = connection
         .query_row(
@@ -168,8 +248,7 @@ pub fn recover_environment_preparation(
         return Err("需核对租约并输入完整确认语，确认所有安装子进程已经停止".into());
     }
     let lock = environment_preparation_lock(path)?;
-    lock.try_lock()
-        .map_err(|_| "环境准备仍在运行，不能解除锁定".to_string())?;
+    try_lock_settled(&lock).map_err(|_| "环境准备仍在运行，不能解除锁定".to_string())?;
     let mut connection = open(path)?;
     let tx = connection
         .transaction_with_behavior(TransactionBehavior::Immediate)
@@ -207,9 +286,20 @@ pub fn recover_environment_preparation(
 /// absent OS lock alone is insufficient proof that it is safe to recover.
 pub fn begin_environment_preparation(path: &Path) -> Result<EnvironmentPreparationLease, String> {
     let lock = environment_preparation_lock(path)?;
-    lock.try_lock()
+    try_lock_settled(&lock)
         .map_err(|error| format!("已有环境准备正在进行，拒绝同时安装：{error}"))?;
     let mut connection = open(path)?;
+    #[cfg(unix)]
+    let original_database = {
+        use std::os::unix::fs::MetadataExt;
+        let file = fs::File::open(path).map_err(|error| error.to_string())?;
+        let held = file.metadata().map_err(|error| error.to_string())?;
+        let current = fs::metadata(path).map_err(|error| error.to_string())?;
+        if held.dev() != current.dev() || held.ino() != current.ino() {
+            return Err("environment_preparation_database_changed".into());
+        }
+        file
+    };
     let tx = connection
         .transaction_with_behavior(TransactionBehavior::Immediate)
         .map_err(|error| error.to_string())?;
@@ -256,6 +346,8 @@ pub fn begin_environment_preparation(path: &Path) -> Result<EnvironmentPreparati
         db_path: path.to_path_buf(),
         owner,
         _lock: lock,
+        #[cfg(unix)]
+        original_database,
     })
 }
 
@@ -297,10 +389,23 @@ pub fn initialize(app_data_dir: &Path) -> Result<PathBuf, String> {
         .execute_batch(include_str!("agent_runtime/web_mode/schema.sql"))
         .map_err(|error| error.to_string())?;
     connection
+        .execute_batch(include_str!("commands/native_protection_recovery_schema.sql"))
+        .map_err(|error| error.to_string())?;
+    connection
+        .execute_batch(include_str!("commands/native_protection_recovery_priced_schema.sql"))
+        .map_err(|error| error.to_string())?;
+    connection.execute_batch(include_str!("agent_runtime/web_mode/root/birth_seal.sql"))
+        .map_err(|e| e.to_string())?;
+    connection
         .execute_batch(include_str!("agent_runtime/multi_agent/budget/root/model/tick/schema.sql"))
         .map_err(|error|error.to_string())?;
     connection
+        .execute_batch(include_str!("agent_runtime/multi_agent/budget/root/model/tick/confirmation/schema.sql"))
+        .map_err(|error| error.to_string())?;
+    connection
         .execute_batch(assignment_attempt_schema::SCHEMA)
+        .map_err(|error| error.to_string())?;
+    connection.execute_batch(include_str!("agent_runtime/multi_agent/attempts/withdrawal_receipt/schema.sql"))
         .map_err(|error| error.to_string())?;
     connection
         .execute_batch(include_str!("native_pipeline/process_log/schema.sql"))
@@ -320,6 +425,18 @@ pub fn initialize(app_data_dir: &Path) -> Result<PathBuf, String> {
         .map_err(|error| error.to_string())?;
     connection.execute_batch(include_str!("agent_runtime/deleted_scan_audit/schema.sql")).map_err(|e|e.to_string())?;
     connection.execute_batch(include_str!("agent_runtime/multi_agent/budget/clock/finalization/exit_receipt/schema.sql")).map_err(|e|e.to_string())?;
+    connection.execute_batch(crate::agent_runtime::multi_agent::specialist::mapper_loop::SCHEMA)
+        .map_err(|e|format!("无法初始化 Mapper 多轮原费用账据：{e}"))?;
+    connection.execute_batch(crate::agent_runtime::multi_agent::specialist::mapper_loop::final_seal::FINAL_SCHEMA)
+        .map_err(|e|format!("无法初始化 Mapper 多轮最终原收据：{e}"))?;
+    connection.execute_batch(crate::agent_runtime::multi_agent::specialist::mapper_loop::expired_seal::EXPIRED_SCHEMA)
+        .map_err(|e|format!("无法初始化 Mapper 过期原输出收据：{e}"))?;
+    connection.execute_batch(include_str!("tool_supply/approval/schema.sql"))
+        .map_err(|e|format!("无法初始化工具管理员批准库存：{e}"))?;
+    connection.execute_batch(include_str!("tool_supply/frozen_plan/schema.sql"))
+        .map_err(|e|format!("无法初始化任务工具冻结计划：{e}"))?;
+    connection.execute_batch(include_str!("tool_supply/selection/schema.sql"))
+        .map_err(|e|format!("无法初始化新草稿工具准备选择：{e}"))?;
     migrate_import_membership_source_paths(&connection)?;
     suspend_collaboration_event_triggers(&connection)?;
     migrate_legacy_agent_and_retry_columns(&mut connection)?;
@@ -397,4 +514,7 @@ mod tests {
     include!("db_settings_startup_tests.rs");
     include!("db_neutral_tests.rs");
     include!("db_startup_schema_tests.rs");
+    include!("db_sqlite_concurrency_tests.rs");
+    include!("db_preparation_lock_spawn_tests.rs");
+    include!("db_tool_supply_lease_tests.rs");
 }

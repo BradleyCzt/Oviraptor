@@ -47,6 +47,11 @@ fn native_coordinator_executor_allocation(
     }
     let mut tokens = available_tokens.map_or(0, |n| n - token_floor);
     let mut requests = available_requests.map_or(0, |n| n - request_floor);
+    if budget::supervision_capacity::enabled(&bootstrap) {
+        if let Some(cap) = budget::supervision_capacity::executor_requests_on(db, actor, available_requests)? {
+            requests = requests.min(cap);
+        }
+    }
     let slots = if (available_tokens.is_none() || tokens >= 12_000)
         && (available_requests.is_none() || requests >= 3)
     {

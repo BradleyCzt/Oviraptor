@@ -149,7 +149,7 @@ fn specialist_inflight_original_executor_context_with_tokens(tokens:i64) -> (Pat
 }
 fn specialist_inflight_original_executor_context_at(tokens:i64,target:&str)->(PathBuf,AgentRunContext,
     crate::agent_runtime::multi_agent::supervisor::WorkerSupervisor) {
-    use crate::agent_runtime::{contract::{AgentRole,AgentLane},multi_agent::{scheduler,supervisor::WorkerSupervisor}};
+    use crate::agent_runtime::{contract::{AgentRole,AgentLane},multi_agent::scheduler};
     let (root, path, run, actor) = multi_agent_new_task_root_for_target("original-web-cancel", 60000, 20, target);
     let db = db::open(&path).unwrap();
     let child = scheduler::schedule_child(&db,&actor,AgentRole::WebExecutor,AgentLane::TargetTouching,
@@ -168,7 +168,7 @@ fn specialist_inflight_original_executor_context_at(tokens:i64,target:&str)->(Pa
     context.run = Some(AgentRunLedger {db_path:path.clone(),run_id:run});
     bind_agent_evidence_location(&context).unwrap();
     context.run = Some(AgentRunLedger {db_path:path.clone(),run_id:child.run_id});
-    let parent = WorkerSupervisor::start(&path,&actor).unwrap();
+    let parent = start_original_fixture_supervisor(&path,&actor).unwrap();
     context.supervision = Some(parent.ticket());
     (root,context,parent)
 }

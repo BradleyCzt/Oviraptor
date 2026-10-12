@@ -27,6 +27,10 @@ fn exceptional_terminal_actual_late_original_root_bill_after_close_stays_financi
     // writer. SDK and diagnostics really exit; no refund or no-send is claimed.
     let response=prepared.client.complete_once_observed_with_lifecycle(&prepared.request,
         &CancelToken::from_checker(||false),log.observer()).unwrap();
+    // Frozen v3 financial policy (production coordinator_tick_once order): the
+    // physical invoice is retained in its own transaction right after the SDK
+    // returns; only its settlement below is the late financial writer.
+    tick.persist_received_invoice(&db,&response).unwrap();
     drop(log);drop(original);drop(f.parent.take());
     if expired {
         std::thread::sleep(std::time::Duration::from_millis(2100));
@@ -61,6 +65,11 @@ fn exceptional_terminal_actual_late_original_root_bill_after_close_stays_financi
     let tx = db.unchecked_transaction().unwrap();
     assert!(!call.terminal(&tx, "received", Some(&response), "").unwrap());
     tx.commit().unwrap();
+    // v3: the bill is an obligation until its original terminal proof commits
+    // (production received()+persist_terminal_capture). Financial only: no
+    // semantic decision, publication or Root reopening is written here.
+    let capture = tick.capture_terminal_proof(&db, "received", Some(&response));
+    tick.persist_terminal_capture(&db, capture).unwrap();
     assert_eq!(
         budget::balance(&db, &root, None, "model_input_tokens")
             .unwrap()

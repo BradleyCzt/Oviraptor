@@ -19,15 +19,7 @@ fn validate_child_contract(
     if (role == AgentRole::EvidenceReviewer) != (lane == AgentLane::Review) {
         return Err("reviewer_requires_exclusive_review_lane".into());
     }
-    if matches!(
-        role,
-        AgentRole::SpaApiMapper
-            | AgentRole::IdentitySession
-            | AgentRole::RepoMapper
-            | AgentRole::SourceAnalyst
-            | AgentRole::ClientSide
-    ) && lane != AgentLane::ReadOnlyAnalysis
-    {
+    if role.requires_read_only_analysis_lane() && lane != AgentLane::ReadOnlyAnalysis {
         return Err("analysis_specialist_requires_read_only_lane".into());
     }
     if role == AgentRole::DeepInvestigator && lane != AgentLane::ReadOnlyAnalysis {
@@ -47,6 +39,8 @@ fn validate_child_contract(
         AgentRole::SpaApiMapper => Some(&["evidence.read", "mailbox.read", "mailbox.write"][..]),
         AgentRole::IdentitySession => Some(&["evidence.read", "mailbox.read", "mailbox.write"][..]),
         AgentRole::ClientSide => Some(&["evidence.read", "mailbox.write"][..]),
+        AgentRole::InputParser => Some(&["evidence.read", "mailbox.write"][..]),
+        AgentRole::BusinessLogic => Some(&["evidence.read", "mailbox.write"][..]),
         // Source validates the complete frozen phase/capability contract below.
         AgentRole::RepoMapper | AgentRole::SourceAnalyst => None,
         AgentRole::DeepInvestigator => {
@@ -61,6 +55,8 @@ fn validate_child_contract(
         AgentRole::ExternalSurface => {
             Some(&["public_surface_get", "evidence.read", "mailbox.write"][..])
         }
+        AgentRole::Upload => return Err("upload_role_not_implemented".into()),
+        AgentRole::Concurrency => return Err("concurrency_role_not_implemented".into()),
         _ => return Err("specialist_role_not_implemented".into()),
     };
     if let Some(allowed) = allowed {

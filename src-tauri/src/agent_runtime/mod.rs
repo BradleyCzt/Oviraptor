@@ -6,6 +6,7 @@
 
 pub mod checkpoint;
 pub mod contract;
+pub(crate) mod controlled_executor;
 pub(crate) mod deleted_scan_audit;
 pub mod evidence_graph;
 pub(crate) mod execution_owner;
@@ -19,6 +20,7 @@ pub(crate) mod single_projection;
 pub mod secrets;
 pub mod store;
 pub mod target_requests;
+pub(crate) mod target_protection;
 pub(crate) mod web_mode;
 
 #[cfg(test)]

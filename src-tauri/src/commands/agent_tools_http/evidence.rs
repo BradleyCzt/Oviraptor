@@ -122,6 +122,12 @@ fn agent_record_http_observation(
         EvidenceNodeKind::RequestRecord,
         &format!("{}:{artifact_id}", run.run_id),
     );
+    let mut observation_payload = json!({"requestId":request_id,"status":view["status"],
+        "bodySha256":view["bodySha256"],"recordSha256":format!("{:x}",Sha256::digest(&bytes))});
+    // Old artifacts without a transport binding keep their exact original shape.
+    if let Some(claim) = view.get("httpClaim") {
+        observation_payload["httpClaim"] = claim.clone();
+    }
     let node = EvidenceNode {
         id: format!("ev-{}", &natural_key_hash[..32]),
         root_run_id: root_run_id.clone(),
@@ -129,12 +135,7 @@ fn agent_record_http_observation(
         kind: EvidenceNodeKind::RequestRecord,
         provenance: EvidenceProvenance::Observed,
         natural_key_hash,
-        payload: serde_json::json!({
-            "requestId": request_id,
-            "status": view["status"],
-            "bodySha256": view["bodySha256"],
-            "recordSha256": format!("{:x}", Sha256::digest(&bytes)),
-        }),
+        payload: observation_payload,
         artifact_refs: vec![format!("{AGENT_HTTP_DIRECTORY}/{artifact_id}")],
         created_by_run_id: run.run_id.clone(),
         supersedes_id: String::new(),

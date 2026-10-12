@@ -1,5 +1,9 @@
 #[cfg(test)]
 thread_local! {
+    static EXPIRE_RECEIVED_REVIEWER_ONCE: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+    static EXPIRE_RECEIVED_DEEP_ONCE: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+    static EXPIRE_RECEIVED_IDENTITY_ONCE: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+    static EXPIRE_RECEIVED_MAPPER_ONCE: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
     static REAL_CHILD_TRANSPORT: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
 }
 
@@ -12,7 +16,32 @@ fn multi_agent_child_round(
     input: JsonValue,
 ) -> Result<(String, AgentTokenUsage), String> {
     if REAL_CHILD_TRANSPORT.with(std::cell::Cell::get) {
-        return multi_agent_child_round_transport(context, lease, child, system, input);
+        let received = multi_agent_child_round_transport(context, lease, child, system, input)?;
+        let expire = match child.role {
+            crate::agent_runtime::contract::AgentRole::SpaApiMapper => EXPIRE_RECEIVED_MAPPER_ONCE.with(|flag|flag.replace(false)),
+            crate::agent_runtime::contract::AgentRole::IdentitySession => EXPIRE_RECEIVED_IDENTITY_ONCE.with(|flag|flag.replace(false)),
+            crate::agent_runtime::contract::AgentRole::DeepInvestigator => EXPIRE_RECEIVED_DEEP_ONCE.with(|flag|flag.replace(false)),
+            crate::agent_runtime::contract::AgentRole::EvidenceReviewer => EXPIRE_RECEIVED_REVIEWER_ONCE.with(|flag|flag.replace(false)),
+            _ => false,
+        };
+        if expire {
+            let db = db::open(&context.db_path)?;
+            let tx = db.unchecked_transaction().map_err(|e|e.to_string())?;
+            let original = crate::agent_runtime::multi_agent::specialist::received_for_local_delivery(&tx,lease,child)?;
+            if original.text != received.0 || original.usage != received.1 || !original.rejection.is_empty() {
+                return Err("test_original_mapper_received_mismatch".into());
+            }
+            tx.commit().map_err(|e|e.to_string())?;
+            let count = db.execute("UPDATE agent_assignment_attempts SET expires_at=datetime('now','localtime','+1 second') WHERE child_run_id=?1 AND assignment_id=?2", params![child.run_id,child.assignment_id]).map_err(|e|e.to_string())?;
+            if count != 1 { return Err("test_original_mapper_worker_missing".into()); }
+            let deadline = Instant::now()+Duration::from_secs(5);
+            while crate::agent_runtime::multi_agent::attempts::current(&db,lease,&child.assignment_id)?.state != "expired" {
+                context.supervision.as_ref().ok_or("test_original_supervisor_missing")?.check()?;
+                if Instant::now()>=deadline {return Err("test_original_mapper_expiry_timeout".into());}
+                std::thread::sleep(Duration::from_millis(20));
+            }
+        }
+        return Ok(received);
     }
     use crate::agent_runtime::contract::AgentRole;
     let text = match child.role {

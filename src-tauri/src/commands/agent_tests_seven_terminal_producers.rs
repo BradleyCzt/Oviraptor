@@ -73,7 +73,6 @@ fn seven_terminal_single(kind: &str) -> (AgentHarness, OwnedAgentTargetOutcome) 
 }
 
 fn seven_terminal_resume() -> (AgentHarness, OwnedAgentTargetOutcome) {
-    use crate::agent_runtime::multi_agent::supervisor;
     let mut h = fresh_multi_production_harness("seven-resume");
     freeze_fresh_multi_production_harness(&mut h);
     retarget_model(
@@ -83,7 +82,7 @@ fn seven_terminal_resume() -> (AgentHarness, OwnedAgentTargetOutcome) {
         ))],
     );
     let actor = bootstrap_original_actor(&h);
-    let parent = supervisor::WorkerSupervisor::start(&h.db_path, &actor).unwrap();
+    let parent = start_original_fixture_supervisor(&h.db_path, &actor).unwrap();
     h.context.supervision = Some(parent.ticket());
     assert!(
         !native_coordinator_tick(&h.context, &actor)
@@ -124,7 +123,8 @@ fn seven_terminal_resume() -> (AgentHarness, OwnedAgentTargetOutcome) {
     (h, owned)
 }
 
-// Queue a real production request behind the process-wide cloud gate. The
+// Queue a real production request behind this harness's cloud admission gate
+// (process-wide in production; per fake-provider origin under cfg(test)). The
 // temporary scan status withdraws execution before transport. This is not an
 // active-cancel IPC or remote cancellation acceptance test.
 fn seven_terminal_queued_stop(status: &str) -> (AgentHarness, OwnedAgentTargetOutcome) {
@@ -133,7 +133,7 @@ fn seven_terminal_queued_stop(status: &str) -> (AgentHarness, OwnedAgentTargetOu
     let mut h = fresh_single_production_harness(&format!("seven-{status}"), mock_site);
     freeze_fresh_single_production_harness(&mut h);
     assert_eq!(h.context.environment.deployment, "cloud");
-    let gate = admission::gate(false);
+    let gate = admission::gate_for(false, &h.context.environment.api_base);
     let permits: Vec<_> = (0..admission::CLOUD_MAX_IN_FLIGHT)
         .map(|_| gate.acquire(&CancelToken::new()).unwrap())
         .collect();

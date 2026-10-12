@@ -1,4 +1,5 @@
-// Genuine creator and paid independent facts; held Web worker has no target I/O.
+// Original v5 retained-floor contract, genuine creator and paid independent
+// facts. Exact seven/eight-request limits remain; the held worker has no target I/O.
 struct RootSupervisionHeadroomFixture {
     f: RootTickFixture,
     mapper: crate::agent_runtime::multi_agent::scheduler::ScheduledChild,
@@ -32,10 +33,9 @@ fn root_supervision_headroom_fixture(
             changed_fact_response(&request, true),
         )
     }));
-    let f = root_tick_fixture_protocol_limits(
+    let f = root_tick_fixture_original_v5_limits(
         "root-supervision-headroom",
         &format!("http://127.0.0.1:{port}/v1"),
-        true,
         limits,
     );
     let db = db::open(&f.context.db_path).unwrap();

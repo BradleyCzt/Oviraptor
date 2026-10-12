@@ -1,4 +1,5 @@
 import { assetApi } from "./features/assets/api";
+import { ownershipAuthorizationApi } from "./features/assets/ownershipDirectoryApi";
 import { hackerOneApi } from "./features/hackerone/api";
 import { runtimeApi } from "./features/runtime/api";
 import { sentinelApi } from "./features/sentinel/api";
@@ -9,6 +10,7 @@ import { workspaceApi } from "./features/workspaces/api";
 export const api = {
   ...workspaceApi,
   ...assetApi,
+  ...ownershipAuthorizationApi,
   ...hackerOneApi,
   ...sentinelApi,
   ...runtimeApi,

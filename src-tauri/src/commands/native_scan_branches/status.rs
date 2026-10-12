@@ -98,7 +98,10 @@ fn native_scan_status_for_attempt(
         "receiptId":r.get::<_,String>(0)?,"purpose":r.get::<_,String>(1)?,
         "containerName":r.get::<_,String>(2)?,"status":r.get::<_,String>(3)?,"detail":r.get::<_,String>(4)?
     }))).map_err(|e| e.to_string())?.collect::<Result<_,_>>().map_err(|e| e.to_string())?;
-    let source_plan = crate::native_pipeline::NativeSourcePlan::load(&transaction, scan_id, attempt)?;
+    // Web scheduling metadata shares the plan table, but is not a source
+    // analyzer freeze. Decode source plans only for source task types.
+    let scan_type:String=transaction.query_row("SELECT scan_type FROM sentinel_scans WHERE id=?1",[scan_id],|r|r.get(0)).map_err(|e|e.to_string())?;
+    let source_plan = if scan_type=="web" {None} else {crate::native_pipeline::NativeSourcePlan::load(&transaction, scan_id, attempt)?};
     let source_gaps = source_plan.map(|plan| plan.gaps).unwrap_or_default();
     let mut targets_query = transaction.prepare(
         "SELECT url,status,substr(routing_reason,1,500) FROM sentinel_targets WHERE scan_id=?1 ORDER BY id",
@@ -114,11 +117,24 @@ fn native_scan_status_for_attempt(
         stop_diagnostic["nextAction"] = json!("create_independent_task");
         stop_diagnostic["automaticResumeAllowed"] = json!(false);
     }
-    let (requests, tokens): (i64, i64) = transaction.query_row(
+    let (mut requests, mut tokens): (i64, i64) = transaction.query_row(
         "SELECT llm_requests,total_tokens FROM sentinel_scans WHERE id=?1",
         [scan_id],
         |row| Ok((row.get(0)?, row.get(1)?)),
     ).map_err(|error| format!("无法读取任务模型用量：{error}"))?;
+    if crate::agent_runtime::multi_agent::homogeneous::model_worker::enabled(&transaction,scan_id,attempt)? {
+        // Cumulative scan counters do not receive these independent tool-free
+        // invoices. Display the original ledger without inventing or recharging.
+        let mut roots=transaction.prepare("SELECT root_run_id FROM agent_homogeneous_tasks WHERE scan_id=?1 ORDER BY attempt_number,root_run_id").map_err(|e|e.to_string())?;
+        let ids=roots.query_map([scan_id],|r|r.get::<_,String>(0)).map_err(|e|e.to_string())?.collect::<Result<Vec<_>,_>>().map_err(|e|e.to_string())?;
+        requests=0;tokens=0;
+        for root in ids {
+            use crate::agent_runtime::multi_agent::budget;
+            budget::root::RootOwner::load_original(&transaction,&root)?;
+            requests=requests.checked_add(budget::balance(&transaction,&root,None,"model_requests")?.consumed).ok_or("budget_amount_overflow")?;
+            for dim in ["model_input_tokens","model_output_tokens"] {tokens=tokens.checked_add(budget::balance(&transaction,&root,None,dim)?.consumed).ok_or("budget_amount_overflow")?;}
+        }
+    }
     let coordinator_lease_valid: bool = transaction.query_row(
         "SELECT EXISTS(SELECT 1 FROM agent_coordinator_leases WHERE scan_id=?1 AND attempt_number=?2 \
          AND lease_expires_at>datetime('now','localtime'))",
@@ -309,7 +325,7 @@ fn native_scan_status_for_attempt(
             scan_id,
             attempt,
         )?;
-    Ok(crate::agent_runtime::secrets::redact_json(&json!({
+    let value = json!({
         "scanId":scan_id,"attemptNumber":attempt,"status":status,"branches":branches,
         "historicalPendingReceipts":historical_pending_receipts,
         "historicalReceiptItems":historical_receipts,
@@ -340,5 +356,8 @@ fn native_scan_status_for_attempt(
         "followup": gap_followup_relations(&transaction, scan_id)?,
         "humanAssessmentObligations": native_human_assessment_obligations(&transaction,scan_id,attempt)?,
         "timeline": timeline,
-    })))
+    });
+    Ok(if crate::agent_runtime::multi_agent::homogeneous::material_policy::plaintext(&transaction, scan_id, attempt)? {
+        value
+    } else { crate::agent_runtime::secrets::redact_json(&value) })
 }

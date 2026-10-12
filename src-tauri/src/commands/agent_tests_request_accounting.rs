@@ -155,24 +155,73 @@ fn request_accounting_protection_response_counts_without_a_model_round() {
 
 #[test]
 fn request_accounting_terminal_snapshot_preserves_aggregate_and_child_ownership() {
-    let (port,seen,stop) = spawn_endpoint(std::sync::Arc::new(|_| (200,"text/plain","entry".into())));
-    let (_root,mut context,lease) = public_surface_fixture(&format!("http://127.0.0.1:{port}/"));
-    accounting_native(&context,3);
-    let (model_port,_,model_stop) = spawn_endpoint(std::sync::Arc::new(|_| (200,"application/json",proposal_model_response(public_surface_model_text()))));
-    context.environment.api_base = format!("http://127.0.0.1:{model_port}/v1");
+    // A Multi Root is born from the real creator contract and exits through the
+    // original `finalize_agent_target` -> `finish_coordinator_run` exit receipt.
+    // The runtime terminal consumer for Multi is a pure original reader (no
+    // backfill), so the Root aggregate is the terminal request-accounting view
+    // over the immutable lineage, while the child keeps its own snapshot.
     let _real = RealSpecialistTransport::enter();
-    multi_agent_external_surface(&context,&lease).unwrap();
+    let mut h = fresh_multi_production_harness("request-accounting-terminal");
+    h.context.external_surface = true;
+    let (port, models, model_stop) = spawn_endpoint(std::sync::Arc::new(|wire| {
+        let response = if let Some(root) = fresh_multi_root_wire_response(&wire) { root }
+            else if wire.contains("SPA/API Mapper") {
+                proposal_model_response(r#"{"summary":"frozen frontend map only","priorityContracts":[],"risks":[]}"#)
+            } else if specialist_original_is_web_sdk(&wire) {
+                proposal_model_response("actual bounded Web exit; no target tool")
+            } else { proposal_model_response(public_surface_model_text()) };
+        (200, "application/json", response)
+    }));
+    h.context.environment.api_base = format!("http://127.0.0.1:{port}/v1");
+    h.model_seen = models;
+    h.context.execution_plan.max_turns = 1;
+    freeze_fresh_multi_production_harness(&mut h);
+    let mut session = multi_agent_prepare(&mut h.context).unwrap();
+    let context = &h.context;
     let connection = db::open(&context.db_path).unwrap();
     let child:String = connection.query_row("SELECT child_run_id FROM agent_assignments WHERE role='external_surface'",[],|r|r.get(0)).unwrap();
     let snapshot = crate::agent_runtime::store::read_snapshot(&connection,&child).unwrap().unwrap();
     assert_eq!(snapshot.snapshot["targetRequests"],1);
+    let outcome = run_native_agent(context);
+    assert!(matches!(outcome,AgentTargetOutcome::BoundedCompleted(_) | AgentTargetOutcome::Incomplete(_)),"{outcome:?}");
+    assert_eq!(h.model_seen.lock().unwrap().iter().filter(|wire|specialist_original_is_web_sdk(wire)).count(),1);
+    // The three executor target requests below remain a synthetic accounting
+    // fixture. Only the Web model exit and its financial journal are real.
+    let mut original_state=NativeAgentState::read(&context.db_path,&context.scan_id,&context.target_url)
+        .expect("actual Web exit checkpoint");
+    let before_state=original_state.as_json();
+    let original_target_requests=original_state.target_requests;
+    original_state.target_requests=3;
+    original_state.persist(&context.db_path,&context.scan_id,&context.target_url).unwrap();
+    let mut reread=NativeAgentState::read(&context.db_path,&context.scan_id,&context.target_url).unwrap();
+    assert_eq!(reread.target_requests,3);
+    reread.target_requests=original_target_requests;
+    assert_eq!(reread.as_json(),before_state,"synthetic target counts cannot replace the actual Web checkpoint");
+    multi_agent_finish_execution(context,&mut session,&outcome).unwrap();
+    let closed = finalize_agent_target(context,&session.lease,outcome.clone());
+    assert_eq!((closed.terminal_code(),closed.detail()),(outcome.terminal_code(),outcome.detail()),"the real Multi exit closes with the original outcome");
+    let receipts:i64 = connection.query_row("SELECT count(*) FROM agent_multi_exit_receipts",[],|r|r.get(0)).unwrap();
+    assert_eq!(receipts,1);
     let route = FrontendRoute {url:context.target_url.clone(),score:0,mode:"standard".into(),surface:"unknown".into(),reasons:vec![]};
-    record_runtime_terminal_facts(&context.db_path,&context.scan_id,&route,&AgentTargetOutcome::incomplete("fixture finished"));
-    let root = crate::agent_runtime::store::read_snapshot(&connection,&lease.root_run_id).unwrap().unwrap();
-    assert_eq!(root.snapshot["targetRequests"],4);
-    assert_eq!(root.snapshot["requestAccounting"]["executorRecordedRequests"],3);
-    assert_eq!(seen.lock().unwrap().len(),1);
-    stop.store(true,std::sync::atomic::Ordering::SeqCst);
+    let before = single_finally_physical(&connection);
+    for _ in 0..2 {
+        let reduction = record_runtime_terminal_facts_checked(&context.db_path,&context.scan_id,&route,&closed).unwrap().unwrap();
+        assert_eq!((reduction.code.as_str(),reduction.reason.as_str()),(outcome.terminal_code(),outcome.detail().as_str()));
+        assert_eq!(single_finally_physical(&connection),before,"Multi terminal facts only verify the original exit");
+    }
+    assert!(crate::agent_runtime::store::read_snapshot(&connection,&session.lease.root_run_id).unwrap().is_none(),"no Root projection is backfilled after the original exit");
+    let root = read_agent_target_execution(&context.db_path,&context.scan_id,&context.target_url).unwrap();
+    let accounting = &root["runtime"]["requestAccounting"];
+    assert_eq!(accounting["available"],true);
+    assert_eq!(accounting["recordedRequests"],4);
+    assert_eq!(accounting["executorRecordedRequests"],3);
+    assert_eq!(accounting["externalSurfaceReceivedRequests"],1);
+    assert_eq!(accounting["budgetCommittedRequests"],4);
+    let usage = agent_request_accounting(&connection,&context.scan_id,context.attempt_number,&context.target_url).unwrap();
+    assert_eq!((usage.executor_recorded,usage.external.received,usage.recorded,usage.budget_committed),(3,1,4,4));
+    let snapshot = crate::agent_runtime::store::read_snapshot(&connection,&child).unwrap().unwrap();
+    assert_eq!(snapshot.snapshot["targetRequests"],1,"the child keeps only its own request");
+    assert_eq!(h.site_seen.lock().unwrap().len(),1);
     model_stop.store(true,std::sync::atomic::Ordering::SeqCst);
 }
 

@@ -116,7 +116,7 @@ fn budget_journal_freezes_all_dimensions_and_denies_ungranted_writes() {
     let mut expected=budget::DIMENSIONS.map(str::to_string);expected.sort();assert_eq!(limits,expected);
     let tx=db.unchecked_transaction().unwrap();
     for dimension in ["controlled_writes","upload_bytes","browser_actions"] {
-        assert_eq!(budget::append(&tx,&lease,&child.assignment_id,dimension,Kind::Reserve,1,dimension,"ungranted").unwrap_err(),"budget_hard_limit_exceeded");
+        assert_eq!(budget::append(&tx,&lease,&child.assignment_id,dimension,Kind::Reserve,1,dimension,"ungranted").unwrap_err(),"budget_dimension_denied_by_contract");
     }
     assert_eq!(budget::balance(&tx,&root_id,None,"concurrency_batches").unwrap().reserved,1);
     assert_eq!(budget::append(&tx,&lease,&child.assignment_id,"concurrency_batches",Kind::Reserve,3,"fourth","child").unwrap_err(),"budget_hard_limit_exceeded");

@@ -78,7 +78,21 @@ fn run_native_json_helper_capture(
         .arg(helper)
         .env("PATH", runtime_path)
         .env("NO_PROXY", no_proxy)
-        .env("no_proxy", no_proxy)
+        .env("no_proxy", no_proxy);
+    // Same FD_CLOEXEC-atomic capture pipes as native_pipeline::process::run: a
+    // concurrent spawn elsewhere can never inherit (and hold open) these ends.
+    #[cfg(unix)]
+    let (mut stdin, stdout, stderr) = {
+        use crate::native_pipeline::process::capture_pipe;
+        let unavailable = |_| "helper_output_pipe_unavailable".to_string();
+        let (in_read, in_write) = capture_pipe().map_err(unavailable)?;
+        let (out_read, out_write) = capture_pipe().map_err(unavailable)?;
+        let (err_read, err_write) = capture_pipe().map_err(unavailable)?;
+        command.stdin(in_read).stdout(out_write).stderr(err_write);
+        (in_write, out_read, err_read)
+    };
+    #[cfg(not(unix))]
+    command
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
@@ -86,19 +100,23 @@ fn run_native_json_helper_capture(
         command.env("HTTPS_PROXY", proxy).env("HTTP_PROXY", proxy);
     }
     control.check()?;
-    let child = command
-        .spawn()
-        .map_err(|error| format!("无法启动 {}：{error}", helper.display()))?;
+    let spawned = command.spawn();
+    // The parent's copies of the child ends close here, before any read/write.
+    drop(command);
+    let child = spawned.map_err(|error| format!("无法启动 {}：{error}", helper.display()))?;
     let mut child = crate::native_pipeline::process::OwnedChild::new(child);
-    crate::native_pipeline::process::interruptible(child.0.stdout.as_ref().expect("piped stdout"))
+    #[cfg(not(unix))]
+    let (mut stdin, stdout, stderr) = (
+        child.0.stdin.take().expect("piped stdin"),
+        child.0.stdout.take().expect("piped stdout"),
+        child.0.stderr.take().expect("piped stderr"),
+    );
+    crate::native_pipeline::process::interruptible(&stdout)
         .map_err(|_| "helper_output_pipe_unavailable")?;
-    crate::native_pipeline::process::interruptible(child.0.stderr.as_ref().expect("piped stderr"))
+    crate::native_pipeline::process::interruptible(&stderr)
         .map_err(|_| "helper_output_pipe_unavailable")?;
     // The three pipes must be drained concurrently; otherwise a large JSON
     // capture can fill stdout and deadlock a parent waiting for process exit.
-    let mut stdin = child.0.stdin.take().expect("piped stdin");
-    let stdout = child.0.stdout.take().expect("piped stdout");
-    let stderr = child.0.stderr.take().expect("piped stderr");
     let writer = thread::spawn(move || stdin.write_all(&input));
     let stop = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
     let (out_send, out_read) = mpsc::channel();

@@ -1,16 +1,20 @@
 /// Every post-bootstrap exit uses the same atomic root/directive closure. A
 /// persistence failure must remain visible alongside, not instead of, its cause.
 fn executor_settlement_outcome(outcome: &AgentTargetOutcome, error: &str) -> AgentTargetOutcome {
+    let (stage, cause) = match error.strip_prefix("executor_followup_failed:").and_then(|value| value.split_once(':')) {
+        Some((stage, cause)) => (format!("executor_followup_failed:{stage}"), cause),
+        None => ("executor_settlement_failed".to_string(), error),
+    };
     let reason = crate::agent_runtime::secrets::redact_text_with(
         &format!(
-            "executor_settlement_failed:{error}; executor_code={}; executor_reason={}",
+            "{stage}:{cause}; executor_code={}; executor_reason={}",
             outcome.terminal_code(),
             outcome.detail()
         ),
         None,
     );
     if matches!(
-        error,
+        cause,
         "budget_indeterminate_requires_reconciliation"
             | "budget_history_requires_reconciliation"
             | "budget_reservations_require_settlement"

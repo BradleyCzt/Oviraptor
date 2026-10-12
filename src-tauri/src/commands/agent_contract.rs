@@ -345,6 +345,7 @@ fn agent_identity_label(identities: &[AgentIdentity], key: &str) -> String {
 
 #[derive(Clone)]
 struct AgentRunContext {
+    tool_configuration: Option<crate::tool_supply::ToolAdministratorConfiguration>,
     supervision: Option<crate::agent_runtime::multi_agent::supervision_ticket::SupervisionTicket>,
     /// Orchestrated public-entry capture. Direct single-tool contexts do not
     /// schedule specialists; the production context builder enables this.

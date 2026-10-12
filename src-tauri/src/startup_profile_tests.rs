@@ -20,6 +20,25 @@ fn normal_launch_has_no_acceptance_profile() {
 }
 
 #[test]
+fn acceptance_bundle_requires_isolation_before_creating_data_directories() {
+    assert_eq!(
+        require_bundle_root("com.oviraptor.nest.acceptance", None).unwrap_err(),
+        "acceptance_bundle_requires_isolated_root"
+    );
+    assert!(require_bundle_root("com.oviraptor.desktop", None).is_ok());
+    let root = private_root();
+    let verified = resolve_acceptance_root(
+        Some(root.clone().into_os_string()),
+        &std::env::temp_dir(),
+    )
+    .unwrap()
+    .unwrap();
+    assert!(require_bundle_root("com.oviraptor.nest.acceptance", Some(&verified)).is_ok());
+    assert!(!root.join("oviraptor").exists());
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
 fn private_temp_profile_separates_database_exports_and_legacy_sources() {
     let root = private_root();
     let selected =

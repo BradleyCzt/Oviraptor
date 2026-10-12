@@ -38,7 +38,7 @@ fn native_model_transport(
     let request_hash=crate::agent_runtime::store::stable_hash(&serde_json::json!({"messages":request.messages,
         "tools":request.tools.iter().map(|tool|tool.as_function_spec()).collect::<Vec<_>>(),
         "temperature":request.temperature,"model":client.profile().model,"endpoint":client.profile().endpoint,
-        "maxOutputTokens":client.profile().max_output_tokens,"schemaHash":client.schema_hash()}).to_string());
+        "maxOutputTokens":client.profile().max_output_tokens,"providerOptions":client.profile().bounded_wire_options(),"schemaHash":client.schema_hash()}).to_string());
     match native_root_model_transport(context, client, &request, round, &request_hash) {
         Ok(Some(result)) => return result,
         Ok(None) => {}
@@ -48,8 +48,16 @@ fn native_model_transport(
             )))
         }
     }
-    let admitted = if unbounded {native_model_budget_admission_with_estimate(context,round,request_hash,unbounded_estimate)}
-        else {native_model_budget_admission(context,round,request_hash)};
+    let admitted = (|| {
+        native_model_budget_preflight(context)?;
+        native_coordinator_budget_consumption_before_action(context)?;
+        native_coordinator_http_budget_consumption_before_action(context)?;
+        if unbounded {
+            native_model_budget_admission_with_estimate(context, round, request_hash, unbounded_estimate)
+        } else {
+            native_model_budget_admission(context, round, request_hash)
+        }
+    })();
     let admission = match admitted {
         Ok(admission) => admission,
         Err(reason) if reason == "budget_model_requests_exhausted" => {

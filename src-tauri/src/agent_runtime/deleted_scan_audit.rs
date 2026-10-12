@@ -2,7 +2,7 @@
 use crate::agent_runtime::{
     execution_owner::NativeInvocationOwner, multi_agent::budget::root::RootOwner, single_projection,
 };
-use rusqlite::{params, Connection, OptionalExtension, Transaction};
+use rusqlite::{params, Connection, Transaction};
 use serde::{Deserialize, Serialize};
 mod anchor;
 mod delivery;
@@ -12,6 +12,14 @@ mod rows;
 mod scope;
 mod source;
 pub(crate) use source::OriginalSourceParents;
+#[cfg(test)]
+mod tests_archive_version;
+#[cfg(test)]
+#[path = "deleted_scan_audit/tests_mapper_diagnostic_identity.rs"]
+mod tests_mapper_diagnostic_identity;
+#[cfg(test)]
+#[path = "deleted_scan_audit/tests_row_identity.rs"]
+mod tests_row_identity;
 mod writer;
 #[derive(Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -31,8 +39,11 @@ pub(crate) struct Prepared {
 }
 impl Bundle {
     fn verify(&self) -> Result<(), String> {
-        if self.version != 1 || self.scan.is_empty() || self.roots.is_empty() {
+        if !matches!(self.version, 1 | 2) || self.scan.is_empty() || self.roots.is_empty() {
             return Err("deleted_audit_scope_invalid".into());
+        }
+        if self.version == 1 && self.tables.iter().any(|table| table.identity.is_some()) {
+            return Err("deleted_audit_legacy_identity_invalid".into());
         }
         let db = Connection::open_in_memory().map_err(|e| e.to_string())?;
         // Private lossless reconstruction has column-only parent tables.
@@ -40,7 +51,14 @@ impl Bundle {
         db.pragma_update(None, "foreign_keys", false)
             .map_err(|e| e.to_string())?;
         for table in &self.tables {
-            if !scope::native(&table.name) || table.name == "native_deleted_scan_audits" {
+            if !scope::native(&table.name)
+                || matches!(
+                    table.name.as_str(),
+                    "native_deleted_scan_audits"
+                        | "native_deleted_scan_audits_v2"
+                        | "native_deleted_scan_anchors"
+                )
+            {
                 return Err("deleted_audit_table_invalid".into());
             }
             table.restore(&db)?;
@@ -77,7 +95,27 @@ impl Bundle {
     fn retained(&self) -> impl Iterator<Item = &&'static str> {
         scope::RETAINED
             .iter()
-            .chain(scope::MULTI_RETAINED.iter().filter(|_| self.is_multi()))
+            // Additive cache tables were absent from older signed audit bundles.
+            // Preserve them when captured; never backfill or reseal old history.
+            .filter(|name| {
+                !matches!(
+                    **name,
+                    "agent_root_model_cache_provenance"
+                        | "agent_frozen_tool_supply_plans"
+                        | "native_tool_selection_requests"
+                        | "agent_root_model_cache_capture"
+                        | "native_sdk_log_mapper_owners"
+                ) || self.tables.iter().any(|table| table.name == **name)
+            })
+            .chain(scope::MULTI_RETAINED.iter().filter(|name| {
+                self.is_multi()
+                    && (!matches!(
+                        **name,
+                        "agent_mapper_loop_journal"
+                            | "agent_mapper_loop_final_receipts"
+                            | "agent_mapper_loop_expired_receipts"
+                    ) || self.tables.iter().any(|table| table.name == **name))
+            }))
             .chain(scope::SOURCE_RETAINED.iter().filter(|_| self.is_source()))
     }
     fn verify_runs(&self, db: &Connection) -> Result<(), String> {
@@ -98,6 +136,7 @@ impl Bundle {
             return Err("deleted_audit_root_scope_conflict".into());
         }
         for (id, policy, parent, root) in &runs {
+            if parent.is_none() { scope::verify_original_tool_supply(db, id)?; }
             match (policy.as_str(), parent) {
                 ("single", None) => single_projection::deletion::verify_closed(db, id)?,
                 ("multi", None) if root == id => multi::verify_closed(db, id)?,
@@ -168,6 +207,7 @@ pub(crate) fn prepare_with_source_parents(
         if parent.is_some() {
             continue;
         }
+        scope::verify_original_tool_supply(tx, root)?;
         match policy.as_str() {
             "single" => {
                 single_projection::deletion::verify_closed(tx, root)?;
@@ -184,7 +224,7 @@ pub(crate) fn prepare_with_source_parents(
     owners.extend(parents.into_guards());
     let roots = runs.into_iter().map(|r| r.0).collect::<Vec<_>>();
     let bundle = Bundle {
-        version: 1,
+        version: 2,
         scan: scan.into(),
         tables: scope::capture(tx, scan, &roots)?,
         roots,
@@ -230,8 +270,15 @@ impl Prepared {
     }
     pub(crate) fn persist(&self, tx: &Transaction<'_>, stamp: &str) -> Result<(), String> {
         self.bundle.verify_retained(tx)?;
-        let n=tx.execute("INSERT INTO native_deleted_scan_audits(scan_id,version,audit_json,audit_hash,deleted_at) VALUES(?1,1,?2,?3,?4)",params![self.bundle.scan,self.text,self.hash,stamp]).map_err(|e|e.to_string())?;
-        let exact:bool=tx.query_row("SELECT EXISTS(SELECT 1 FROM native_deleted_scan_audits WHERE scan_id=?1 AND version=1 AND audit_json=?2 AND audit_hash=?3 AND deleted_at=?4)",params![self.bundle.scan,self.text,self.hash,stamp],|r|r.get(0)).map_err(|e|e.to_string())?;
+        if self.bundle.version != 2 {
+            return Err("deleted_audit_new_version_invalid".into());
+        }
+        let conflict:bool=tx.query_row("SELECT EXISTS(SELECT 1 FROM native_deleted_scan_audits WHERE scan_id=?1) OR EXISTS(SELECT 1 FROM native_deleted_scan_audits_v2 WHERE scan_id=?1)",[&self.bundle.scan],|r|r.get(0)).map_err(|e|e.to_string())?;
+        if conflict {
+            return Err("deleted_audit_duplicate_archive".into());
+        }
+        let n=tx.execute("INSERT INTO native_deleted_scan_audits_v2(scan_id,version,audit_json,audit_hash,deleted_at) VALUES(?1,2,?2,?3,?4)",params![self.bundle.scan,self.text,self.hash,stamp]).map_err(|e|e.to_string())?;
+        let exact:bool=tx.query_row("SELECT EXISTS(SELECT 1 FROM native_deleted_scan_audits_v2 WHERE scan_id=?1 AND version=2 AND audit_json=?2 AND audit_hash=?3 AND deleted_at=?4)",params![self.bundle.scan,self.text,self.hash,stamp],|r|r.get(0)).map_err(|e|e.to_string())?;
         if n != 1 || !exact {
             return Err("deleted_audit_write_unconfirmed".into());
         }
@@ -247,8 +294,40 @@ impl Prepared {
     }
 }
 pub(crate) fn verify_deleted(db: &Connection, scan: &str) -> Result<bool, String> {
-    let saved:Option<(i64,String,String,String)>=db.query_row("SELECT version,audit_json,audit_hash,deleted_at FROM native_deleted_scan_audits WHERE scan_id=?1",[scan],|r|Ok((r.get(0)?,r.get(1)?,r.get(2)?,r.get(3)?))).optional().map_err(|e|e.to_string())?;
-    let Some((version, text, hash, stamp)) = saved else {
+    // Old read-only databases may predate the additive v2 table. Reading
+    // history never initializes schema or manufactures a new archive.
+    let mut catalogue = db
+        .prepare("SELECT type FROM main.sqlite_master WHERE name='native_deleted_scan_audits_v2'")
+        .map_err(|e| e.to_string())?;
+    let kinds = catalogue
+        .query_map([], |row| row.get::<_, String>(0))
+        .map_err(|e| e.to_string())?
+        .collect::<rusqlite::Result<Vec<_>>>()
+        .map_err(|e| e.to_string())?;
+    let sql=match kinds.as_slice() {
+        []=>"SELECT 1,version,audit_json,audit_hash,deleted_at FROM native_deleted_scan_audits WHERE scan_id=?1",
+        [kind] if kind=="table"=>"SELECT 1,version,audit_json,audit_hash,deleted_at FROM native_deleted_scan_audits WHERE scan_id=?1 UNION ALL SELECT 2,version,audit_json,audit_hash,deleted_at FROM native_deleted_scan_audits_v2 WHERE scan_id=?1",
+        _=>return Err("deleted_audit_v2_schema_invalid".into()),
+    };
+    let mut statement = db.prepare(sql).map_err(|e| e.to_string())?;
+    let saved = statement
+        .query_map([scan], |r| {
+            Ok((
+                r.get::<_, i64>(0)?,
+                r.get::<_, i64>(1)?,
+                r.get::<_, String>(2)?,
+                r.get::<_, String>(3)?,
+                r.get::<_, String>(4)?,
+            ))
+        })
+        .map_err(|e| e.to_string())?
+        .collect::<rusqlite::Result<Vec<_>>>()
+        .map_err(|e| e.to_string())?;
+    if saved.len() > 1 {
+        return Err("deleted_audit_duplicate_archive".into());
+    }
+    let saved = saved.into_iter().next();
+    let Some((table_version, version, text, hash, stamp)) = saved else {
         let original:bool=db.query_row("SELECT EXISTS(SELECT 1 FROM agent_root_budget_attempts WHERE json_extract(contract_json,'$.root.scan')=?1)",[scan],|r|r.get(0)).map_err(|e|e.to_string())?;
         return if original {
             Err("deleted_audit_original_sources_missing".into())
@@ -260,7 +339,9 @@ pub(crate) fn verify_deleted(db: &Connection, scan: &str) -> Result<bool, String
         serde_json::from_str(&text).map_err(|_| "deleted_audit_payload_invalid")?;
     let closed:bool=db.query_row("SELECT EXISTS(SELECT 1 FROM sentinel_deleted_scans WHERE scan_id=?1 AND deleted_at=?2) AND NOT EXISTS(SELECT 1 FROM sentinel_scans WHERE id=?1) AND NOT EXISTS(SELECT 1 FROM agent_runs WHERE scan_id=?1)",params![scan,stamp],|r|r.get(0)).map_err(|e|e.to_string())?;
     if !closed
-        || version != 1
+        || version != table_version
+        || i64::from(bundle.version) != version
+        || !matches!(version, 1 | 2)
         || bundle.scan != scan
         || serde_json::to_string(&bundle).map_err(|e| e.to_string())? != text
         || crate::agent_runtime::store::stable_hash(&text) != hash

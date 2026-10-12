@@ -10,7 +10,7 @@ import os
 import sqlite3
 import uuid
 from pathlib import Path
-from native_tick_migration_snapshot import canonical, file_hash, open_database, snapshot
+from native_tick_migration_snapshot import canonical, file_hash, open_backup, open_database, snapshot
 from native_tick_migration_schema import classify
 from native_tick_migration_apply import apply
 
@@ -33,7 +33,7 @@ def inventory(database, backup_directory):
         os.chmod(backup_path, 0o600)
     finally:
         db.close()
-    backup = open_database(backup_path)
+    backup = open_backup(backup_path)
     try:
         backup.execute('BEGIN')
         if snapshot(backup) != before or backup.execute('PRAGMA integrity_check').fetchone()[0] != b'ok':

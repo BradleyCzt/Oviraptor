@@ -199,7 +199,40 @@ fn confirm_draft_with_binding(
         return Err("directive_draft_confirmation_conflict".into());
     }
     super::human_review::record_approval(&transaction, &draft, &directive_id, &protected)?;
+    // Complete the original approval writer before projecting into the
+    // homogeneous business queue. Its financial/write authority stays intact.
     writer.finish()?;
+    // DESIGN §5.6 / §8：确认过的引导在同质任务上进入闸门（G1 脱敏 + G2 规则初筛），
+    // 由主管在后续裁决 relay/rewrite/reject。默认 legacy 时这里零副作用。
+    let homogeneous = crate::agent_runtime::multi_agent::homogeneous::apply::task_exists_for_root(
+        &transaction,
+        &draft.root_run_id,
+    );
+    if matches!(homogeneous, Ok(true)) {
+        if let Some(task) =
+            crate::agent_runtime::multi_agent::homogeneous::store::load_task_by_root_run(
+                &transaction,
+                &draft.root_run_id,
+            )
+            .ok()
+            .flatten()
+        {
+            let gated_id = format!(
+                "dir-{}",
+                &crate::agent_runtime::store::stable_hash(&directive_id)[..24]
+            );
+            screen_confirmed_homogeneous_guidance(
+                &transaction,
+                &task,
+                &gated_id,
+                &directive_id,
+                &draft.safe_execution_text,
+            )?;
+            if super::human_review::approval_scope(&transaction, &draft)? != protected {
+                return Err("directive_human_review_scope_changed".into());
+            }
+        }
+    }
     transaction
         .commit()
         .map_err(|error| format!("无法提交用户指令确认：{error}"))?;
@@ -208,6 +241,107 @@ fn confirm_draft_with_binding(
         text: draft.safe_execution_text,
         status: "pending".into(),
     })
+}
+
+// The projection shares the confirmation transaction so a rejected write
+// rolls back the approval too. It cannot inherit the approval writer's rights.
+fn screen_confirmed_homogeneous_guidance(
+    connection: &Connection,
+    task: &crate::agent_runtime::multi_agent::homogeneous::types::HomogeneousTask,
+    gated_id: &str,
+    directive_id: &str,
+    text: &str,
+) -> Result<(), String> {
+    use crate::agent_runtime::multi_agent::{attempts::audit_rows::Rows, homogeneous};
+    use rusqlite::hooks::{AuthAction, AuthContext, Authorization};
+    let previous = Rows::read(
+        connection,
+        "SELECT rowid,* FROM agent_human_directive_gated ORDER BY rowid",
+        [],
+    )?;
+    let floor: i64 = connection
+        .query_row(
+            "SELECT COALESCE(MAX(sequence),0) FROM agent_collaboration_events",
+            [],
+            |r| r.get(0),
+        )
+        .map_err(|e| e.to_string())?;
+    let events = Rows::read(
+        connection,
+        "SELECT rowid,* FROM agent_collaboration_events WHERE sequence<=?1 ORDER BY rowid",
+        [floor],
+    )?;
+    struct QueueWriter<'a>(&'a Connection);
+    impl Drop for QueueWriter<'_> {
+        fn drop(&mut self) {
+            let _ = self
+                .0
+                .authorizer(None::<fn(AuthContext<'_>) -> Authorization>);
+        }
+    }
+    connection
+        .authorizer(Some(|context: AuthContext<'_>| {
+            let direct = context.database_name == Some("main") && context.accessor.is_none();
+            let allowed = match context.action {
+                AuthAction::Insert {
+                    table_name: "agent_human_directive_gated",
+                }
+                | AuthAction::Update {
+                    table_name: "agent_human_directive_gated",
+                    ..
+                } => direct,
+                AuthAction::Insert {
+                    table_name: "agent_collaboration_events",
+                } => {
+                    context.database_name == Some("main")
+                        && matches!(
+                            context.accessor,
+                            Some(
+                                "agent_collaboration_homogeneous_guidance_insert"
+                                    | "agent_collaboration_homogeneous_guidance_update"
+                            )
+                        )
+                }
+                AuthAction::Read { .. }
+                | AuthAction::Select
+                | AuthAction::Function { .. }
+                | AuthAction::Transaction { .. }
+                | AuthAction::Savepoint { .. }
+                | AuthAction::Recursive => true,
+                _ => false,
+            };
+            if allowed {
+                Authorization::Allow
+            } else {
+                Authorization::Deny
+            }
+        }))
+        .map_err(|_| "homogeneous_guidance_confirmation_guard_unavailable")?;
+    let _writer = QueueWriter(connection);
+    let expected =
+        homogeneous::directive_gate::screen(connection, task, gated_id, directive_id, text)
+            .map_err(|error| format!("引导闸门初筛失败：{}", error.reason_code))?;
+    if homogeneous::store::load_gated_directive(connection, gated_id)
+        .map_err(|e| e.reason_code.to_string())?
+        != Some(expected.clone())
+        || Rows::read(
+            connection,
+            "SELECT rowid,* FROM agent_human_directive_gated WHERE directive_id<>?1 ORDER BY rowid",
+            [gated_id],
+        )? != previous
+        || Rows::read(
+            connection,
+            "SELECT rowid,* FROM agent_collaboration_events WHERE sequence<=?1 ORDER BY rowid",
+            [floor],
+        )? != events
+    {
+        return Err("homogeneous_guidance_confirmation_projection_changed".into());
+    }
+    let exact: bool = connection.query_row("SELECT COUNT(*)=1 AND SUM(CASE WHEN scan_id=?2 AND attempt_number=?3 AND entity_type='homogeneous_guidance' AND entity_id=?4 AND event_type='homogeneous_guidance' AND payload_json=?5 AND created_at<>'' THEN 0 ELSE 1 END)=0 FROM agent_collaboration_events WHERE sequence>?1", params![floor, task.scan_id, task.attempt_number, gated_id, serde_json::json!({"state":expected.state}).to_string()], |r| r.get(0)).map_err(|e| e.to_string())?;
+    if !exact {
+        return Err("homogeneous_guidance_confirmation_event_invalid".into());
+    }
+    Ok(())
 }
 
 pub fn cancel_draft(

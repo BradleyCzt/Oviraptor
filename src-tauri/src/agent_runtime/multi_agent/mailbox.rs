@@ -12,6 +12,8 @@ pub struct MailboxMessage {
 }
 
 mod authority;
+mod history_assignment;
+pub(crate) use history_assignment::read_original_execution_assignment_on;
 mod consume;
 mod record;
 mod saved_message;
@@ -215,5 +217,36 @@ pub(crate) fn verified_completed_output(db:&Connection,lease:&CoordinatorLease,i
         return Err("mailbox_output_not_consumed".into());
     }
     record.verify(db,lease,&lease.root_run_id)?;
+    Ok(record.message)
+}
+
+// Read an already consumed local assessment, never reactivate its recipient
+// or manufacture a delivery/ACK while building a supervision source.
+pub(crate) fn verified_completed_gap_assessment(
+    db: &Connection,
+    lease: &CoordinatorLease,
+    child: &super::scheduler::ScheduledChild,
+    expected: &JsonValue,
+) -> Result<MailboxMessage, String> {
+    if db.is_autocommit() || child.role != crate::agent_runtime::contract::AgentRole::DeepInvestigator {
+        return Err("mailbox_gap_assessment_snapshot_required".into());
+    }
+    let candidate = expected["candidateId"].as_str().ok_or("mailbox_gap_assessment_binding_invalid")?;
+    let revision = expected["evidenceRevision"].as_i64().filter(|v| *v > 0)
+        .ok_or("mailbox_gap_assessment_binding_invalid")?;
+    let correlation = format!("review-gap:{candidate}:{revision}");
+    let dedup = format!("{}:proposal_assessed:{correlation}:{revision}", child.assignment_id);
+    let mut query = db.prepare("SELECT id FROM agent_messages WHERE root_run_id=?1 AND run_id=?1 AND assignment_id=?2 AND kind='proposal_assessed' AND from_run_id=?1 AND to_run_id=?3 AND from_agent='coordinator' AND to_agent='deep_investigator' AND correlation_id=?4 AND evidence_revision=?5 AND dedup_key=?6 AND artifact_refs_json='[]'")
+        .map_err(|e|e.to_string())?;
+    let ids = query.query_map(params![lease.root_run_id,child.assignment_id,child.run_id,correlation,revision,dedup], |row|row.get::<_,String>(0))
+        .map_err(|e|e.to_string())?.collect::<rusqlite::Result<Vec<_>>>().map_err(|e|e.to_string())?;
+    if ids.len()!=1 { return Err("mailbox_gap_assessment_original_missing".into()); }
+    let record = record::Record::load(db,lease,&ids[0],&child.run_id)?;
+    if record.delivered.is_empty() || record.acknowledged.is_empty()
+        || record.message.delivery_attempts!=1 || record.message.payload!=*expected {
+        return Err("mailbox_gap_assessment_original_conflict".into());
+    }
+    record.consumer_authority(db,lease,&child.run_id)?;
+    record.verify(db,lease,&child.run_id)?;
     Ok(record.message)
 }

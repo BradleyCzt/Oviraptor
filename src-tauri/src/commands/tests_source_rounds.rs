@@ -22,7 +22,7 @@ fn source_round_result(id:&str,name:&str,args:JsonValue)->crate::agent_runtime::
     use crate::agent_runtime::model::gateway::{ModelResponse,ToolCall};
     ModelResponse {text:"Inspect the frozen source material.".into(),
         tool_calls:vec![ToolCall {id:id.into(),name:name.into(),arguments:args}],
-        usage:AgentTokenUsage {input_tokens:12,cached_input_tokens:2,output_tokens:8,total_tokens:20,model_requests:1},usage_reported:true,finish_reason:"tool_calls".into()}
+        usage:AgentTokenUsage {input_tokens:12,cached_input_tokens:2,output_tokens:8,total_tokens:20,model_requests:1},usage_reported:true,cached_usage_reported:false,finish_reason:"tool_calls".into()}
 }
 
 #[test]

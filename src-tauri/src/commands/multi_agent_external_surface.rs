@@ -103,6 +103,13 @@ fn capture_public_surface(
     lease: &crate::agent_runtime::multi_agent::lease::CoordinatorLease,
     child: &crate::agent_runtime::multi_agent::scheduler::ScheduledChild,
 ) -> Result<JsonValue, String> {
+    let protocol_db = db::open(&context.db_path)?;
+    let protocol_snapshot = protocol_db.unchecked_transaction().map_err(|e|e.to_string())?;
+    let sealed_response = external_surface_response_receipt::enabled_on(&protocol_snapshot, &lease.root_run_id)?;
+    drop(protocol_snapshot);
+    if sealed_response {
+        return capture_public_surface_with_original_response(context, lease, child);
+    }
     let contract = public_surface_contract(context)?;
     let url = contract["url"].as_str().ok_or("public_surface_url_missing")?;
     // Do not use the authenticated replay helper: it adds session headers and
@@ -174,6 +181,30 @@ fn capture_public_surface(
     if protected {
         return Err(if status == 429 { "public_surface_protected_target_rate_limit" }
             else { "public_surface_protected_target_waf" }.into());
+    }
+    Ok(payload)
+}
+
+// v12 only: the same stable original writer survives claim, actual transport
+// and receipt. Old births retain their original response path above.
+fn capture_public_surface_with_original_response(
+    context:&AgentRunContext,
+    lease:&crate::agent_runtime::multi_agent::lease::CoordinatorLease,
+    child:&crate::agent_runtime::multi_agent::scheduler::ScheduledChild,
+)->Result<JsonValue,String> {
+    let mut connection=Box::new(db::open(&context.db_path)?);
+    connection.pragma_update(None,"synchronous","FULL").map_err(|e|e.to_string())?;
+    let tx=connection.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate).map_err(|e|e.to_string())?;
+    let witness=external_surface_response_receipt::claim_on(&tx,context,lease,child)?;
+    tx.commit().map_err(|e|e.to_string())?;
+    let fresh=external_surface_response_receipt::send_transport(&connection,context,witness)?;
+    let written=agent_write_http_record_fresh(context,1,&fresh.request(),fresh.view(),fresh.body())?;
+    let tx=connection.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate).map_err(|e|e.to_string())?;
+    let original=external_surface_response_receipt::issue_received_on(&tx,context,fresh,&written)?;
+    let payload=original.fact()["response"].clone();
+    tx.commit().map_err(|e|e.to_string())?;
+    if payload["capture"]["protected"]==true {
+        return Err(if payload["capture"]["status"]==429 {"public_surface_protected_target_rate_limit"} else {"public_surface_protected_target_waf"}.into());
     }
     Ok(payload)
 }
@@ -283,7 +314,18 @@ fn validate_public_surface_receipt(
     payload: &JsonValue,
     target_dir: &Path,
 ) -> Result<(),String> {
+    if connection.is_autocommit() {
+        let snapshot=connection.unchecked_transaction().map_err(|e|e.to_string())?;
+        return validate_public_surface_receipt(&snapshot,lease,child,payload,target_dir);
+    }
     let capture = &payload["observedCapture"];
+    if external_surface_response_receipt::enabled_on(connection,&lease.root_run_id)? {
+        let original=external_surface_response_receipt::read_original_on(connection,lease,child)?
+            .ok_or("public_surface_response_original_receipt_missing")?;
+        if original.fact()["response"]!=*capture || resolve_agent_evidence_location(connection,&lease.root_run_id)?!=target_dir {
+            return Err("public_surface_response_original_fact_changed".into());
+        }
+    }
     let serialized = capture.to_string();
     let artifact = capture["artifactId"].as_str().ok_or("public_surface_receipt_missing")?;
     let exact: bool = connection.query_row(
@@ -328,6 +370,21 @@ fn verified_public_surface_review_fact(
     target_dir: &Path,
     fact: &JsonValue,
 ) -> bool {
+    if connection.is_autocommit() {
+        let Ok(snapshot)=connection.unchecked_transaction() else {return false};
+        return verified_public_surface_review_fact(&snapshot,root_run,author_run,artifact,target_dir,fact);
+    }
+    let protocol=external_surface_response_receipt::enabled_on(connection,root_run);
+    let Ok(protocol)=protocol else {return false};
+    if protocol {
+        let owner:Result<(crate::agent_runtime::multi_agent::lease::CoordinatorLease,String),_>=connection.query_row(
+            "SELECT r.scan_id,r.attempt_number,r.target_url,a.coordinator_run_id,a.lease_epoch,a.fencing_token,c.lease_expires_at,a.id FROM agent_runs r JOIN agent_assignments a ON a.id=r.assignment_id AND a.child_run_id=r.id JOIN agent_coordinator_leases c ON c.root_run_id=a.coordinator_run_id WHERE r.id=?1 AND r.root_run_id=?2 AND a.coordinator_run_id=?2 AND r.role='external_surface' AND a.role=r.role",
+            params![author_run,root_run],|r|Ok((crate::agent_runtime::multi_agent::lease::CoordinatorLease {scan_id:r.get(0)?,attempt_number:r.get(1)?,target_key:r.get(2)?,root_run_id:r.get(3)?,lease_epoch:r.get(4)?,fencing_token:r.get(5)?,lease_expires_at:r.get(6)?},r.get(7)?)));
+        let Ok((actor,assignment))=owner else {return false};
+        let child=crate::agent_runtime::multi_agent::scheduler::ScheduledChild {assignment_id:assignment,run_id:author_run.into(),role:crate::agent_runtime::contract::AgentRole::ExternalSurface};
+        let Ok(Some(original))=external_surface_response_receipt::read_original_on(connection,&actor,&child) else {return false};
+        if original.fact()["artifactId"]!=artifact || resolve_agent_evidence_location(connection,root_run).ok().as_deref()!=Some(target_dir) {return false;}
+    }
     let receipt: Result<(String,String),_> = connection.query_row(
         "SELECT c.response_json,c.response_hash FROM agent_external_surface_captures c \
          JOIN agent_runs r ON r.id=c.child_run_id JOIN agent_assignments a ON a.id=c.assignment_id \
@@ -357,16 +414,39 @@ fn multi_agent_external_surface(
 ) -> Result<JsonValue, String> {
     use crate::agent_runtime::{contract::{AgentRole,AgentLane}, multi_agent::{scheduler,mailbox}};
     let connection = db::open(&context.db_path)?;
+    let snapshot = connection.unchecked_transaction().map_err(|e|e.to_string())?;
+    if external_surface_response_receipt::enabled_on(&snapshot,&lease.root_run_id)? {
+        let completed = snapshot.prepare(
+            "SELECT id,child_run_id FROM agent_assignments WHERE coordinator_run_id=?1 AND role='external_surface' AND trigger_code='anonymous_entry_contract' AND state='completed'"
+        ).map_err(|e|e.to_string())?.query_map([&lease.root_run_id],|r|Ok((r.get::<_,String>(0)?,r.get::<_,String>(1)?)))
+            .map_err(|e|e.to_string())?.collect::<rusqlite::Result<Vec<_>>>().map_err(|e|e.to_string())?;
+        if completed.len()>1 { return Err("external_surface_output_original_worker_conflict".into()); }
+        if let Some((assignment_id,run_id)) = completed.into_iter().next() {
+            let child = scheduler::ScheduledChild { assignment_id,run_id,role:AgentRole::ExternalSurface };
+            let source = external_surface_output_receipt::read_original_on(&snapshot,lease,&child)?
+                .ok_or("external_surface_output_original_receipt_missing")?;
+            let payload = source.fact()["collection"]["payload"].clone();
+            snapshot.rollback().map_err(|e|e.to_string())?;
+            native_coordinator_external_surface_output_feedback(context,lease,&child)?;
+            return Ok(payload);
+        }
+    }
+    snapshot.rollback().map_err(|e|e.to_string())?;
+    // Surface grant (2000) + shared EvidenceReviewer floor (legacy gate used 6000).
+    let surface_grant_tokens: i64 = 2000;
+    let min_tokens = surface_grant_tokens
+        + crate::agent_runtime::multi_agent::client_side::REVIEWER_FLOOR_TOKENS;
     let available: bool = connection.query_row(
-        "SELECT (total_tokens=0 OR total_tokens-spent_tokens-reserved_tokens>=6000) \
-         AND (total_requests=0 OR total_requests-spent_requests-reserved_requests>=3) \
-         FROM agent_budget_ledger WHERE root_run_id=?1", [&lease.root_run_id], |r|r.get(0),
-    ).map_err(|e|format!("public_surface_budget:{e}"))?;
+        "SELECT (total_tokens=0 OR total_tokens-spent_tokens-reserved_tokens>=?2)          AND (total_requests=0 OR total_requests-spent_requests-reserved_requests>=3)          FROM agent_budget_ledger WHERE root_run_id=?1",
+        rusqlite::params![lease.root_run_id, min_tokens],
+        |r| r.get(0),
+    )
+    .map_err(|e| format!("public_surface_budget:{e}"))?;
     if !available { return Ok(serde_json::json!({"state":"not_scheduled","reason":"insufficient_budget_for_surface_executor_and_review","targetRequests":0})); }
     let contract = public_surface_contract(context)?;
     let child = scheduler::schedule_child(&connection, lease, AgentRole::ExternalSurface,
         AgentLane::TargetTouching, "anonymous_entry_contract", &contract, 1,
-        &["public_surface_get".into(),"evidence.read".into(),"mailbox.write".into()], 2000, 1)?;
+        &["public_surface_get".into(),"evidence.read".into(),"mailbox.write".into()], surface_grant_tokens, 1)?;
     scheduler::start_child_or_release(&connection, lease, &child)?;
     let mut isolated = context.clone();
     isolated.run = Some(AgentRunLedger {db_path:context.db_path.clone(),run_id:child.run_id.clone()});
@@ -389,5 +469,12 @@ fn multi_agent_external_surface(
         // target capability and atomically sends/acks the genuine result.
         deliver_readonly_assessment(&connection,lease,&child,&usage,&payload,Some(&context.target_dir))
     })();
-    result.map_err(|error|failed_specialist_error(&connection,lease,&child,&error))
+    let result = result.map_err(|error|failed_specialist_error(&connection,lease,&child,&error))?;
+    let snapshot = connection.unchecked_transaction().map_err(|e|e.to_string())?;
+    let output_enabled = external_surface_response_receipt::enabled_on(&snapshot,&lease.root_run_id)?;
+    snapshot.rollback().map_err(|e|e.to_string())?;
+    if output_enabled {
+        native_coordinator_external_surface_output_feedback(context,lease,&child)?;
+    }
+    Ok(result)
 }

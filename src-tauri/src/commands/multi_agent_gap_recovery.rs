@@ -65,7 +65,16 @@ fn prepare_gap_receipt_completion(
          AND NOT EXISTS(SELECT 1 FROM agent_messages WHERE assignment_id=a.id)",
         params![child.assignment_id,child.run_id,lease.root_run_id,revision,lease.lease_epoch,lease.fencing_token], |row|row.get(0),
     ).map_err(|_|"gap_receipt_assignment_not_recoverable".to_string())?;
-    let task: JsonValue = serde_json::from_str(&task).map_err(|_| "gap_receipt_task_invalid")?;
+    let mut task: JsonValue =
+        serde_json::from_str(&task).map_err(|_| "gap_receipt_task_invalid")?;
+    // A born Root dispatches the Investigator through
+    // `native_coordinator_schedule_decision`, which binds its published
+    // decision into the task as `rootDecision`. Only that genuine binding is
+    // set aside (after it is verified against this Root's own publication);
+    // every other key must still equal the frozen gap exactly.
+    if let Some(decision) = task.as_object_mut().and_then(|object| object.remove("rootDecision")) {
+        gap_receipt_root_decision_valid(tx, &lease.root_run_id, &decision, candidate_id, revision)?;
+    }
     if task
         != serde_json::json!({"candidateId":candidate_id,"revision":revision,"missingEvidence":redact_json(missing_evidence)})
     {
@@ -167,6 +176,66 @@ fn verify_gap_delivery_events(
     ).map_err(|error|format!("gap_delivery_event_postcondition:{error}"))?;
     if visible != 4 {
         return Err("gap_delivery_event_postcondition_failed".into());
+    }
+    Ok(())
+}
+
+/// The `rootDecision` a Root-dispatched Investigator task carries must be the
+/// exact shape `native_coordinator_schedule_decision` writes for
+/// `dispatch:deep_investigator`, and must name a decision this Root actually
+/// published (same event sequence and decision hash). Anything else, including
+/// a forged or foreign decision, keeps the task mismatched.
+fn gap_receipt_root_decision_valid(
+    tx: &rusqlite::Connection,
+    root_run_id: &str,
+    decision: &JsonValue,
+    candidate_id: &str,
+    revision: i64,
+) -> Result<(), String> {
+    if tx.is_autocommit() { return Err("gap_original_snapshot_required".into()); }
+    let mismatch = || "gap_receipt_task_mismatch".to_string();
+    let object = decision.as_object().ok_or_else(mismatch)?;
+    let mut keys = object.keys().map(String::as_str).collect::<Vec<_>>();
+    keys.sort_unstable();
+    let sequence = decision["eventSequence"].as_i64().filter(|value| *value > 0);
+    if keys != ["eventSequence", "frameHash", "rustPolicy", "step", "summaryHash"]
+        || decision["step"] != "dispatch:deep_investigator"
+        || !decision["frameHash"].is_string()
+        || !decision["summaryHash"].is_string()
+        || sequence.is_none()
+    {
+        return Err(mismatch());
+    }
+    let (publication, request): (String,String) = tx
+        .query_row(
+            "SELECT p.fact_json,r.fact_json FROM agent_root_tick_receipts p JOIN agent_root_tick_receipts r \
+             ON r.root_run_id=p.root_run_id AND r.call_id=p.call_id AND r.phase='request' \
+             WHERE p.root_run_id=?1 AND p.phase='publication' \
+             AND json_extract(p.fact_json,'$.eventSequence')=?2",
+            params![root_run_id, sequence],
+            |row| Ok((row.get(0)?,row.get(1)?)),
+        )
+        .map_err(|_| mismatch())?;
+    let publication_fact: JsonValue = serde_json::from_str(&publication).map_err(|_| mismatch())?;
+    let request_fact: JsonValue = serde_json::from_str(&request).map_err(|_| mismatch())?;
+    let canonical_publication=publication_fact.to_string();
+    let canonical_request=request_fact.to_string();
+    let basis=&request_fact["request"]["basis"];
+    let origin=&basis["changedFact"];
+    let frame_hash=crate::agent_runtime::store::stable_hash(&origin.to_string());
+    let policy=&decision["rustPolicy"];
+    if canonical_publication!=publication || canonical_request!=request
+        || publication_fact["decisionHash"] != decision["summaryHash"]
+        || basis["phase"]!="reviewer-decision" || origin["kind"]!="reviewer-decision"
+        || origin["semantic"]["candidateId"]!=candidate_id || origin["semantic"]["revision"]!=revision
+        || publication_fact["event"]["basisHash"]!=crate::agent_runtime::multi_agent::budget::root::model::tick::Tick::basis_hash(basis)
+        || decision["frameHash"]!=frame_hash || policy["factHash"]!=frame_hash
+        || policy["schemaVersion"]!=1 || policy["trigger"]!="reviewer_decision"
+        || policy["step"]!=decision["step"] || policy["selection"]!="accepted"
+        || policy["advisoryOnly"]!=true || policy["targetEvidenceProven"]!=false
+        || policy["costBasis"]["expectedTargetRequests"]!=0
+    {
+        return Err(mismatch());
     }
     Ok(())
 }

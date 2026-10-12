@@ -18,6 +18,7 @@ pub(crate) struct Hint {
     pub run_id: String,
     pub worker_id: Option<String>,
     pub sequence: i64,
+    pub round: i64,
 }
 fn protect<T>(
     db: &Connection,
@@ -29,7 +30,11 @@ fn protect<T>(
         let allowed = match c.action {
             AuthAction::Insert { table_name } if direct => {
                 matches!(table_name, "native_sdk_log_rows" | "native_sdk_log_gaps")
-                    || (owner_insert && table_name == "native_sdk_log_owners")
+                    || (owner_insert
+                        && matches!(
+                            table_name,
+                            "native_sdk_log_owners" | "native_sdk_log_mapper_owners"
+                        ))
             }
             AuthAction::Read { .. }
             | AuthAction::Select
@@ -72,11 +77,12 @@ fn expected(owner: &Owner) -> String {
     serde_json::to_string(owner).unwrap_or_default()
 }
 fn exact_owner(db: &Connection, owner: &Owner, time: &str) -> Result<bool, String> {
+    super::owner_mapper_loop::verify_extension_if_saved(db, owner)?;
     let identity = stable_hash(&expected(owner));
     db.query_row("SELECT COUNT(*)=1 FROM native_sdk_log_owners WHERE owner_id=?1 AND domain=?2 AND dispatch_key=?3
    AND scan_id=?4 AND attempt_number=?5 AND root_run_id=?6 AND run_id=?7 AND assignment_id IS ?8
    AND lease_attempt_id=?9 AND worker_id IS ?10 AND round_number=?11 AND request_hash=?12 AND identity_hash=?13 AND created_at=?14",
-   params![owner.owner_id,owner.domain,owner.dispatch_key,owner.scan_id,owner.attempt,owner.root_run_id,owner.run_id,owner.assignment_id,owner.lease_attempt_id,owner.worker_id,owner.round,owner.request_hash,identity,time],|r|r.get(0))
+   params![owner.owner_id,owner.domain.storage(),owner.dispatch_key,owner.scan_id,owner.attempt,owner.root_run_id,owner.run_id,owner.assignment_id,owner.lease_attempt_id,owner.worker_id,owner.round,owner.request_hash,identity,time],|r|r.get(0))
    .map_err(|_|"native_sdk_log_owner_unverified".into())
 }
 pub(super) fn begin(db: &mut Connection, owner: &Owner) -> Result<Hint, String> {
@@ -90,10 +96,14 @@ pub(super) fn begin(db: &mut Connection, owner: &Owner) -> Result<Hint, String> 
             .map_err(|_| "native_sdk_log_commit_failed")?;
         let n=tx.execute("INSERT INTO native_sdk_log_owners(owner_id,domain,dispatch_key,scan_id,attempt_number,root_run_id,run_id,assignment_id,
     lease_attempt_id,worker_id,round_number,request_hash,identity_hash,created_at) VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14)",
-    params![owner.owner_id,owner.domain,owner.dispatch_key,owner.scan_id,owner.attempt,owner.root_run_id,owner.run_id,owner.assignment_id,owner.lease_attempt_id,owner.worker_id,owner.round,owner.request_hash,stable_hash(&expected(owner)),time]).map_err(|_|"native_sdk_log_owner_not_persisted")?;
+    params![owner.owner_id,owner.domain.storage(),owner.dispatch_key,owner.scan_id,owner.attempt,owner.root_run_id,owner.run_id,owner.assignment_id,owner.lease_attempt_id,owner.worker_id,owner.round,owner.request_hash,stable_hash(&expected(owner)),time]).map_err(|_|"native_sdk_log_owner_not_persisted")?;
+        if owner.domain == super::owner::Domain::MapperLoop {
+            tx.execute("INSERT INTO main.native_sdk_log_mapper_owners(owner_id,logical_domain,identity_hash) VALUES(?1,'mapper_loop',?2)", params![owner.owner_id, stable_hash(&expected(owner))]).map_err(|_| "native_sdk_log_mapper_owner_not_persisted")?;
+        }
         if n != 1 || !exact_owner(&tx, owner, &time)? {
             return Err("native_sdk_log_owner_not_persisted".into());
         }
+        super::owner_mapper_loop::verify_extension(&tx, owner)?;
         owner.verify_pristine(&tx)?;
         append_row(&tx, owner, "prepared", "", "")
     })?;
@@ -189,6 +199,7 @@ fn append_row(
         dispatch_key: owner.dispatch_key.clone(),
         run_id: owner.run_id.clone(),
         worker_id: owner.worker_id.clone(),
+        round: owner.round,
         sequence,
     })
 }
@@ -226,6 +237,7 @@ pub(super) fn gap(db: &mut Connection, owner: &Owner, stage: &str) -> Result<Hin
             dispatch_key: owner.dispatch_key.clone(),
             run_id: owner.run_id.clone(),
             worker_id: owner.worker_id.clone(),
+            round: owner.round,
             sequence,
         })
     })?;

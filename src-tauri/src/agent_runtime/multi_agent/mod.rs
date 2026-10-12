@@ -5,6 +5,7 @@
 //! directives, typed mailbox delivery and deterministic child-run scheduling.
 pub mod assignment;
 pub(crate) mod client_side;
+pub(crate) mod input_parser;
 pub(crate) mod attempts;
 pub mod budget;
 pub(crate) mod budget_gaps;
@@ -13,6 +14,7 @@ mod coordinator_heartbeat;
 pub mod directive;
 pub mod lease;
 pub mod mailbox;
+pub(crate) mod homogeneous;
 pub mod scheduler;
 pub mod source;
 pub(crate) mod source_coverage;

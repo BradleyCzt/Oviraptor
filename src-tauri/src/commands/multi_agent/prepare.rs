@@ -19,9 +19,35 @@ fn multi_agent_prepare_owned(context:&mut AgentRunContext,owner:crate::agent_run
         .ok_or_else(|| "multi_agent_root_run_missing".to_string())?;
     owner.validate_scope(&context.db_path,&context.scan_id,context.attempt_number,&root_run_id)?;
     let connection = db::open(&context.db_path)?;
+    if crate::agent_runtime::multi_agent::budget::root::model::tick::financial_purpose::binding_on(&connection,&root_run_id)?.is_some() {
+        return Err("financial_continuation_general_prepare_denied".into());
+    }
     if native_frozen_web_root_mode_on(&connection,context)?!=crate::agent_runtime::web_mode::WebMode::Multi {return Err("multi_agent_requires_frozen_multi_root".into());}
     native_web_original_finance_on(&connection,context)?;
     native_coordinator_frozen_evidence(&connection,context)?;
+    // New lease contracts authenticate their original issuer before acquiring
+    // or refreshing C, modifying Root projections, or rebinding summary fees.
+    let preflight_issuer = {
+        let tx = connection.unchecked_transaction().map_err(|e| e.to_string())?;
+        let required = crate::agent_runtime::web_mode::root::read(&tx, &root_run_id)?
+            .is_some_and(|d| d.lease_expiry_supervision().is_some());
+        let sealed: bool = tx.query_row("SELECT EXISTS(SELECT 1 FROM agent_root_mode_birth_seals WHERE root_run_id=?1)", [&root_run_id], |r| r.get(0)).map_err(|e| e.to_string())?;
+        if required || sealed {
+            let original = tx.query_row(
+                "SELECT scan_id,attempt_number,target_key,root_run_id,lease_epoch,fencing_token,lease_expires_at FROM agent_coordinator_leases WHERE root_run_id=?1 AND scan_id=?2 AND attempt_number=?3 AND target_key=?4",
+                params![root_run_id,context.scan_id,context.attempt_number,context.target_url],
+                |r| Ok(lease::CoordinatorLease {scan_id:r.get(0)?,attempt_number:r.get(1)?,target_key:r.get(2)?,root_run_id:r.get(3)?,lease_epoch:r.get(4)?,fencing_token:r.get(5)?,lease_expires_at:r.get(6)?}),
+            ).map_err(|_| "worker_supervisor_original_coordinator_missing")?;
+            if required {
+                lease::validate_coordinator_lease(&tx, &original)?;
+                lease::require_executable_coordinator(&tx, &original)?;
+            }
+            let issuer = original_withdrawal_issuer_on(&tx, &original)?;
+            if required && issuer.is_none() { return Err("worker_supervisor_original_signed_issuer_required".into()); }
+            issuer
+        } else { None }
+    };
+
     // The linked gap is an advisory objective, never an inherited execution
     // grant. Revalidate it before scheduling any child, not only at review.
     let followup = {
@@ -100,19 +126,70 @@ fn multi_agent_prepare_owned(context:&mut AgentRunContext,owner:crate::agent_run
             params![coordinator_lease.lease_epoch, coordinator_lease.fencing_token, root_run_id],
         )
         .map_err(|error| format!("无法初始化多智能体预算账本：{error}"))?;
-    let supervisor = crate::agent_runtime::multi_agent::supervisor::WorkerSupervisor::start_owned(
-        &context.db_path,
+    // DESIGN §0.1 / §2.2：任务级 scheduling_model 开关。取值只来自冻结扫描计划，
+    // 默认 legacy_role_pipeline；只有显式声明 homogeneous_workers 的任务才建立同质任务，
+    // 固定角色管线的既有行为与测试完全不变。
+    let scheduling_model =
+        crate::agent_runtime::multi_agent::homogeneous::store::scheduling_model_from_plan(
+            &connection,
+            &context.scan_id,
+            context.attempt_number,
+        )
+        .map_err(|error| format!("无法判定调度模式：{error}"))?;
+    crate::agent_runtime::multi_agent::homogeneous::store::set_run_scheduling_model(
+        &connection,
+        &root_run_id,
+        scheduling_model,
+    )
+    .map_err(|error| format!("无法写入调度模式：{error}"))?;
+    crate::agent_runtime::multi_agent::homogeneous::store::activate_task_for_lease(
+        &connection,
         &coordinator_lease,
-        owner,
-    )?;
+    )
+    .map_err(|error| format!("无法激活同质 Worker 任务：{error}"))?;
+    // Phase 1.1 让路（REVIEW §8.1 第 3 条）：显式声明 homogeneous_workers 的 root 不再进入
+    // legacy bootstrap dispatch——固定角色 child、旧 lane 互斥与 bootstrap 预算一个都不建，
+    // 切片只由主管轮（mint 出的 homogeneous-decision 帧 + `homogeneous::apply`）派发。
+    // 默认 legacy_role_pipeline 的 root 走原路径，本分支一次都不执行。
+    if scheduling_model
+        == crate::agent_runtime::multi_agent::homogeneous::types::SCHEDULING_HOMOGENEOUS
+    {
+        return Err("homogeneous_scan_legacy_bootstrap_stepped_aside".into());
+    }
+    let issuer = match preflight_issuer {
+        Some(issuer) => {
+            let tx = connection.unchecked_transaction().map_err(|e| e.to_string())?;
+            issuer.require_actor(&tx, &coordinator_lease)?;
+            Some(issuer)
+        }
+        None => original_withdrawal_issuer_on(&connection, &coordinator_lease)?,
+    };
+    let supervisor = match issuer {
+        Some(issuer) => crate::agent_runtime::multi_agent::supervisor::WorkerSupervisor::start_owned_signed(&context.db_path, &coordinator_lease, owner, issuer)?,
+        None => crate::agent_runtime::multi_agent::supervisor::WorkerSupervisor::start_owned(&context.db_path, &coordinator_lease, owner)?,
+    };
     context.supervision = Some(supervisor.ticket());
     let bootstrap = native_coordinator_bootstrap(context,&coordinator_lease)?;
     context.evidence["multiAgentCoordinator"]=json!({"decisionSummary":bootstrap.summary.as_json(),
         "eventSequence":bootstrap.event_sequence,"replayed":bootstrap.replayed,"advisoryOnly":true});
-    let mapper = native_coordinator_prepare_mapper(context,&coordinator_lease,&bootstrap,&json!({
+    let mapper_loop_bounds = if crate::agent_runtime::web_mode::root::read(&connection, &root_run_id)?
+        .and_then(|mode| mode.bootstrap_dispatch())
+        .is_some_and(|contract| contract["schemaVersion"] == 15)
+    {
+        let snapshot = connection.unchecked_transaction().map_err(|error| error.to_string())?;
+        let inventory = mapper_evidence_lookup::MapperEvidenceInventory::capture_on(
+            &snapshot, &coordinator_lease, &context.target_dir, 1,
+            mapper_evidence_lookup::MapperLookupLimits::new(256 * 1024, 512)?,
+        )?;
+        Some(mapper_loop_request::VerifiedMapperLoopRequestBounds::capture_on(
+            &snapshot, &coordinator_lease, &context.target_dir, inventory,
+            &context.environment, context.proxy.as_deref(),
+        )?)
+    } else { None };
+    let mapper = native_coordinator_prepare_mapper_with_loop_bounds(context,&coordinator_lease,&bootstrap,&json!({
         "target":context.target_url,
         "objective":"从冻结前端证据中整理 API、参数、认证线索和优先验证路径，不访问目标",
-    }))?;
+    }), mapper_loop_bounds.as_ref())?;
     // Derived projections are not new frontend evidence. Keep the paid Root's
     // stable public summary/reference, while replay diagnostics stay outside
     // the Mapper's original request. Never rewrite/adopt an old paid request.
@@ -134,13 +211,17 @@ fn multi_agent_prepare_owned(context:&mut AgentRunContext,owner:crate::agent_run
         "identityCount": authenticated_identity_count,
         "requiredOutput": {"summary":"string","priorityContracts":["string"],"risks":["string"]}
     });
-    let mapper_result = multi_agent_child_round(
+    let mapper_result = if let Some(bounds) = &mapper_loop_bounds {
+        mapper_executor_adapter::native_run_mapper_controlled_executor(
+            context, &coordinator_lease, &mapper, bounds,
+        ).map(|output| (output.text().to_owned(), *output.usage()))
+    } else { multi_agent_child_round(
         context,
         &coordinator_lease,
         &mapper,
         "你是独立的 SPA/API Mapper。你只能分析提供的冻结证据，不能声称访问了目标。输出严格 JSON，不要 Markdown；列出证据支持的 API、参数、认证线索和建议优先合同。",
         mapper_input,
-    );
+    ) };
     context.evidence["multiAgentMapper"] = match mapper_result {
         Ok((text, usage)) => deliver_readonly_assessment(
             &connection,
@@ -151,6 +232,11 @@ fn multi_agent_prepare_owned(context:&mut AgentRunContext,owner:crate::agent_run
             None,
         )?,
         Err(error) => {
+            if mapper_loop_bounds.is_some() {
+                // Per-round invoices retain their original financial stage.
+                // Legacy specialist cleanup cannot reconcile or refund them.
+                return Err(error);
+            }
             return Err(failed_specialist_error(
                 &connection,
                 &coordinator_lease,
@@ -159,6 +245,12 @@ fn multi_agent_prepare_owned(context:&mut AgentRunContext,owner:crate::agent_run
             ));
         }
     };
+    // Original delivery has committed. Root assessment must not enter its
+    // child cleanup/retry closure or the Supervisor's protected writer.
+    if crate::agent_runtime::multi_agent::attempts::current(&connection, &coordinator_lease, &mapper.assignment_id)?.state == "expired"
+        && crate::agent_runtime::web_mode::root::read(&connection, &root_run_id)?.is_some_and(|d| d.lease_expiry_supervision().is_some()) {
+        native_coordinator_lease_expiry_feedback(context, &coordinator_lease, &mapper)?;
+    }
     if identity_mode != crate::auth_session::ScanIdentityMode::AnonymousOnly {
         supervisor.check()?;
         let identity_child = scheduler::prepare_supervised_readonly_child(
@@ -205,6 +297,7 @@ fn multi_agent_prepare_owned(context:&mut AgentRunContext,owner:crate::agent_run
                 ));
             }
         };
+        native_coordinator_original_expired_feedback(context,&coordinator_lease,&identity_child)?;
         // This is a distinct paid, closed worker fact, not Mapper's opinion or
         // a target authorization. Rust checks metadata again before Web grant.
         let feedback=native_coordinator_identity_feedback(context,&coordinator_lease,&mapper,&identity_child)?;

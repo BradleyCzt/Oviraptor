@@ -7,8 +7,9 @@
 
 use rusqlite::{Connection, OptionalExtension};
 
-/// Dimensions the Master §5.4 BudgetVector requires. The live summary tracks
-/// only tokens and requests; the rest have no representation at all.
+/// Dimensions the Master §5.4 BudgetVector requires. Seven dimensions have
+/// live append writers; browser_actions / controlled_writes / upload_bytes
+/// remain missing until a contract writer lands.
 pub const REQUIRED_DIMENSIONS: &[&str] = &[
     "model_input_tokens",
     "model_cached_tokens",
@@ -22,10 +23,23 @@ pub const REQUIRED_DIMENSIONS: &[&str] = &[
     "wall_time_ms",
 ];
 
-/// The summary records model requests; target requests use a separate counter
-/// and cannot be claimed as entries in this ledger. Token totals likewise do
-/// not distinguish input, cache and output.
-pub const TRACKED_DIMENSIONS: &[&str] = &["model_requests"];
+/// Append-only dimensions already written live: model `DIMENSIONS[..4]`,
+/// broker `target_requests`, admission `wall_time_ms`, and lane
+/// `concurrency_batches`. Browser/controlled-write/upload stay denied by
+/// contract and remain reported as missing until a live writer exists.
+pub const TRACKED_DIMENSIONS: &[&str] = &[
+    "model_input_tokens",
+    "model_cached_tokens",
+    "model_output_tokens",
+    "model_requests",
+    "target_requests",
+    "concurrency_batches",
+    "wall_time_ms",
+];
+
+/// Re-export: must stay identical to `budget::diagnostics` denied coverage.
+#[cfg(test)]
+pub use super::budget::DENIED_BY_CONTRACT_DIMENSIONS;
 
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -54,6 +68,8 @@ pub struct BudgetLedgerGaps {
     pub fencing_matches_coordinator: bool,
     pub missing_dimensions: Vec<String>,
     pub append_journal: Option<Vec<super::budget::diagnostics::DimensionDiagnostic>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub supervision_request_capacity: Option<super::budget::supervision_capacity::SupervisionRequestDiagnostic>,
 }
 
 #[cfg(test)]
@@ -99,7 +115,8 @@ pub(crate) fn budget_ledger_gaps_in_snapshot(
     let (assignment_tokens, assignment_requests): (i64, i64) = snapshot
         .query_row(
             "SELECT COALESCE(SUM(reserved_tokens),0),COALESCE(SUM(reserved_requests),0) \
-             FROM agent_assignments WHERE coordinator_run_id=?1 AND budget_settled_at=''",
+             FROM agent_assignments WHERE coordinator_run_id=?1 AND budget_settled_at='' \
+             AND scheduling_model='legacy_role_pipeline'",
             [root_run_id],
             |row| Ok((row.get(0)?, row.get(1)?)),
         )
@@ -150,6 +167,13 @@ pub(crate) fn budget_ledger_gaps_in_snapshot(
                 .ok_or("预算 request 差额溢出")
         })
         .transpose()?;
+    let append_journal = super::budget::diagnostics::read(snapshot, root_run_id)?;
+    // Summary-only legacy roots have no append contract to interpret as v6.
+    let supervision_request_capacity = if append_journal.is_some() {
+        super::budget::supervision_capacity::diagnostic(snapshot, root_run_id)?
+    } else {
+        None
+    };
     let gaps = BudgetLedgerGaps {
         ledger_exists: ledger.is_some(),
         reserved_tokens: ledger.as_ref().map(|ledger| ledger.0).unwrap_or(0),
@@ -172,7 +196,8 @@ pub(crate) fn budget_ledger_gaps_in_snapshot(
             _ => false,
         },
         missing_dimensions: missing,
-        append_journal: super::budget::diagnostics::read(snapshot, root_run_id)?,
+        append_journal,
+        supervision_request_capacity,
     };
     Ok(gaps)
 }

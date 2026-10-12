@@ -109,9 +109,9 @@ fn draft_scan_directive_in(
         lease_epoch,
         &fencing_token,
     )?;
-    let value = crate::agent_runtime::secrets::redact_json(
+    let value = crate::agent_runtime::multi_agent::homogeneous::material_policy::json(&transaction, &root_run_id,
         &serde_json::to_value(draft).map_err(|error| error.to_string())?,
-    );
+    )?;
     transaction
         .commit()
         .map_err(|error| format!("无法提交用户指令草案：{error}"))?;

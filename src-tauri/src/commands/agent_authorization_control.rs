@@ -1,7 +1,7 @@
 /// Explicit operator input for one cross-object authorization control group.
 /// This command is deliberately not an Agent tool: model text, imported JSON,
 /// and `ownershipHints` cannot create an ownership assertion.
-#[derive(Clone, Debug, PartialEq, Eq, serde::Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, serde::Deserialize, serde::Serialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct SaveAuthorizationControlInput {
     scan_id: String,

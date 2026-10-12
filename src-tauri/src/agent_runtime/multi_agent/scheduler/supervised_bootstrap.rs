@@ -9,7 +9,7 @@ pub fn prepare_supervised_readonly_child(
     task_slice: &JsonValue,
     reserved_tokens: i64,
 ) -> Result<ScheduledChild, String> {
-    if !matches!(role, AgentRole::SpaApiMapper | AgentRole::IdentitySession) {
+    if !role.allows_supervised_readonly_bootstrap() {
         return Err("supervised_bootstrap_role_requires_dedicated_recovery".into());
     }
     let dedup = format!("{}:{trigger}:{}:1", role.as_str(), lease.target_key);

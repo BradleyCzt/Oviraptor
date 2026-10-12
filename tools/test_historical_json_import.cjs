@@ -5,6 +5,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const test = require('node:test');
 const ts = require('typescript');
+const { loadSentinelApi } = require('./sentinel_api_harness.cjs');
 const vue = require('vue');
 const { parse, compileScript, compileTemplate } = require('@vue/compiler-sfc');
 const transpile = text => ts.transpileModule(text, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020 } }).outputText;
@@ -103,10 +104,8 @@ async function mount({ picker = async () => '/chosen/history.json', importFile =
 }
 
 test('historical import IPC accepts only the chosen path, not project or task authority', async () => {
-  const calls = [], exports = {};
-  new Function('require', 'exports', transpile(fs.readFileSync(path.join(__dirname, '../src/features/sentinel/api.ts'), 'utf8')))((name) => {
-    assert.equal(name, '@tauri-apps/api/core'); return { invoke: async (...args) => { calls.push(args); return 2; } };
-  }, exports);
+  const calls = [];
+  const exports = { sentinelApi: loadSentinelApi(async (...args) => { calls.push(args); return 2; }) };
   await exports.sentinelApi.importSentinelProject('/chosen/archive.json');
   await exports.sentinelApi.importSentinelResults('{"format":"oviraptor-sentinel-v1"}');
   assert.deepEqual(calls, [['import_sentinel_project', { path: '/chosen/archive.json' }],

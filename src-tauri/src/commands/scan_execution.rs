@@ -30,7 +30,28 @@ fn launch_sentinel_url_pipeline(
     adaptive: AgentBudgetSettings,
     packet_budget: usize,
     auth_session_path: Option<PathBuf>,
+    admission: Option<WebDispatchAdmission>,
+) -> Result<(), String> {
+    launch_sentinel_url_pipeline_with_tool_configuration(db_path, scan_id, attempt_number, worker, work_dir, targets, proxies, no_proxy, model_environment, runtime_path, adaptive, packet_budget, auth_session_path, admission, None)
+}
+
+#[allow(clippy::too_many_arguments)]
+fn launch_sentinel_url_pipeline_with_tool_configuration(
+    db_path: PathBuf,
+    scan_id: String,
+    attempt_number: i64,
+    worker: PathBuf,
+    work_dir: PathBuf,
+    targets: Vec<(String, String)>,
+    proxies: Vec<(String, String)>,
+    no_proxy: String,
+    model_environment: ModelRuntimeEnv,
+    runtime_path: OsString,
+    adaptive: AgentBudgetSettings,
+    packet_budget: usize,
+    auth_session_path: Option<PathBuf>,
     mut admission: Option<WebDispatchAdmission>,
+    tool_configuration: Option<crate::tool_supply::ToolAdministratorConfiguration>,
 ) -> Result<(), String> {
     thread::Builder::new().name("native-web-pipeline".into()).spawn(move || {
         let claim = claim_web_pipeline_branch(&db_path,&scan_id,attempt_number,&work_dir,&worker,&mut admission);
@@ -184,7 +205,7 @@ fn launch_sentinel_url_pipeline(
             }
             // Plan selection/writes belong inside target admission. A repeated
             // target must not change the winner's frozen plan before it owns it.
-            let dispatched = run_agent_target(
+            let dispatched = run_agent_target_with_tool_configuration(
                 &prepared,
                 AgentTargetExecution {
                     db_path: &db_path,
@@ -195,6 +216,7 @@ fn launch_sentinel_url_pipeline(
                     adaptive: &adaptive,
                     log_path: &log_path,
                 },
+                tool_configuration.as_ref(),
             );
             let dispatched = match dispatched {
                 Ok(dispatched) => dispatched,

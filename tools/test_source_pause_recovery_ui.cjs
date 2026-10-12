@@ -4,6 +4,7 @@ const test = require('node:test');
 const fs = require('node:fs');
 const path = require('node:path');
 const ts = require('typescript');
+const { loadSentinelApi } = require('./sentinel_api_harness.cjs');
 const vue = require('vue');
 const { parse, compileScript, compileTemplate, compileStyle } = require('@vue/compiler-sfc');
 const { renderToString } = require('@vue/server-renderer');
@@ -124,12 +125,8 @@ test('busy, unsettled costs and commit errors retain obligations without exposin
 });
 
 test('production API adapter invokes the registered command with exact original scope', async () => {
-  const exports = {}, calls = [];
-  const source = fs.readFileSync(path.join(__dirname, '../src/features/sentinel/api.ts'), 'utf8');
-  new Function('require', 'exports', transpile(source))((name) => {
-    assert.equal(name, '@tauri-apps/api/core');
-    return { invoke: async (...args) => { calls.push(args); return receipt(); } };
-  }, exports);
+  const calls = [];
+  const exports = { sentinelApi: loadSentinelApi(async (...args) => { calls.push(args); return receipt(); }) };
   assert.deepEqual(await exports.sentinelApi.recoverNativeSourcePauseResult('scan-a', 1), receipt());
   assert.deepEqual(calls, [['recover_native_source_pause_result', { scanId: 'scan-a', attemptNumber: 1 }]]);
 });

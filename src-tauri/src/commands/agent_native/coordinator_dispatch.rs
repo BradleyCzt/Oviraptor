@@ -15,15 +15,9 @@ fn native_coordinator_schedule_decision(
     requests: i64,
 ) -> Result<crate::agent_runtime::multi_agent::scheduler::ScheduledChild, String> {
     use crate::agent_runtime::{contract::AgentRole, multi_agent::scheduler, store};
-    let expected = match role {
-        AgentRole::WebExecutor => "dispatch:web_executor",
-        AgentRole::DeepInvestigator => "dispatch:deep_investigator",
-        _ => return Err("root_decision_role_not_bounded".into()),
-    };
+    let expected = native_root_schedule_decision_role_gate(role)?;
     if expected != frame.step()
-        || !decision.summary.as_json()["suggestions"]
-            .as_array()
-            .is_some_and(|items| items.iter().any(|v| v.as_str() == Some(expected)))
+        || !native_root_paid_suggestion_selected(decision, expected)
     {
         return Err("root_decision_did_not_select_step".into());
     }
@@ -40,11 +34,27 @@ fn native_coordinator_schedule_decision(
         Ok(())
     };
     verify()?;
-    let allocation = if role == AgentRole::WebExecutor {
-        native_coordinator_executor_allocation(&tx, actor, trigger, revision)?
-    } else { None };
-    let (tokens,requests)=allocation.map_or((tokens,requests),|(t,r,_)|(t,r));
-    let rust_policy = native_coordinator_dispatch_policy_on(&tx, context, actor, frame, decision, role, tokens, requests, allocation.is_some())?;
+    let allocation = match role {
+        AgentRole::WebExecutor => {
+            native_coordinator_executor_allocation(&tx, actor, trigger, revision)?
+        }
+        AgentRole::DeepInvestigator => {
+            native_coordinator_investigator_allocation(&tx, actor, trigger, revision)?
+        }
+        _ => None,
+    };
+    let (tokens, requests) = allocation.map_or((tokens, requests), |(t, r, _)| (t, r));
+    let rust_policy = native_coordinator_dispatch_policy_on(
+        &tx,
+        context,
+        actor,
+        frame,
+        decision,
+        role,
+        tokens,
+        requests,
+        allocation.is_some(),
+    )?;
     let mut task = task.clone();
     let object = task.as_object_mut().ok_or("root_decision_task_invalid")?;
     if object.contains_key("rootDecision") {
@@ -70,11 +80,41 @@ fn native_coordinator_schedule_decision(
             tokens,
             requests,
         )?;
-        if let Some((_,_,fresh))=allocation {
-            if crate::agent_runtime::multi_agent::budget::model::original_web_grant(&tx,actor,&child.assignment_id)? != (tokens,requests) {return Err("executor_allocation_original_grant_conflict".into());}
+        if let Some((_, _, fresh)) = allocation {
+            match role {
+                AgentRole::WebExecutor => {
+                    if crate::agent_runtime::multi_agent::budget::model::original_web_grant(
+                        &tx,
+                        actor,
+                        &child.assignment_id,
+                    )? != (tokens, requests)
+                    {
+                        return Err("executor_allocation_original_grant_conflict".into());
+                    }
+                }
+                AgentRole::DeepInvestigator => {
+                    let (granted_tokens, granted_requests): (i64, i64) = tx
+                        .query_row(
+                            "SELECT reserved_tokens,reserved_requests FROM agent_assignments WHERE id=?1",
+                            [&child.assignment_id],
+                            |r| Ok((r.get(0)?, r.get(1)?)),
+                        )
+                        .map_err(|_| "investigator_allocation_original_grant_conflict".to_string())?;
+                    if (granted_tokens, granted_requests) != (tokens, requests) {
+                        return Err("investigator_allocation_original_grant_conflict".into());
+                    }
+                }
+                _ => {}
+            }
             if fresh {
-                let (retained_tokens,retained_requests)=native_coordinator_executor_retained_floor(&tx,actor)?;
-                crate::agent_runtime::multi_agent::budget::root::require_child_capacity(&tx,&actor.root_run_id,retained_tokens,retained_requests)?;
+                let (retained_tokens, retained_requests) =
+                    native_coordinator_executor_retained_floor(&tx, actor)?;
+                crate::agent_runtime::multi_agent::budget::root::require_child_capacity(
+                    &tx,
+                    &actor.root_run_id,
+                    retained_tokens,
+                    retained_requests,
+                )?;
             }
         }
         verify()?; // Same captured proof, after every grant/reservation/trigger write.
@@ -98,6 +138,7 @@ fn native_coordinator_root_context(
 }
 
 include!("coordinator_executor_allocation.rs");
+include!("coordinator_investigator_allocation.rs");
 
 // Exact policy used both for issuance and original paid-issuance inspection.
 #[allow(clippy::too_many_arguments)]
@@ -126,26 +167,60 @@ fn native_coordinator_dispatch_policy_on(
             )
             .map_err(|e| e.to_string())?;
     }
-    let mode=crate::agent_runtime::web_mode::root::read(db,&actor.root_run_id)?.ok_or("web_mode_root_missing")?;
-    let rule=NativeCoordinatorModelCostRule::from_original(&mode.bootstrap_dispatch().unwrap_or(JsonValue::Null))?;
+    let mode = crate::agent_runtime::web_mode::root::read(db, &actor.root_run_id)?
+        .ok_or("web_mode_root_missing")?;
+    let rule = NativeCoordinatorModelCostRule::from_original(
+        &mode.bootstrap_dispatch().unwrap_or(JsonValue::Null),
+    )?;
     let mut rust_policy = match rule {
-        NativeCoordinatorModelCostRule::OriginalConservative => native_coordinator_rust_dispatch_policy(
-            context, frame, decision, role, tokens, requests, limits)?,
-        NativeCoordinatorModelCostRule::NativeUnlimitedNoScarcity => native_coordinator_rust_dispatch_policy_with_rule(
-            context, frame, decision, role, tokens, requests, limits, rule)?,
+        NativeCoordinatorModelCostRule::OriginalConservative => {
+            native_coordinator_rust_dispatch_policy(
+                context, frame, decision, role, tokens, requests, limits,
+            )?
+        }
+        NativeCoordinatorModelCostRule::NativeUnlimitedNoScarcity => {
+            native_coordinator_rust_dispatch_policy_with_rule(
+                context, frame, decision, role, tokens, requests, limits, rule,
+            )?
+        }
     };
     if rule == NativeCoordinatorModelCostRule::NativeUnlimitedNoScarcity {
-        rust_policy["modelCostRule"]=json!(NATIVE_UNLIMITED_MODEL_COST_RULE);
-        rust_policy["costBasis"]["modelNormalization"]=json!("share_of_finite_original_model_ceiling");
-        rust_policy["costBasis"]["modelFeesTrackedIndependently"]=json!(true);
-        rust_policy["costBasis"]["unboundedModelDimensions"]=json!(["model_input_tokens","model_requests"].into_iter().zip(limits).filter_map(|(name,limit)|limit.is_none().then_some(name)).collect::<Vec<_>>());
+        rust_policy["modelCostRule"] = json!(NATIVE_UNLIMITED_MODEL_COST_RULE);
+        rust_policy["costBasis"]["modelNormalization"] =
+            json!("share_of_finite_original_model_ceiling");
+        rust_policy["costBasis"]["modelFeesTrackedIndependently"] = json!(true);
+        rust_policy["costBasis"]["unboundedModelDimensions"] =
+            json!(["model_input_tokens", "model_requests"]
+                .into_iter()
+                .zip(limits)
+                .filter_map(|(name, limit)| limit.is_none().then_some(name))
+                .collect::<Vec<_>>());
     }
     if dynamic {
-        rust_policy["allocationRule"]=json!("current_balance_after_reviewer_floor_and_ordered_proposals");
-        rust_policy["reviewerFloor"]=json!({"modelTokens":15_000,"modelRequests":1});
-        let (retained_tokens,retained_requests)=native_coordinator_executor_retained_floor(db,actor)?;
-        if retained_tokens>15_000 || retained_requests>1 {
-            rust_policy["rootSupervisionFloor"]=json!({"modelTokens":retained_tokens-15_000,"modelRequests":retained_requests-1});
+        let bootstrap = mode.bootstrap_dispatch().unwrap_or(JsonValue::Null);
+        if crate::agent_runtime::multi_agent::budget::supervision_capacity::enabled(&bootstrap)
+            && role == crate::agent_runtime::contract::AgentRole::WebExecutor
+        {
+            rust_policy["supervisionRequestAllocationRule"] = bootstrap["supervisionRequestAllocationRule"].clone();
+        }
+        if role == crate::agent_runtime::contract::AgentRole::DeepInvestigator {
+            rust_policy["allocationRule"] = json!("fixed_proposal_after_reviewer_and_root_floor");
+            rust_policy["proposalGrant"] = json!({
+                "modelTokens": crate::agent_runtime::multi_agent::directive::proposals::PROPOSAL_TOKENS,
+                "modelRequests": 1
+            });
+        } else {
+            rust_policy["allocationRule"] =
+                json!("current_balance_after_reviewer_floor_and_ordered_proposals");
+        }
+        rust_policy["reviewerFloor"] = json!({"modelTokens": 15_000, "modelRequests": 1});
+        let (retained_tokens, retained_requests) =
+            native_coordinator_executor_retained_floor(db, actor)?;
+        if retained_tokens > 15_000 || retained_requests > 1 {
+            rust_policy["rootSupervisionFloor"] = json!({
+                "modelTokens": retained_tokens - 15_000,
+                "modelRequests": retained_requests - 1
+            });
         }
     }
     Ok(rust_policy)

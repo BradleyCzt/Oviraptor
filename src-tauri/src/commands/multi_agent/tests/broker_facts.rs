@@ -87,13 +87,20 @@ fn brokered_http_record_becomes_one_attributable_review_fact_only_while_executor
     let fake_hash_view = serde_json::json!({"requestId":"req-0001","status":200,"bodySha256":"a".repeat(64)});
     assert_eq!(agent_record_http_observation(&context, "replay_http", &artifact, &fake_hash_view, "req-0001").unwrap_err(),
         "http_observation_payload_mismatch");
+    // Capability/fencing loss is decided by the one Broker authority gate that
+    // also guards dispatch and the send boundary, so the producer reports the
+    // canonical authority code (an execution-authorization stop), never an
+    // evidence-write failure. Observation-only conditions keep their own code.
+    let authority_stop = |code: &str| agent_tool_terminal_outcome(&agent_http_claim_error(code.to_string()))
+        .map(|outcome| outcome.terminal_code().to_string());
     assert_eq!(agent_record_http_observation(&context, "browser_action", &artifact, &view, "req-0001").unwrap_err(),
-        "http_observation_assignment_or_lease_denied");
+        "tool_capability_or_fencing_denied");
+    assert_eq!(authority_stop("tool_capability_or_fencing_denied"), Some(terminal_code::EXECUTION_AUTHORIZATION_DENIED.to_string()));
     connection.execute("UPDATE agent_assignments SET evidence_revision=0 WHERE id=?1", [&child.assignment_id]).unwrap();
     assert_eq!(record_fact().unwrap_err(), "http_observation_assignment_or_lease_denied");
     connection.execute("UPDATE agent_assignments SET evidence_revision=2 WHERE id=?1", [&child.assignment_id]).unwrap();
     connection.execute("UPDATE agent_capability_leases SET revoked_at=datetime('now','localtime') WHERE child_run_id=?1", [&child.run_id]).unwrap();
-    assert_eq!(record_fact().unwrap_err(), "http_observation_assignment_or_lease_denied");
+    assert_eq!(record_fact().unwrap_err(), "tool_capability_or_fencing_denied");
     let count: i64 = connection.query_row("SELECT COUNT(*) FROM agent_evidence_nodes WHERE kind='request_record'", [], |row| row.get(0)).unwrap();
     assert_eq!(count, 1);
     let binary_body = b"safe\xffbody";

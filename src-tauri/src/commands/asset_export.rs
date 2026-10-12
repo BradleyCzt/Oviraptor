@@ -1,3 +1,25 @@
+// Keep the user project name readable while preventing path traversal and
+// platform-reserved filename characters. Time includes milliseconds.
+fn asset_export_filename(project: &str, timestamp: &str) -> String {
+    let safe: String = project
+        .chars()
+        .take(48)
+        .map(|c| {
+            if c.is_control() || matches!(c, '/' | '\\' | ':' | '*' | '?' | '"' | '<' | '>' | '|') {
+                '_'
+            } else {
+                c
+            }
+        })
+        .collect();
+    let safe = safe.trim_matches([' ', '.']);
+    format!(
+        "{}_{}.csv",
+        if safe.is_empty() { "项目" } else { safe },
+        timestamp
+    )
+}
+
 fn export_value(asset: &Asset, field: &str) -> String {
     match field {
         "projectName" => asset.project_name.clone(),
@@ -40,11 +62,33 @@ fn export_value(asset: &Asset, field: &str) -> String {
         }
         .to_string(),
         "deletedAt" => asset.deleted_at.clone().unwrap_or_default(),
-        "sentinelStatus" => asset.sentinel_status.clone(),
+        "sentinelStatus" => if asset.sentinel_scan_count > 0 || asset.sentinel_sent_at.is_some() {
+            "是"
+        } else {
+            "否"
+        }
+        .to_string(),
         "sentinelScanCount" => asset.sentinel_scan_count.to_string(),
         "sentinelSentAt" => asset.sentinel_sent_at.clone().unwrap_or_default(),
+        "hasLogin" => portal_label(asset.has_login),
+        "hasRegister" => portal_label(asset.has_register),
+        "entrySeen" => if asset.entry_opened_at.as_deref().is_some_and(|value| !value.is_empty()) {
+            "已看".to_string()
+        } else {
+            "未看".to_string()
+        },
+        "entryOpenedAt" => asset.entry_opened_at.clone().unwrap_or_default(),
         _ => String::new(),
     }
+}
+
+fn portal_label(flag: i64) -> String {
+    match flag {
+        1 => "有",
+        0 => "无",
+        _ => "未识别",
+    }
+    .to_string()
 }
 
 #[tauri::command]
@@ -88,6 +132,10 @@ pub fn export_assets(
         "sentinelStatus",
         "sentinelScanCount",
         "sentinelSentAt",
+        "hasLogin",
+        "hasRegister",
+        "entrySeen",
+        "entryOpenedAt",
     ];
     if request.fields.is_empty() {
         return Err("请至少选择一个导出字段".into());
@@ -110,8 +158,21 @@ pub fn export_assets(
         .map_err(|error| error.to_string())?;
     let exports_dir = state.export_dir.clone();
     fs::create_dir_all(&exports_dir).map_err(|error| error.to_string())?;
-    let path: PathBuf = exports_dir.join(format!("assets-{}.csv", Uuid::new_v4()));
-    let mut file = File::create(&path).map_err(|error| error.to_string())?;
+    let project_name: String = match request.query.project_id {
+        Some(id) => connection
+            .query_row("SELECT name FROM projects WHERE id=?1", [id], |row| {
+                row.get(0)
+            })
+            .map_err(|error| format!("无法读取导出项目名称：{error}"))?,
+        None => "全部项目".into(),
+    };
+    let timestamp = chrono::Local::now().format("%Y%m%d-%H%M%S-%3f").to_string();
+    let path: PathBuf = exports_dir.join(asset_export_filename(&project_name, &timestamp));
+    let mut file = std::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(&path)
+        .map_err(|error| error.to_string())?;
     file.write_all(&[0xEF, 0xBB, 0xBF])
         .map_err(|error| error.to_string())?;
     let mut writer = csv::Writer::from_writer(file);
@@ -148,9 +209,13 @@ pub fn export_assets(
         ("lastRunId", "最近任务 ID"),
         ("isDeleted", "回收状态"),
         ("deletedAt", "移入回收站时间"),
-        ("sentinelStatus", "安全检测状态"),
+        ("sentinelStatus", "是否发送扫描"),
         ("sentinelScanCount", "安全检测次数"),
         ("sentinelSentAt", "最近送扫时间"),
+        ("hasLogin", "登录口"),
+        ("hasRegister", "注册口"),
+        ("entrySeen", "是否看过"),
+        ("entryOpenedAt", "访问入口打开时间"),
     ]);
     let headers = request
         .fields
@@ -188,4 +253,40 @@ pub fn export_assets(
         path: path.to_string_lossy().to_string(),
         rows,
     })
+}
+
+#[cfg(test)]
+mod asset_export_filename_tests {
+    use super::asset_export_filename;
+    #[test]
+    fn asset_export_filename_keeps_project_and_time() {
+        assert_eq!(
+            asset_export_filename("香港移动", "20261008-123456-789"),
+            "香港移动_20261008-123456-789.csv"
+        );
+        assert_eq!(
+            asset_export_filename("全部项目", "20261008-123456-789"),
+            "全部项目_20261008-123456-789.csv"
+        );
+    }
+    #[test]
+    fn asset_export_filename_cannot_escape_export_directory() {
+        let name = asset_export_filename(" ../a\\b:*?\n ", "20261008-123456-789");
+        assert!(
+            !name.contains('/')
+                && !name.contains('\\')
+                && !name.contains(':')
+                && !name.contains('\n')
+        );
+        assert!(!name.starts_with('.'));
+        assert_eq!(
+            asset_export_filename(" . ", "20261008-123456-789"),
+            "项目_20261008-123456-789.csv"
+        );
+    }
+    #[test]
+    fn asset_export_filename_bounds_unicode_filename_bytes() {
+        let name = asset_export_filename(&"🦖".repeat(100), "20261008-123456-789");
+        assert!(name.len() < 255);
+    }
 }

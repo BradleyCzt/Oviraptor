@@ -103,6 +103,8 @@ fn a_legacy_database_is_upgraded_in_place_and_stays_readable() {
         // This post-Stage1 trigger references the tables/columns removed below;
         // a genuine pre-Stage1 database did not contain it either.
         connection.execute_batch("DROP TRIGGER IF EXISTS agent_directive_proposal_state_guard_v2").unwrap();
+        // Same for the open paid Root retention guard (it reads root_run_id).
+        connection.execute_batch("DROP TRIGGER IF EXISTS root_paid_open_run_retained").unwrap();
         for table in [
             "agent_review_decisions",
             "agent_evidence_edges",
@@ -154,6 +156,14 @@ fn a_legacy_database_is_upgraded_in_place_and_stays_readable() {
         )
         .unwrap();
     assert_eq!(guards, 2, "端点隔离触发器必须重建");
+    let retention: i64 = connection
+        .query_row(
+            "SELECT COUNT(*) FROM sqlite_master WHERE type='trigger' AND name='root_paid_open_run_retained'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(retention, 1, "升级后必须恢复开放付费 Root 保留守卫");
     drop(connection);
     crate::db::initialize(&root).unwrap();
     let connection = crate::db::open(&path).unwrap();

@@ -1,4 +1,7 @@
 fn changed_fact_reviewer_response(request: &str, investigate: bool) -> String {
+    if specialist_original_is_web_sdk(request) {
+        return proposal_model_response("actual bounded original Web exit; no target tool");
+    }
     if request.contains("You are the Root Coordinator") {
         let mut wire: JsonValue =
             serde_json::from_str(&changed_fact_response(request, true)).unwrap();
@@ -48,9 +51,11 @@ fn coordinator_actual_independent_reviewer_feedback_controls_bounded_gap_dispatc
                 changed_fact_reviewer_response(&request, investigate),
             )
         }));
-        let mut f = root_tick_fixture(
+        let mut f = root_tick_fixture_from_web_mode_turns(
             "changed-fact-reviewer",
             &format!("http://127.0.0.1:{port}/v1"),
+            true, (60_000, 20), None,
+            web_mode_fixture("multi", "https://authorized.example.test"), Some(1),
         );
         drop(f.parent.take());
         let mut session = multi_agent_prepare(&mut f.context).unwrap();
@@ -65,14 +70,23 @@ fn coordinator_actual_independent_reviewer_feedback_controls_bounded_gap_dispatc
         )
         .unwrap();
         let outcome = AgentTargetOutcome::incomplete("no verified target control");
-        multi_agent_finish_execution(&f.context, &mut session, &outcome).unwrap();
+        let original_web = run_native_agent(&f.context);
+        assert!(matches!(original_web, AgentTargetOutcome::BoundedCompleted(_) | AgentTargetOutcome::Incomplete(_)), "{original_web:?}");
+        multi_agent_finish_execution(&f.context, &mut session, &original_web).unwrap();
+        let usage_db = db::open(&f.context.db_path).unwrap();
+        let usage: (i64, i64, i64) = usage_db.query_row(
+            "SELECT used_tokens,used_cached_tokens,used_requests FROM agent_runs WHERE id=?1",
+            [&session.executor.run_id], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+        ).unwrap();
+        assert_eq!(usage, (20, 0, 1));
+        assert_eq!(seen.lock().unwrap().iter().filter(|wire| specialist_original_is_web_sdk(wire)).count(), 1);
         let reviewed = multi_agent_review(&f.context, &mut session, outcome);
-        assert_eq!(seen.lock().unwrap().len(),if investigate {7}else {5},
-            "three Root SDK without proposal; four when paid Investigator returns; Mapper and independent Reviewer: {reviewed:?}");
+        assert_eq!(seen.lock().unwrap().len(),if investigate {9}else {7},
+            "four Root SDK without proposal; five when paid Investigator returns; Mapper, Web and independent Reviewer: {reviewed:?}");
         let db = db::open(&f.context.db_path).unwrap();
         assert_eq!(
             root_tick_count(&db, &f.actor.root_run_id, "publication"),
-            if investigate { 4 } else { 3 }
+            if investigate { 5 } else { 4 }
         );
         assert_eq!(
             crate::agent_runtime::multi_agent::budget::balance(
@@ -83,7 +97,7 @@ fn coordinator_actual_independent_reviewer_feedback_controls_bounded_gap_dispatc
             )
             .unwrap()
             .consumed,
-            if investigate { 4 } else { 3 }
+            if investigate { 5 } else { 4 }
         );
         let row: (String, i64, i64) = db
             .query_row(
@@ -111,7 +125,7 @@ fn coordinator_actual_independent_reviewer_feedback_controls_bounded_gap_dispatc
             .unwrap();
         assert_eq!(
             seen.lock().unwrap().len(),
-            if investigate { 7 } else { 5 },
+            if investigate { 9 } else { 7 },
             "unchanged Reviewer fact cannot negotiate/execute again"
         );
         if investigate {

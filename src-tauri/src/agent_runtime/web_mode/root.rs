@@ -5,12 +5,20 @@ use rusqlite::{params, Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
+mod birth_seal;
+pub(crate) use birth_seal::verify_birth;
 mod bootstrap;
 use bootstrap::BootstrapDispatch;
 mod local;
 use local::LocalDeliberation;
 mod observation;
 use observation::LiveBudgetObservation;
+mod new_evidence;
+use new_evidence::NewEvidenceSupervision;
+mod lease_expiry;
+use lease_expiry::LeaseExpirySupervision;
+mod protection;
+use protection::ProtectionSupervision;
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -25,10 +33,19 @@ pub(crate) struct NewRootModeDeclaration {
     bootstrap_dispatch: Option<BootstrapDispatch>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     live_budget_observation: Option<LiveBudgetObservation>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    new_evidence_supervision: Option<NewEvidenceSupervision>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    lease_expiry_supervision: Option<LeaseExpirySupervision>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    protection_supervision: Option<ProtectionSupervision>,
     #[serde(skip)]
     authorization: Option<VerifiedMode>,
 }
 impl NewRootModeDeclaration {
+    pub(super) fn verify_fresh_birth(&self, db: &Connection, root: &str) -> Result<(), String> {
+        verify_birth(db, root, self.authorization.as_ref().ok_or("web_mode_private_creation_missing")?)
+    }
     pub(crate) fn from_verified(
         proof: &VerifiedMode,
         target: &str,
@@ -42,6 +59,9 @@ impl NewRootModeDeclaration {
             local_deliberation: None,
             bootstrap_dispatch: None,
             live_budget_observation: None,
+            new_evidence_supervision: None,
+            lease_expiry_supervision: None,
+            protection_supervision: None,
             authorization: Some(proof.clone()),
         };
         value.validate_scope(
@@ -62,7 +82,9 @@ impl NewRootModeDeclaration {
         self.fact.validate()?;
         if let Some(local) = &self.local_deliberation {
             local.validate()?;
-            if self.mode() != WebMode::Multi { return Err("root_local_deliberation_mode_invalid".into()); }
+            if self.mode() != WebMode::Multi {
+                return Err("root_local_deliberation_mode_invalid".into());
+            }
         }
         if let Some(bootstrap) = &self.bootstrap_dispatch {
             bootstrap.validate()?;
@@ -70,9 +92,29 @@ impl NewRootModeDeclaration {
                 return Err("root_bootstrap_dispatch_mode_invalid".into());
             }
         }
-        if let Some(observation)=&self.live_budget_observation {
+        if let Some(observation) = &self.live_budget_observation {
             observation.validate()?;
-            if self.mode()!=WebMode::Multi {return Err("root_budget_observation_mode_invalid".into());}
+            if self.mode() != WebMode::Multi {
+                return Err("root_budget_observation_mode_invalid".into());
+            }
+        }
+        if let Some(protocol) = &self.new_evidence_supervision {
+            protocol.validate()?;
+            if self.mode() != WebMode::Multi {
+                return Err("root_new_evidence_supervision_mode_invalid".into());
+            }
+        }
+        if let Some(protocol) = &self.lease_expiry_supervision {
+            protocol.validate()?;
+            if self.mode() != WebMode::Multi || self.new_evidence_supervision.is_none() {
+                return Err("root_lease_expiry_supervision_mode_invalid".into());
+            }
+        }
+        if let Some(protocol) = &self.protection_supervision {
+            protocol.validate()?;
+            if self.mode() != WebMode::Multi || self.new_evidence_supervision.is_none() {
+                return Err("root_protection_supervision_mode_invalid".into());
+            }
         }
         if uuid::Uuid::parse_str(&self.mode_id).is_err()
             || self.fact.scan_id != scan
@@ -88,7 +130,9 @@ impl NewRootModeDeclaration {
         Ok(())
     }
     pub(crate) fn with_local_deliberation(mut self) -> Result<Self, String> {
-        if self.authorization.is_none() { return Err("web_mode_private_creation_missing".into()); }
+        if self.authorization.is_none() {
+            return Err("web_mode_private_creation_missing".into());
+        }
         if self.mode() == WebMode::Multi {
             self.local_deliberation = Some(LocalDeliberation::creation_contract());
             self.bootstrap_dispatch = Some(BootstrapDispatch::creation_contract());
@@ -96,14 +140,167 @@ impl NewRootModeDeclaration {
         }
         Ok(self)
     }
+    pub(crate) fn with_new_evidence_supervision(mut self) -> Result<Self, String> {
+        if self.authorization.is_none() {
+            return Err("web_mode_private_creation_missing".into());
+        }
+        if self.mode() == WebMode::Multi {
+            self.new_evidence_supervision = Some(NewEvidenceSupervision::creation_contract());
+        }
+        Ok(self)
+    }
+    // Explicit legacy fixture birth before INSERT. No database writer or
+    // existing-root reader calls this; the original v5 byte contract is kept.
+    #[cfg(test)]
+    pub(crate) fn with_original_v5_bootstrap_for_test(mut self) -> Result<Self, String> {
+        if self.authorization.is_none() || self.mode() != WebMode::Multi || self.local_deliberation.is_none() {
+            return Err("web_mode_private_creation_missing".into());
+        }
+        self.bootstrap_dispatch = Some(BootstrapDispatch::original_v5_contract());
+        self.bootstrap_dispatch.as_ref().unwrap().validate()?;
+        Ok(self)
+    }
+    // Original v6 regression birth, before INSERT and signing. Existing
+    // receipts are read unchanged and are never downgraded or re-signed.
+    #[cfg(test)]
+    pub(crate) fn with_original_v6_bootstrap_for_test(mut self) -> Result<Self, String> {
+        if self.authorization.is_none() || self.mode() != WebMode::Multi || self.local_deliberation.is_none() {
+            return Err("web_mode_private_creation_missing".into());
+        }
+        self.bootstrap_dispatch = Some(BootstrapDispatch::original_v6_contract());
+        self.bootstrap_dispatch.as_ref().unwrap().validate()?;
+        Ok(self)
+    }
+    #[cfg(test)]
+    pub(crate) fn with_original_v8_http_bootstrap_for_test(mut self) -> Result<Self, String> {
+        if self.authorization.is_none() || self.mode() != WebMode::Multi || self.local_deliberation.is_none() {
+            return Err("web_mode_private_creation_missing".into());
+        }
+        self.bootstrap_dispatch = Some(BootstrapDispatch::http_creation_contract());
+        self.bootstrap_dispatch.as_ref().unwrap().validate()?;
+        Ok(self)
+    }
+    #[cfg(test)]
+    pub(crate) fn with_original_v7_bootstrap_for_test(mut self) -> Result<Self, String> {
+        if self.authorization.is_none() || self.mode() != WebMode::Multi || self.local_deliberation.is_none() {
+            return Err("web_mode_private_creation_missing".into());
+        }
+        self.bootstrap_dispatch = Some(BootstrapDispatch::original_v7_contract());
+        self.bootstrap_dispatch.as_ref().unwrap().validate()?;
+        Ok(self)
+    }
+    #[cfg(test)]
+    pub(crate) fn with_web_expiry_v9_bootstrap_for_test(mut self) -> Result<Self, String> {
+        if self.authorization.is_none() || self.mode() != WebMode::Multi || self.local_deliberation.is_none() {
+            return Err("web_mode_private_creation_missing".into());
+        }
+        self.bootstrap_dispatch = Some(BootstrapDispatch::web_expiry_creation_contract());
+        self.bootstrap_dispatch.as_ref().unwrap().validate()?;
+        Ok(self)
+    }
+    #[cfg(test)]
+    pub(crate) fn with_authorization_v11_bootstrap_for_test(mut self) -> Result<Self, String> {
+        if self.authorization.is_none() || self.mode() != WebMode::Multi || self.local_deliberation.is_none() {
+            return Err("web_mode_private_creation_missing".into());
+        }
+        self.bootstrap_dispatch = Some(BootstrapDispatch::authorization_output_creation_contract());
+        self.bootstrap_dispatch.as_ref().unwrap().validate()?;
+        Ok(self)
+    }
+    #[cfg(test)]
+    pub(crate) fn with_mapper_v15_bootstrap_for_test(mut self) -> Result<Self, String> {
+        if self.authorization.is_none() || self.mode() != WebMode::Multi || self.local_deliberation.is_none() {
+            return Err("web_mode_private_creation_missing".into());
+        }
+        self.bootstrap_dispatch = Some(BootstrapDispatch::mapper_loop_creation_contract());
+        self.bootstrap_dispatch.as_ref().unwrap().validate()?;
+        Ok(self)
+    }
+    #[cfg(test)]
+    pub(crate) fn with_business_logic_v14_bootstrap_for_test(mut self) -> Result<Self, String> {
+        if self.authorization.is_none() || self.mode() != WebMode::Multi || self.local_deliberation.is_none() {
+            return Err("web_mode_private_creation_missing".into());
+        }
+        self.bootstrap_dispatch = Some(BootstrapDispatch::business_logic_dispatch_creation_contract());
+        self.bootstrap_dispatch.as_ref().unwrap().validate()?;
+        Ok(self)
+    }
+    #[cfg(test)]
+    pub(crate) fn with_business_logic_v13_bootstrap_for_test(mut self) -> Result<Self, String> {
+        if self.authorization.is_none() || self.mode() != WebMode::Multi || self.local_deliberation.is_none() {
+            return Err("web_mode_private_creation_missing".into());
+        }
+        self.bootstrap_dispatch = Some(BootstrapDispatch::business_logic_output_creation_contract());
+        self.bootstrap_dispatch.as_ref().unwrap().validate()?;
+        Ok(self)
+    }
+    #[cfg(test)]
+    pub(crate) fn with_external_surface_v12_bootstrap_for_test(mut self) -> Result<Self, String> {
+        if self.authorization.is_none() || self.mode() != WebMode::Multi || self.local_deliberation.is_none() {
+            return Err("web_mode_private_creation_missing".into());
+        }
+        self.bootstrap_dispatch = Some(BootstrapDispatch::external_surface_output_creation_contract());
+        self.bootstrap_dispatch.as_ref().unwrap().validate()?;
+        Ok(self)
+    }
+    #[cfg(test)]
+    pub(crate) fn with_capability_v10_bootstrap_for_test(mut self) -> Result<Self, String> {
+        if self.authorization.is_none() || self.mode() != WebMode::Multi || self.local_deliberation.is_none() {
+            return Err("web_mode_private_creation_missing".into());
+        }
+        self.bootstrap_dispatch = Some(BootstrapDispatch::capability_creation_contract());
+        self.bootstrap_dispatch.as_ref().unwrap().validate()?;
+        Ok(self)
+    }
+    pub(crate) fn with_lease_expiry_supervision(mut self) -> Result<Self, String> {
+        if self.authorization.is_none() {
+            return Err("web_mode_private_creation_missing".into());
+        }
+        if self.mode() == WebMode::Multi {
+            if self.new_evidence_supervision.is_none() {
+                return Err("root_lease_expiry_supervision_mode_invalid".into());
+            }
+            self.lease_expiry_supervision = Some(LeaseExpirySupervision::creation_contract());
+        }
+        Ok(self)
+    }
+    pub(crate) fn with_protection_supervision(mut self) -> Result<Self, String> {
+        if self.authorization.is_none() {
+            return Err("web_mode_private_creation_missing".into());
+        }
+        if self.mode() == WebMode::Multi {
+            if self.new_evidence_supervision.is_none() {
+                return Err("root_protection_supervision_mode_invalid".into());
+            }
+            self.protection_supervision = Some(ProtectionSupervision::creation_contract());
+        }
+        Ok(self)
+    }
+    pub(crate) fn protection_supervision(&self) -> Option<Value> {
+        self.protection_supervision.as_ref().map(ProtectionSupervision::as_json)
+    }
+    pub(crate) fn lease_expiry_supervision(&self) -> Option<Value> {
+        self.lease_expiry_supervision.as_ref().map(LeaseExpirySupervision::as_json)
+    }
+    pub(crate) fn new_evidence_supervision(&self) -> Option<Value> {
+        self.new_evidence_supervision
+            .as_ref()
+            .map(NewEvidenceSupervision::as_json)
+    }
     pub(crate) fn local_deliberation(&self) -> Option<Value> {
-        self.local_deliberation.as_ref().map(LocalDeliberation::as_json)
+        self.local_deliberation
+            .as_ref()
+            .map(LocalDeliberation::as_json)
     }
     pub(crate) fn bootstrap_dispatch(&self) -> Option<Value> {
-        self.bootstrap_dispatch.as_ref().map(BootstrapDispatch::as_json)
+        self.bootstrap_dispatch
+            .as_ref()
+            .map(BootstrapDispatch::as_json)
     }
-    pub(crate) fn live_budget_observation(&self)->Option<Value> {
-        self.live_budget_observation.as_ref().map(LiveBudgetObservation::as_json)
+    pub(crate) fn live_budget_observation(&self) -> Option<Value> {
+        self.live_budget_observation
+            .as_ref()
+            .map(LiveBudgetObservation::as_json)
     }
     pub(crate) fn mode(&self) -> WebMode {
         self.fact.mode
@@ -119,6 +316,9 @@ impl NewRootModeDeclaration {
             && self.local_deliberation == other.local_deliberation
             && self.bootstrap_dispatch == other.bootstrap_dispatch
             && self.live_budget_observation == other.live_budget_observation
+            && self.new_evidence_supervision == other.new_evidence_supervision
+            && self.lease_expiry_supervision == other.lease_expiry_supervision
+            && self.protection_supervision == other.protection_supervision
     }
 }
 
@@ -165,6 +365,7 @@ pub(crate) fn freeze_new(
         .map_err(|e| e.to_string())?;
     let n=db.execute("INSERT INTO agent_root_mode_definitions(root_run_id,mode_id,definition_json,native_plan_text_hash) VALUES(?1,?2,?3,?4)",
         params![root,declaration.mode_id,serde_json::to_string(declaration).map_err(|e|e.to_string())?,store::stable_hash(&text)]).map_err(|e|e.to_string())?;
+    birth_seal::issue(fresh, declaration)?;
     if n != 1
         || read(db, root)?
             .as_ref()

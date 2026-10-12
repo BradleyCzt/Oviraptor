@@ -38,7 +38,8 @@ fn start_inner(
     connection: &Connection, lease: &CoordinatorLease, child: &ScheduledChild,
     request: &Value, authorize: impl Fn(&Connection) -> Result<(), String>, transport: bool,
 ) -> Result<(Start, Option<crate::agent_runtime::execution_owner::NativeInvocationOwner>), String> {
-    let request_value = redact_json(request);
+    let plaintext = super::super::homogeneous::material_policy::for_root(connection, &lease.root_run_id)?;
+    let request_value = if plaintext { request.clone() } else { redact_json(request) };
     let request = request_value.to_string();
     if request.len() > 6_000_000 {
         return Err("specialist_request_too_large".into());
@@ -53,6 +54,9 @@ fn start_inner(
     binding(&tx, lease, child)?;
     require_executable_coordinator(&tx, lease)?;
     authorize(&tx)?;
+    if plaintext != super::super::homogeneous::material_policy::for_root(&tx, &lease.root_run_id)? {
+        return Err("homogeneous_material_policy_changed".into());
+    }
     if source::is_source_role(child.role) {
         source::validate_request(&tx, lease, child, &request_value)?;
     }
@@ -99,6 +103,9 @@ fn start_inner(
         return Err("specialist_dispatch_persist_missing".into());
     }
     authorize(&tx)?;
+    if plaintext != super::super::homogeneous::material_policy::for_root(&tx, &lease.root_run_id)? {
+        return Err("homogeneous_material_policy_changed".into());
+    }
     attempts::require_live_for_run(&tx, &child.run_id)?;
     binding(&tx, lease, child)?;
     require_executable_coordinator(&tx, lease)?;

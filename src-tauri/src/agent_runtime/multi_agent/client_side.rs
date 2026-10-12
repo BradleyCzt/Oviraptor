@@ -166,6 +166,10 @@ pub(crate) fn validate_assessment(text: &str, task: &Task) -> Result<(), String>
 }
 
 // Caller holds the actual scheduling IMMEDIATE lock, before and after reserve.
+/// EvidenceReviewer retained capacity shared by Mapper/Executor/proposal/ordered/surface gates.
+pub(crate) const REVIEWER_FLOOR_TOKENS: i64 = 15_000;
+pub(crate) const REVIEWER_FLOOR_REQUESTS: i64 = 1;
+
 pub(crate) fn require_reviewer_floor(
     db: &Connection,
     lease: &CoordinatorLease,
@@ -187,11 +191,12 @@ pub(crate) fn require_reviewer_floor(
         Some(row) => row,
         None => first_child_capacity(db, lease, new_tokens, new_requests)?,
     };
+    // Same EvidenceReviewer floor as Mapper/Executor retained capacity.
     let tf = new_tokens
-        .checked_add(8000)
+        .checked_add(REVIEWER_FLOOR_TOKENS)
         .ok_or("client_side_budget_invalid")?;
     let rf = new_requests
-        .checked_add(1)
+        .checked_add(REVIEWER_FLOOR_REQUESTS)
         .ok_or("client_side_budget_invalid")?;
     if (tokens > 0
         && !tokens
@@ -245,7 +250,7 @@ fn first_child_capacity(
     }
     let history: bool = db.query_row(
         "SELECT EXISTS(SELECT 1 FROM agent_budget_ledger WHERE root_run_id=?1)
-        OR EXISTS(SELECT 1 FROM agent_assignments WHERE coordinator_run_id=?1)
+        OR EXISTS(SELECT 1 FROM agent_assignments WHERE coordinator_run_id=?1 AND scheduling_model='legacy_role_pipeline')
         OR EXISTS(SELECT 1 FROM agent_budget_entries WHERE root_run_id=?1)
         OR EXISTS(SELECT 1 FROM agent_root_model_journal WHERE root_run_id=?1)
         OR EXISTS(SELECT 1 FROM agent_specialist_calls WHERE root_run_id=?1)

@@ -9,11 +9,12 @@ struct NativeCoordinatorFrame {
 }
 impl NativeCoordinatorFrame {
     fn closed_rows(
-        tx: &rusqlite::Transaction<'_>,
+        tx: &rusqlite::Connection,
         actor: &crate::agent_runtime::multi_agent::lease::CoordinatorLease,
         child: &crate::agent_runtime::multi_agent::scheduler::ScheduledChild,
     ) -> Result<Vec<NativeCoordinatorFrozenRows>, String> {
         use crate::agent_runtime::multi_agent::attempts;
+        if tx.is_autocommit() { return Err("root_frame_snapshot_required".into()); }
         let worker = attempts::current(tx, actor, &child.assignment_id)?;
         let closed: bool=tx.query_row("SELECT EXISTS(SELECT 1 FROM agent_assignments a JOIN agent_runs r ON r.id=a.child_run_id
             WHERE a.id=?1 AND r.id=?2 AND a.coordinator_run_id=?3 AND r.root_run_id=?3 AND r.parent_run_id=?3
@@ -34,7 +35,11 @@ impl NativeCoordinatorFrame {
             return Err("root_frame_worker_not_closed".into());
         }
         let capture = |sql: &str, key: &str| NativeCoordinatorFrozenRows::capture(tx, sql, &[key]);
-        vec![
+        let mapper_loop = child.role == crate::agent_runtime::contract::AgentRole::SpaApiMapper
+            && crate::agent_runtime::web_mode::root::read(tx, &actor.root_run_id)?
+                .and_then(|mode| mode.bootstrap_dispatch())
+                .is_some_and(|contract| contract["schemaVersion"] == 15);
+        let mut rows: Vec<NativeCoordinatorFrozenRows> = vec![
             capture(
                 "SELECT rowid,* FROM agent_assignment_attempts WHERE id=?1",
                 &worker.id,
@@ -45,7 +50,11 @@ impl NativeCoordinatorFrame {
             ),
             capture("SELECT rowid,* FROM agent_runs WHERE id=?1", &child.run_id),
             capture(
-                "SELECT rowid,* FROM agent_specialist_calls WHERE child_run_id=?1",
+                if mapper_loop {
+                    "SELECT rowid,* FROM agent_mapper_loop_journal WHERE child_run_id=?1 ORDER BY round_number,phase"
+                } else {
+                    "SELECT rowid,* FROM agent_specialist_calls WHERE child_run_id=?1"
+                },
                 &child.run_id,
             ),
             NativeCoordinatorFrozenRows::capture_optional(
@@ -60,26 +69,35 @@ impl NativeCoordinatorFrame {
             // Client's dedicated receipt writer publishes no synthetic snapshot.
             // Its exact empty/nonempty snapshot state is still frozen; other
             // roles retain their existing required physical snapshot proof.
-            if child.role == crate::agent_runtime::contract::AgentRole::ClientSide {
+            if child.role == crate::agent_runtime::contract::AgentRole::ClientSide || mapper_loop {
                 NativeCoordinatorFrozenRows::capture_optional(tx,
                     "SELECT rowid,* FROM agent_snapshots WHERE run_id=?1 ORDER BY rowid", &[&child.run_id])
             } else {
                 capture("SELECT rowid,* FROM agent_snapshots WHERE run_id=?1 ORDER BY rowid", &child.run_id)
             },
-            capture(
-                "SELECT rowid,* FROM agent_events WHERE run_id=?1 ORDER BY sequence",
-                &child.run_id,
-            ),
+            if mapper_loop {
+                NativeCoordinatorFrozenRows::capture_optional(tx,
+                    "SELECT rowid,* FROM agent_events WHERE run_id=?1 ORDER BY sequence", &[&child.run_id])
+            } else {
+                capture("SELECT rowid,* FROM agent_events WHERE run_id=?1 ORDER BY sequence", &child.run_id)
+            },
             capture(
                 "SELECT rowid,* FROM agent_messages WHERE assignment_id=?1 ORDER BY rowid",
                 &child.assignment_id,
             ),
         ]
         .into_iter()
-        .collect()
+        .collect::<Result<_, String>>()?;
+        if mapper_loop {
+            rows.push(capture("SELECT rowid,* FROM agent_mapper_loop_final_receipts WHERE child_run_id=?1", &child.run_id)?);
+            rows.push(NativeCoordinatorFrozenRows::capture(tx,
+                "SELECT rowid,* FROM agent_collaboration_events WHERE (entity_type='assignment' AND entity_id=?1) OR (entity_type='agent_run' AND entity_id=?2) ORDER BY sequence",
+                &[&child.assignment_id, &child.run_id])?);
+        }
+        Ok(rows)
     }
     fn mapper(
-        tx: &rusqlite::Transaction<'_>,
+        tx: &rusqlite::Connection,
         actor: &crate::agent_runtime::multi_agent::lease::CoordinatorLease,
         child: &crate::agent_runtime::multi_agent::scheduler::ScheduledChild,
     ) -> Result<Self, String> {
@@ -90,34 +108,58 @@ impl NativeCoordinatorFrame {
         if child.role != AgentRole::SpaApiMapper {
             return Err("root_frame_role_invalid".into());
         }
-        let receipt = specialist::received_for_reconciliation(tx, actor, child)?;
-        if !receipt.rejection.is_empty() {
-            return Err("root_frame_paid_output_rejected".into());
-        }
+        let text = if crate::agent_runtime::web_mode::root::read(tx, &actor.root_run_id)?
+            .and_then(|mode| mode.bootstrap_dispatch())
+            .is_some_and(|contract| contract["schemaVersion"] == 15)
+        {
+            specialist::mapper_loop::final_seal::read_final_original_on(tx, actor, child)?
+                .ok_or("root_frame_mapper_loop_original_final_missing")?;
+            specialist::mapper_loop::verified_original_output_on(tx, actor, child)?.text().to_owned()
+        } else {
+            let receipt = specialist::received_for_local_delivery(tx, actor, child)?;
+            if !receipt.rejection.is_empty() {
+                return Err("root_frame_paid_output_rejected".into());
+            }
+            receipt.text
+        };
         let id:String=tx.query_row("SELECT id FROM agent_messages WHERE root_run_id=?1 AND assignment_id=?2
             AND from_run_id=?3 AND to_run_id=?1 AND kind='evidence_summary' AND evidence_revision=1",
             params![actor.root_run_id,child.assignment_id,child.run_id],|r|r.get(0)).map_err(|_|"root_frame_output_missing")?;
         let message = mailbox::verified_completed_output(tx, actor, &id)?;
-        if message.payload["summary"].as_str() != Some(&receipt.text) {
+        if message.payload["summary"].as_str() != Some(&text) {
             return Err("root_frame_output_receipt_mismatch".into());
+        }
+        let mut semantic = json!({"messageId":id,"role":"spa_api_mapper",
+            "output":native_coordinator_mapper_semantic(&text)?});
+        if crate::agent_runtime::web_mode::root::read(tx, &actor.root_run_id)?
+            .and_then(|mode| mode.bootstrap_dispatch())
+            .is_some_and(|contract| contract["schemaVersion"] == 15)
+        {
+            let original = specialist::mapper_loop::final_seal::read_final_original_on(tx, actor, child)?
+                .ok_or("root_frame_mapper_loop_original_final_missing")?;
+            if original.message_id() != id {
+                return Err("root_frame_mapper_loop_original_message_changed".into());
+            }
+            semantic["mapperLoopFinalReceiptId"] = original.receipt_id().into();
+            semantic["mapperLoopFinalSource"] = original.fact().clone();
         }
         Ok(Self {
             kind: "mapper-output",
-            semantic: json!({"messageId":id,"role":"spa_api_mapper",
-            "output":native_coordinator_mapper_semantic(&receipt.text)?}),
+            semantic,
             rows: Self::closed_rows(tx, actor, child)?,
             review_refs: None,
             review_meta: None,
         })
     }
     fn reviewer(
-        tx: &rusqlite::Transaction<'_>,
+        tx: &rusqlite::Connection,
         context: &AgentRunContext,
         actor: &crate::agent_runtime::multi_agent::lease::CoordinatorLease,
         candidate: &str,
         revision: i64,
         missing: &JsonValue,
     ) -> Result<Self, String> {
+    if tx.is_autocommit() { return Err("gap_original_snapshot_required".into()); }
         use crate::agent_runtime::{
             contract::AgentRole,
             multi_agent::{mailbox, scheduler, specialist},
@@ -140,7 +182,7 @@ impl NativeCoordinatorFrame {
             run_id: run,
             role: AgentRole::EvidenceReviewer,
         };
-        let receipt = specialist::received_for_reconciliation(tx, actor, &child)?;
+        let receipt = specialist::received_for_local_delivery(tx, actor, &child)?;
         let decision = validated_review_decision(&receipt.text)?;
         if !receipt.rejection.is_empty()
             || decision.verdict != "insufficient_evidence"
@@ -178,6 +220,12 @@ impl NativeCoordinatorFrame {
         context: &AgentRunContext,
         actor: &crate::agent_runtime::multi_agent::lease::CoordinatorLease,
     ) -> Result<(), String> {
+        if db.is_autocommit() && self.kind == "mapper-output"
+            && self.semantic.get("mapperLoopFinalReceiptId").is_some()
+        {
+            let snapshot = db.unchecked_transaction().map_err(|error| error.to_string())?;
+            return self.verify(&snapshot, context, actor);
+        }
         if let Some((candidate, revision)) = &self.review_meta {
             verify_review_snapshot(
                 db,
@@ -190,17 +238,68 @@ impl NativeCoordinatorFrame {
         for row in &self.rows {
             row.verify(db)?;
         }
+        if self.kind == "mapper-output" && self.semantic.get("mapperLoopFinalReceiptId").is_some() {
+            let message = self.semantic["messageId"].as_str().ok_or("root_frame_mapper_loop_message_missing")?;
+            let (assignment_id, run_id): (String, String) = db.query_row(
+                "SELECT assignment_id,from_run_id FROM agent_messages WHERE id=?1 AND root_run_id=?2 AND to_run_id=?2 AND kind='evidence_summary'",
+                params![message, actor.root_run_id], |row| Ok((row.get(0)?, row.get(1)?)),
+            ).map_err(|_| "root_frame_mapper_loop_original_message_missing")?;
+            let child = crate::agent_runtime::multi_agent::scheduler::ScheduledChild {
+                assignment_id, run_id, role: crate::agent_runtime::contract::AgentRole::SpaApiMapper,
+            };
+            let original = Self::mapper(db, actor, &child)?;
+            if self.fact() != original.fact() {
+                return Err("root_frame_mapper_loop_original_source_changed".into());
+            }
+        }
         if self.kind == "human-directive" {
             self.verify_human_source(db, actor)?;
         }
         if self.kind == "budget-allocation" {
             self.verify_budget_source(db, actor)?;
         }
+        if self.kind == "http-budget-consumption" {
+            self.verify_http_budget_consumption_source(db, context, actor)?;
+        }
+        if self.kind == "budget-consumption" {
+            self.verify_budget_consumption_source(db, context, actor)?;
+        }
+        if self.kind == "authorization-output" {
+            self.verify_authorization_output_source(db, context, actor)?;
+        }
+        if self.kind == "business-logic-output" {
+            self.verify_business_logic_output_source(db, context, actor)?;
+        }
+        if self.kind == "business-logic-input" {
+            self.verify_business_logic_dispatch_source(db, context, actor)?;
+        }
+        if self.kind == "external-surface-output" {
+            self.verify_external_surface_output_source(db, context, actor)?;
+        }
+        if self.kind == "capability-changed" {
+            self.verify_capability_transition_source(db, context, actor)?;
+        }
         if self.kind == "identity-session-output" {
             self.verify_identity_source(db, actor)?;
         }
         if self.kind == "client-side-output" {
             self.verify_client_source(db, context, actor)?;
+        }
+        if self.kind == "lease-expired" {
+            if self.semantic["role"] == "web_executor" {
+                self.verify_web_expiry_source(db, context, actor)?;
+            } else {
+                self.verify_lease_closed_source(db, context, actor)?;
+            }
+        }
+        if self.kind == "new-evidence" {
+            self.verify_new_evidence_source(db, context, actor)?;
+        }
+        if self.kind == "protection-changed" {
+            self.verify_protection_source(db, context, actor)?;
+        }
+        if self.kind == "input-parser-output" {
+            self.verify_input_parser_trigger_source(db, context, actor)?;
         }
         if let Some(refs) = &self.review_refs {
             if review_fact_refs(db, &actor.root_run_id, &context.target_dir)? != *refs {
@@ -210,14 +309,38 @@ impl NativeCoordinatorFrame {
         Ok(())
     }
     fn step(&self) -> &'static str {
-        match self.kind {
-            "human-directive" => "assess:human_directive",
-            "budget-allocation" => "assess:budget_allocation",
-            "mapper-output" => "dispatch:web_executor",
-            "investigator-proposal" => "assess:gap_proposal",
-            "client-side-output" => "assess:client_side_configuration",
-            "identity-session-output" => "assess:identity_session_metadata",
-            _ => "dispatch:deep_investigator",
-        }
+        native_coordinator_frame_step_for_kind(self.kind)
+    }
+}
+
+/// U58: single table for wired frame → permitted step (shared with inventory tests).
+fn native_coordinator_frame_step_for_kind(kind: &str) -> &'static str {
+    // Unknown kinds must not silently advertise dispatch:deep_investigator.
+    // reviewer-decision keeps that step on purpose (independent investigator path).
+    // U61: reserved role-output kinds map to their future Root dispatch steps but
+    // stay off the wired supervision inventory until producers exist.
+    match kind {
+        "human-directive" => "assess:human_directive",
+        "new-evidence" => "assess:new_evidence",
+        "lease-expired" => "assess:lease_expired",
+        "protection-changed" => "assess:protection_changed",
+        "budget-allocation" => "assess:budget_allocation",
+        "budget-consumption" => "assess:budget_consumption",
+        "http-budget-consumption" => "assess:http_budget_consumption",
+        "capability-changed" => "assess:capability_changed",
+        "mapper-output" => "dispatch:web_executor",
+        "investigator-proposal" => "assess:gap_proposal",
+        "client-side-output" => "assess:client_side_configuration",
+        "identity-session-output" => "assess:identity_session_metadata",
+        "reviewer-decision" => "dispatch:deep_investigator",
+        "input-parser-output" => "dispatch:input_parser",
+        "authorization-output" => "assess:authorization_output",
+        "external-surface-output" => "assess:external_surface_output",
+        "business-logic-output" => "assess:business_logic_output",
+        "business-logic-input" => "dispatch:business_logic",
+        // DESIGN §5.4：同质 Worker 主管决策帧。只新增映射行，不改旧 kind 的逻辑，
+        // 也不把新 kind 塞进旧 wired 清单（那里有 18 条的存量盘点断言）。
+        "homogeneous-decision" => "assess:homogeneous_decision",
+        _ => "assess:unmapped_frame_kind",
     }
 }

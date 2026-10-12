@@ -9,7 +9,9 @@ use serde_json::{json, Value};
 use std::time::Duration;
 
 mod receipt;
+pub(crate) mod cache_provenance;
 pub(crate) mod single_lifetime;
+pub(crate) mod single_history;
 pub(crate) mod tick;
 
 #[derive(Clone)]
@@ -20,6 +22,11 @@ pub(crate) struct RootModelCall {
     request: String,
     tokens: i64,
     pub(crate) remaining: Duration,
+}
+
+enum LocalHeadroom<'a> {
+    Generic,
+    VerifiedOneShot(&'a tick::authorization_admission::VerifiedOneShotAssessment),
 }
 
 impl RootModelCall {
@@ -47,7 +54,7 @@ impl RootModelCall {
     ) -> Result<(Self, crate::agent_runtime::execution_owner::NativeInvocationOwner), String> {
         super::transaction::protect(tx, || {
             RootOwner::load_single(tx,root)?;
-            let (call,guard)=Self::claim_inner(tx,root,round,request,estimate,true)?;
+            let (call,guard)=Self::claim_inner(tx,root,round,request,estimate,true,LocalHeadroom::Generic)?;
             Ok((call,guard.ok_or("single_model_transport_owner_missing")?))
         })
     }
@@ -55,7 +62,14 @@ impl RootModelCall {
     fn claim_on(
         tx: &Transaction<'_>, root: &str, round: i64, request: &str, estimate: i64,
     ) -> Result<Self, String> {
-        Self::claim_inner(tx,root,round,request,estimate,false).map(|(call,_)|call)
+        Self::claim_inner(tx,root,round,request,estimate,false,LocalHeadroom::Generic).map(|(call,_)|call)
+    }
+
+    fn claim_one_shot_on(
+        tx: &Transaction<'_>, root: &str, round: i64, request: &str, estimate: i64,
+        proof: &tick::authorization_admission::VerifiedOneShotAssessment,
+    ) -> Result<Self, String> {
+        Self::claim_inner(tx,root,round,request,estimate,false,LocalHeadroom::VerifiedOneShot(proof)).map(|(call,_)|call)
     }
 
     fn claim_inner(
@@ -65,7 +79,11 @@ impl RootModelCall {
         request: &str,
         estimate: i64,
         transport: bool,
+        local_headroom: LocalHeadroom<'_>,
     ) -> Result<(Self, Option<crate::agent_runtime::execution_owner::NativeInvocationOwner>), String> {
+        if let LocalHeadroom::VerifiedOneShot(proof) = &local_headroom {
+            proof.require_on(tx, root, round, request)?;
+        }
         if round < 1
             || request.len() != 64
             || !request.bytes().all(|b| b.is_ascii_hexdigit())
@@ -128,7 +146,8 @@ impl RootModelCall {
         }
         call.insert(tx, "dispatch", &call.dispatch())?;
         call.require_executable(tx)?;
-        if call.owner.contract["root"].get("localDeliberation").is_some() {
+        if matches!(local_headroom, LocalHeadroom::Generic)
+            && call.owner.contract["root"].get("localDeliberation").is_some() {
             super::require_child_capacity(tx, root, 15_000, 1)?;
         } else { super::require_child_capacity(tx, root, 0, 0)?; }
         Ok((call,guard))
@@ -205,7 +224,12 @@ impl RootModelCall {
         };
         if phase == "received" && self.actual_cost_policy(tx)? {
             self.verify(tx, phase, &fact)?;
-        } else { self.insert(tx, phase, &fact)?; }
+        } else {
+            self.insert(tx, phase, &fact)?;
+            if let Some(response) = response {
+                self.record_cache_provenance(tx, response)?;
+            }
+        }
         let unresolved = receipt::settle(tx, self, phase, response)?;
         self.verify(tx, phase, &fact)?;
         self.verify(tx, "dispatch", &self.dispatch())?;

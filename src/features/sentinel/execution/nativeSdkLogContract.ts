@@ -1,5 +1,5 @@
 // SDK-only constants and original physical owner. Process claim IDs never enter.
-export type SdkDomain = "root" | "specialist" | "source_round";
+export type SdkDomain = "root" | "specialist" | "source_round" | "mapper_loop";
 export type SdkStage = "prepared" | "sent" | "response_received" | "cost_saved" | "validated" | "terminal";
 export interface SdkScope { scanId: string; attempt: number; ownerId?: string }
 export interface SdkOwner {
@@ -33,14 +33,14 @@ function ownerValid(o:SdkOwner,scope:SdkScope):boolean {
  &&integer(o.attempt)&&o.attempt>0&&(scope.attempt===0||o.attempt===scope.attempt)&&(!scope.ownerId||o.ownerId===scope.ownerId)
  &&id(o.rootRunId)&&id(o.runId)&&uuid(o.leaseAttemptId)&&integer(o.round)&&o.round>0
  &&(o.domain==="root"?o.runId===o.rootRunId&&o.workerId===null&&o.assignmentId===null
- :["specialist","source_round"].includes(o.domain)&&o.runId!==o.rootRunId&&uuid(o.workerId)&&typeof o.assignmentId==="string"&&/^asg-[a-f0-9]{24}$/i.test(o.assignmentId)&&(o.domain!=="specialist"||o.round===1));
+ :["specialist","source_round","mapper_loop"].includes(o.domain)&&o.runId!==o.rootRunId&&uuid(o.workerId)&&typeof o.assignmentId==="string"&&/^asg-[a-f0-9]{24}$/i.test(o.assignmentId)&&(o.domain!=="specialist"||o.round===1)&&(o.domain!=="mapper_loop"||o.round<=2));
 }
 export function acceptsSdkHint(raw:unknown,scope:SdkScope|undefined):boolean {
  if(!scope||!raw||typeof raw!=="object")return false;
  const h=raw as Partial<SdkLogRow>;
  return h.scanId===scope.scanId&&integer(h.attempt)&&h.attempt>0&&(scope.attempt===0||h.attempt===scope.attempt)
  &&hash(h.ownerId)&&(!scope.ownerId||h.ownerId===scope.ownerId)&&hash(h.dispatchKey)&&id(h.runId)
- &&integer(h.sequence)&&h.sequence>0&&(h.domain==="root"?h.workerId===null:["specialist","source_round"].includes(h.domain??"")&&uuid(h.workerId));
+ &&integer(h.sequence)&&h.sequence>0&&(h.domain==="root"?h.workerId===null:["specialist","source_round","mapper_loop"].includes(h.domain??"")&&uuid(h.workerId)&&(h.domain!=="mapper_loop"||(integer(h.round)&&h.round>=1&&h.round<=2)));
 }
 function rowValid(r:SdkLogRow,scope:SdkScope):boolean {
  if(!ownerValid(r,scope)||!integer(r.sequence)||r.sequence<1||!integer(r.ordinal)||r.ordinal<1||r.ordinal>6

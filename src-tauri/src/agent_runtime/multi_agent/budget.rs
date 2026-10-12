@@ -5,6 +5,7 @@ use rusqlite::{params, Transaction};
 
 pub(crate) mod admission;
 pub(crate) mod clock;
+pub(crate) mod continuation;
 pub(crate) mod diagnostics;
 mod entries;
 mod execution_slots;
@@ -17,6 +18,7 @@ pub(crate) mod receipts;
 pub(crate) mod root;
 pub(crate) mod root_definition;
 mod scope;
+pub(crate) mod supervision_capacity;
 pub(crate) mod target;
 pub(crate) mod web_lifetime;
 
@@ -47,6 +49,22 @@ pub const DIMENSIONS: [&str; 10] = [
     "concurrency_batches",
     "wall_time_ms",
 ];
+
+/// No live append writer yet; diagnostics coverage stays `denied_by_contract`.
+pub const DENIED_BY_CONTRACT_DIMENSIONS: &[&str] = &[
+    "browser_actions",
+    "controlled_writes",
+    "upload_bytes",
+];
+
+/// U102: DENIED dims have ledger columns + hard-reject append, but no live writer.
+#[cfg(test)]
+pub fn denied_budget_dimension_writer_ready(dimension: &str) -> bool {
+    if !DENIED_BY_CONTRACT_DIMENSIONS.contains(&dimension) {
+        return false;
+    }
+    false
+}
 
 #[derive(Clone, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct BudgetVector {
@@ -105,6 +123,12 @@ pub fn balance(
     assignment: Option<&str>,
     dimension: &str,
 ) -> Result<Balance, String> {
+    // A misspelled or unsupported name is not evidence of an unspent budget.
+    // Configured zero-use dimensions still read normally; caller ownership
+    // and snapshot proofs remain separate requirements.
+    if !DIMENSIONS.contains(&dimension) {
+        return Err("budget_dimension_unknown".into());
+    }
     let mut statement=db.prepare("SELECT kind,amount FROM agent_budget_entries WHERE root_run_id=?1 AND (?2 IS NULL OR assignment_id=?2) AND dimension=?3 ORDER BY rowid").map_err(|e|e.to_string())?;
     let rows = statement
         .query_map(params![root, assignment, dimension], |r| {
@@ -329,6 +353,9 @@ fn append_inner(
         || source.trim().is_empty()
     {
         return Err("budget_entry_invalid".into());
+    }
+    if DENIED_BY_CONTRACT_DIMENSIONS.contains(&dimension) {
+        return Err("budget_dimension_denied_by_contract".into());
     }
     validate_budget_assignment(tx, lease, assignment, kind)?;
     if authority == Authority::Live && kind == Kind::Reserve {

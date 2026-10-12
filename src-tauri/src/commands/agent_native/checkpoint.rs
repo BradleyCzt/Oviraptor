@@ -119,6 +119,9 @@ fn agent_tool_terminal_outcome(view: &JsonValue) -> Option<AgentTargetOutcome> {
         "request_budget_exhausted" => AgentTargetOutcome::Limited(AgentStop::new(
             AGENT_STOP_HARD_REQUESTS, "目标请求共享预算已达到硬上限，停止此执行分支；不是本地存储故障，不自动增加预算",
         )),
+        "root_supervision_request_capacity_exhausted" => AgentTargetOutcome::Limited(AgentStop::new(
+            AGENT_STOP_HARD_REQUESTS, "后续 Root 监督与只读角色所需的模型请求容量不足，在发送下一条 HTTP 前停止；已付请求保留，不自动增加预算",
+        )),
         "wall_time_budget_exhausted" => AgentTargetOutcome::Limited(AgentStop::new(
             terminal_code::HARD_WALL_TIME_BUDGET, "根任务共享墙钟预算已耗尽，停止此执行分支；已发送请求的成本保留，不自动重置时钟或增加预算",
         )),
@@ -204,10 +207,10 @@ fn native_exit(
             ..ledger
         })
     } else {
-        AgentTargetOutcome::incomplete(format!(
+        AgentTargetOutcome::Incomplete(AgentStop::new(terminal_code, format!(
             "{summary}；剩余 {} 项未完成，可继续同一尝试",
             queue.len()
-        ))
+        )))
     };
     state.terminal_reason = if matches!(outcome, AgentTargetOutcome::Incomplete(_)) {
         String::new()

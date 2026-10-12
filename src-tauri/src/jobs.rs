@@ -371,6 +371,9 @@ fn import_csv(
             content_category
         };
         let score = field(&record, &index, &["score"]);
+        let has_login = field(&record, &index, &["has_login"]);
+        let has_register = field(&record, &index, &["has_register"]);
+        let portal_known = matches!(has_login, "0" | "1") && matches!(has_register, "0" | "1");
 
         let mut extra = Map::new();
         for (position, name) in headers.iter().enumerate() {
@@ -383,13 +386,18 @@ fn import_csv(
         let is_probe = index.contains_key("probe_outcome");
         let mut hasher = DefaultHasher::new();
         let hash_values: Vec<&str> = if is_probe {
-            vec![
+            let mut values = vec![
                 probe_outcome,
                 probe_entry_state,
                 status_code,
                 title,
                 effective_content_category,
-            ]
+            ];
+            if portal_known {
+                values.push(has_login);
+                values.push(has_register);
+            }
+            values
         } else {
             vec![
                 host,
@@ -456,6 +464,18 @@ fn import_csv(
                 |row| row.get(0),
             )
             .map_err(|error| error.to_string())?;
+        if portal_known {
+            transaction
+                .execute(
+                    "UPDATE assets SET has_login=?1, has_register=?2 WHERE id=?3",
+                    params![
+                        i64::from(has_login == "1"),
+                        i64::from(has_register == "1"),
+                        asset_id
+                    ],
+                )
+                .map_err(|error| error.to_string())?;
+        }
         transaction.execute(r#"
             INSERT INTO project_assets(project_id,asset_id,last_run_id) VALUES(?1,?2,?3)
             ON CONFLICT(project_id,asset_id) DO UPDATE SET last_seen=datetime('now','localtime'),last_run_id=excluded.last_run_id

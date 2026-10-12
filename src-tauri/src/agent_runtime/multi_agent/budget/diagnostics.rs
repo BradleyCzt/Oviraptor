@@ -23,6 +23,17 @@ pub struct DimensionDiagnostic {
     coverage: &'static str,
 }
 
+pub(crate) fn coverage_for(dimension: &str, explicit_root_definition: bool) -> &'static str {
+    match dimension {
+        "target_requests" => "multi_agent_broker",
+        "concurrency_batches" if explicit_root_definition => "race_batch_dispatch_unimplemented",
+        "concurrency_batches" => "multi_agent_lane",
+        "wall_time_ms" => "admission_samples",
+        d if super::DENIED_BY_CONTRACT_DIMENSIONS.contains(&d) => "denied_by_contract",
+        _ => "assignment_settlement",
+    }
+}
+
 pub(crate) fn read(
     db: &Connection,
     root: &str,
@@ -62,14 +73,7 @@ pub(crate) fn read(
             )
             .map_err(|_| "budget_diagnostic_contract_incomplete")?;
         let b = balance(db, root, None, dimension)?;
-        let coverage = match dimension {
-            "target_requests" => "multi_agent_broker",
-            "concurrency_batches" if explicit => "race_batch_dispatch_unimplemented",
-            "concurrency_batches" => "multi_agent_lane",
-            "wall_time_ms" => "admission_samples",
-            "browser_actions" | "controlled_writes" | "upload_bytes" => "denied_by_contract",
-            _ => "assignment_settlement",
-        };
+        let coverage = coverage_for(dimension, explicit);
         rows.push(DimensionDiagnostic {
             dimension,
             hard_limit,

@@ -15,7 +15,7 @@ fn platform_user_home() -> Option<PathBuf> {
 }
 
 #[derive(Clone, serde::Serialize)]
-struct ModelRuntimeEnv {
+pub(crate) struct ModelRuntimeEnv {
     llm: String,
     api_key: String,
     api_base: String,

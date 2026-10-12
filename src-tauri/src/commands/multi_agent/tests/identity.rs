@@ -69,7 +69,10 @@ fn identity_specialist_is_a_separate_read_only_run_with_a_delivered_message() {
     let (mut f,seen,stop)=identity_root_fixture("identity-child",false,false,boundary);
     let mut session=multi_agent_prepare(&mut f.context).unwrap();
     let connection=db::open(&f.context.db_path).unwrap();
-    assert_eq!(f.context.identities,vec![AgentIdentity::scoped("identity-one")]);
+    // prepare.rs: the validated account set, plus exactly one fixed
+    // credential-free control (not another account and not an identity grant;
+    // the authorization broker binds the same set).
+    assert_eq!(f.context.identities,vec![AgentIdentity::scoped("identity-one"),AgentIdentity::anonymous()]);
     let identity=identity_root_child(&connection,&session.lease.root_run_id);
     assert_ne!(identity.run_id,session.mapper.run_id);assert_ne!(identity.run_id,session.executor.run_id);
     let (lane,status,capability):(String,String,String)=connection.query_row("SELECT a.lane,r.status,a.capability_lease_json FROM agent_assignments a JOIN agent_runs r ON r.id=a.child_run_id WHERE a.id=?1",[&identity.assignment_id],|r|Ok((r.get(0)?,r.get(1)?,r.get(2)?))).unwrap();
@@ -81,7 +84,9 @@ fn identity_specialist_is_a_separate_read_only_run_with_a_delivered_message() {
     assert_eq!(seen.lock().unwrap().iter().filter(|w|w.contains("IdentitySession 分析专家")).count(),1);
     assert!(f.context.evidence.get("multiAgentIdentitySession").is_some());
     assert!(!f.context.evidence.to_string().contains("fixture-identity-secret"));
-    multi_agent_finish_execution(&f.context,&mut session,&AgentTargetOutcome::incomplete("identity child proof")).unwrap();
+    let outcome=run_native_agent(&f.context);
+    assert!(matches!(outcome,AgentTargetOutcome::BoundedCompleted(_) | AgentTargetOutcome::Incomplete(_)),"{}",outcome.detail());
+    multi_agent_finish_execution(&f.context,&mut session,&outcome).unwrap();
     drop(session);drop(connection);drop(f);stop.store(true,std::sync::atomic::Ordering::SeqCst);
 }
 

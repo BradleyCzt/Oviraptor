@@ -94,7 +94,6 @@ fn investigator_delivery_is_atomic_without_refunding_or_redispatching_the_model(
             "BEFORE DELETE ON agent_lane_leases",
             "", // Successful real-transport delivery and read-only replay.
         ] {
-            let (root,mut context,session) = specialist_gap_fixture();
             let response = serde_json::json!({
                 "summary":"needs operator review", "nextStep":"manual_review", "gapCode":"missing_control",
                 "supportingFactRefs":[], "missingEvidence":["missing control"], "prerequisites":[],
@@ -103,8 +102,9 @@ fn investigator_delivery_is_atomic_without_refunding_or_redispatching_the_model(
                 "sideEffectClass":"read_only", "overlapKeys":[],
                 "falsificationCondition":"control refutes claim", "stopCondition":"operator decision",
             }).to_string();
-            let (port,seen,_stop) = spawn_endpoint(std::sync::Arc::new(move |_|(200,"application/json",proposal_model_response(&response))));
-            context.environment.api_base = format!("http://127.0.0.1:{port}/v1");
+            // Actual Root/C/worker fixture; its frozen model endpoint is this one.
+            let (port,seen,_stop) = specialist_original_endpoint(std::sync::Arc::new(move |_|(200,"application/json",proposal_model_response(&response))));
+            let (root,context,session) = specialist_original_gap_fixture(&format!("http://127.0.0.1:{port}/v1"));
             let connection = db::open(&context.db_path).unwrap();
             if !target.is_empty() {
                 connection.execute_batch(&format!("CREATE TRIGGER fault {target} BEGIN SELECT RAISE({action}); END;")).unwrap();
@@ -155,7 +155,7 @@ fn investigator_delivery_is_atomic_without_refunding_or_redispatching_the_model(
             let before = review_delivery_snapshot(&connection);
             multi_agent_investigate_review_gap(&context,&session,"candidate-gap",2,&serde_json::json!(["missing control"])).unwrap();
             assert_eq!(before, review_delivery_snapshot(&connection));
-            assert_eq!(seen.lock().unwrap().len(),1);
+            assert_eq!(specialist_handler_call_count(&seen),1);
             drop(connection);
             std::fs::remove_dir_all(root).unwrap();
         }

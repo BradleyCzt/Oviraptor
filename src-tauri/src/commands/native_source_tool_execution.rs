@@ -6,7 +6,7 @@ fn execute_source_tool_assignment(
     slice: &JsonValue,
 ) -> Result<JsonValue, String> {
     use crate::agent_runtime::{
-        multi_agent::{source, source_rounds},
+        multi_agent::source,
         secrets::redact_json,
         store::stable_hash,
     };
@@ -27,112 +27,25 @@ fn execute_source_tool_assignment(
     let messages = source_assessment_messages(SOURCE_TOOLS_SYSTEM, &input);
     let (_, output) = source_assessment_budget(&messages, &profile)?;
     profile.max_output_tokens = Some(output);
-    let mut frozen = redact_json(
+    let frozen = redact_json(
         &json!({"schemaVersion":1,"messages":messages,"tools":tools.iter().map(|s|s.as_function_spec()).collect::<Vec<_>>(),
         "temperature":0.0,"model":profile.model,"endpointHash":stable_hash(&profile.endpoint),"proxyHash":stable_hash(profile.proxy.as_deref().unwrap_or_default()),
         "local":profile.local,"maxOutputTokens":profile.max_output_tokens,"maxContextTokens":profile.max_context_tokens}),
     );
     let client = AgentModelClient::new(profile.clone(), &[]);
-    for number in 1..=3 {
-        let check =
-            |tx: &rusqlite::Connection| authorize_source_tool_phase(tx, context, lease, child);
-        if number > 1 {
-            frozen = source_rounds::prepare_next_authorized(
-                connection, lease, child, number, &frozen, check,
-            )?;
-        }
-        // Includes tool schemas and all accumulated tool results in admission.
-        let (required, _) = source_assessment_budget(
-            &[json!({"messages":frozen["messages"],"tools":frozen["tools"]})],
-            &profile,
-        )?;
-        let (start, _model_lifetime) = source_rounds::start_for_transport(
-            connection, lease, child, number, &frozen, required, check,
-        )?;
-        let (pending, receipt, model_log) = match start {
-            source_rounds::Start::Received(pending, receipt) => (pending, receipt, None),
-            source_rounds::Start::Dispatch(pending) => {
-                let model_log = crate::agent_runtime::model::diagnostics::ModelLog::child(
-                    context.db_path,
-                    lease,
-                    child,
-                    number,
-                    true,
-                );
-                let messages = pending.request()["messages"]
-                    .as_array()
-                    .ok_or("source_tool_phase_messages_invalid")?
-                    .clone();
-                let mut request = agent_model_request(messages, &tools);
-                let remaining = crate::agent_runtime::multi_agent::budget::clock::remaining(
-                    connection,
-                    &lease.root_run_id,
-                )?;
-                let shared_deadline = std::time::Instant::now() + remaining;
-                let deadline = context
-                    .deadline
-                    .map_or(shared_deadline, |d| d.min(shared_deadline));
-                request.request_timeout =
-                    Some(deadline.saturating_duration_since(std::time::Instant::now()));
-                let scoped_cancel = source_tool_model_cancel_token(context, lease, child);
-                let cancel = CancelToken::from_checker(move || {
-                    scoped_cancel.is_cancelled() || std::time::Instant::now() >= deadline
-                });
-                let result = match client.complete_once_observed_with_lifecycle(
-                    &request,
-                    &cancel,
-                    model_log.observer(),
-                ) {
-                    Ok(result) => result,
-                    Err(crate::agent_runtime::model::OneShotFailure::BeforeTransport(error)) => {
-                        source_rounds::record_not_sent(connection, &pending, error.code())?;
-                        return Err(format!("source_tool_model_failed:{}", error.code()));
-                    }
-                    Err(crate::agent_runtime::model::OneShotFailure::TransportOutcomeUnknown(
-                        error,
-                    )) => {
-                        source_rounds::record_uncertain(connection, &pending, error.code())?;
-                        return Err(format!("source_tool_model_failed:{}", error.code()));
-                    }
-                };
-                client.record_usage_line(context.usage_dir, &result);
-                let receipt = source_rounds::record_received(connection, &pending, &result);
-                model_log.cost_saved();
-                (pending, receipt?, Some(model_log))
-            }
-        };
-        context.require_supervision(lease)?;
-        if receipt.response["rejection"] != "" {
-            return Err(format!(
-                "source_tool_response_rejected:{}",
-                receipt.response["rejection"]
-            ));
-        }
-        let calls = receipt.response["toolCalls"]
-            .as_array()
-            .ok_or("source_tool_phase_response_invalid")?;
-        // This SDK response is validated. Tool execution still has its own guards.
-        if let Some(log) = model_log {
-            log.finish(true);
-        }
-        for (index, tool) in calls.iter().enumerate() {
-            source_rounds::execute_tool(
-                connection,
-                &pending,
-                index as i64,
-                check,
-                |tx, name, args| source_tool_broker_call(tx, lease, child, name, args),
-            )?;
-            if tool["name"] == "assignment.finish" {
-                return complete_source_tool_assignment(
-                    connection, context, lease, child, &pending,
-                );
-            }
-        }
-        frozen = source_rounds::continuation(connection, &pending)?;
-    }
-    close_exhausted_source_tool_assignment(connection, context, lease, child)?;
-    Err("source_tool_phase_round_budget_exhausted_without_finish".into())
+    native_run_source_controlled_adapter(NativeSourceControlledAdapter {
+        connection,
+        context,
+        lease,
+        child,
+        profile,
+        tools,
+        client,
+        frozen,
+        registered: capabilities,
+        next_tool: 0,
+        original_error: None,
+    })
 }
 
 #[cfg(test)]

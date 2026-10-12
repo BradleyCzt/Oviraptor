@@ -84,9 +84,7 @@ pub struct EnvironmentDependency {
 pub struct EnvironmentReport {
     pub os: String,
     pub arch: String,
-    pub python: String,
     pub node: String,
-    pub redis_cli: String,
     pub dependencies: Vec<EnvironmentDependency>,
     pub checked_at: String,
 }
@@ -124,14 +122,6 @@ pub struct ExposureFindingInput {
     pub evidence_excerpt: String,
     pub severity: String,
     pub confidence: i64,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct ExposureFindingReviewInput {
-    pub id: i64,
-    pub status: String,
-    pub note: String,
 }
 
 #[derive(Debug, Serialize)]

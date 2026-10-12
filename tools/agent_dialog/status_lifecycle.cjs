@@ -113,6 +113,23 @@ test('an initially hidden chat neither subscribes nor reads until it becomes vis
   assert.deepEqual(h.reads, [['A', undefined, undefined]]);
 });
 
+test('explicit task navigation reads one persisted snapshot while native window visibility lags', async (t) => {
+  const h = setup({ hidden: true }); t.after(h.dispose);
+  await h.sync.loadStatus(undefined, true);
+  assert.deepEqual(h.reads, [['A', undefined, undefined]]);
+  assert.equal(h.sync.state.value.scanId, 'A');
+  assert.equal(h.subscriptions, 0);
+  assert.equal(h.clock.timers.size, 0, 'explicit navigation must not start hidden background polling');
+  await h.sync.loadStatus();
+  assert.equal(h.reads.length, 1);
+  h.select('B');
+  await h.sync.loadStatus(undefined, true);
+  assert.equal(h.sync.state.value.scanId, 'B');
+  h.dispose();
+  await h.sync.loadStatus(undefined, true);
+  assert.equal(h.reads.length, 2, 'user refresh cannot revive a disposed chat');
+});
+
 test('visibility recovery waits for an unresolved current read and schedules only one trailing catch-up', async (t) => {
   const h = setup({ read: async () => ({ ...status('A'), latestSequence: 4 }) }); t.after(h.dispose);
   await h.sync.loadStatus(); await h.sync.installCollaborationListener(); await h.clock.tick(50);

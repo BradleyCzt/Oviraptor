@@ -9,15 +9,21 @@ pub(super) fn install(db: &Connection, proof: &Prepared) -> Result<(), String> {
         .protected_cascades(db, &proof.bundle.scan)?;
     let multi = proof.bundle.is_multi();
     let source = proof.bundle.is_source();
+    let archive_table = match proof.bundle.version {
+        1 => "native_deleted_scan_audits",
+        2 => "native_deleted_scan_audits_v2",
+        _ => return Err("deleted_audit_scope_invalid".into()),
+    };
     db.authorizer(Some(move |c: AuthContext<'_>| {
         let direct = c.database_name == Some("main") && c.accessor.is_none();
         let allowed = match c.action {
-            AuthAction::Insert { table_name } if direct => matches!(
-                table_name,
-                "native_deleted_scan_audits"
-                    | "native_deleted_scan_anchors"
-                    | "sentinel_deleted_scans"
-            ),
+            AuthAction::Insert { table_name } if direct => {
+                table_name == archive_table
+                    || matches!(
+                        table_name,
+                        "native_deleted_scan_anchors" | "sentinel_deleted_scans"
+                    )
+            }
             AuthAction::Update {
                 table_name,
                 column_name,
@@ -35,13 +41,14 @@ pub(super) fn install(db: &Connection, proof: &Prepared) -> Result<(), String> {
                     && !matches!(
                         table_name,
                         "native_deleted_scan_audits"
+                            | "native_deleted_scan_audits_v2"
                             | "native_deleted_scan_anchors"
                             | "sentinel_deleted_scans"
                     ))
                     || protected.contains(table_name)
             }
             AuthAction::Pragma {
-                pragma_name: "foreign_key_list" | "table_info",
+                pragma_name: "foreign_key_list" | "table_info" | "table_list",
                 ..
             } => true,
             AuthAction::Read { .. }

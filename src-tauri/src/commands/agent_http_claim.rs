@@ -7,6 +7,9 @@ fn claim_agent_http_request_on(
     url: &str,
     headers: &[(String, String)],
 ) -> Result<AgentHttpClaim, String> {
+    if agent_protection_stop_on(tx, context)?.is_some() {
+        return Err("http_protection_stop_active".into());
+    }
     let run = context.run.as_ref().ok_or("http_journal_run_required")?;
     agent_authorize_tool_on(tx, context, &request.tool).map_err(str::to_owned)?;
     let (root_owner, _prior_single_http_idle) = if native_single_policy(tx, context)? {
@@ -49,6 +52,13 @@ fn claim_agent_http_request_on(
         i64::try_from(runtime.target_requests).map_err(|_| "http_journal_counter_overflow")?;
     if usage.executor_recorded != runtime_count {
         return Err("http_journal_checkpoint_requires_reconciliation".into());
+    }
+    if let Some((lease, assignment)) =
+        crate::agent_runtime::multi_agent::budget::target::child_owner(tx, &run.run_id)?
+    {
+        crate::agent_runtime::multi_agent::budget::supervision_capacity::require_http_headroom(
+            tx, &lease, &assignment, &run.run_id,
+        )?;
     }
     let anchor = *usage
         .attempts
@@ -145,6 +155,9 @@ fn claim_agent_http_request_on(
     agent_authorize_tool_on(tx, context, &request.tool).map_err(str::to_owned)?;
     if let Some(original) = &claim.root_target {
         original.require_executable(tx)?;
+    }
+    if agent_protection_stop_on(tx, context)?.is_some() {
+        return Err("http_protection_stop_active".into());
     }
     Ok(claim)
 }

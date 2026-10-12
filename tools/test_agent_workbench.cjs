@@ -505,3 +505,18 @@ test('mode switch during a pending save revokes start but preserves edited task 
   assert.equal(b.form.taskName, 'Next code task');
   assert.equal(events.some(([name]) => name === 'prepare' || name === 'open'), false);
 });
+
+test('homogeneous opt-in uses dedicated draft IPC and default stays legacy', async t => {
+  const app=await mount({createSentinelHomogeneousUrlScan:async (...args)=>{app.calls.push(['homogeneous',args]);return draft;}});t.after(app.unmount);
+  app.b.form.homogeneousWorkers=true;app.b.form.orchestrationMode='multi';
+  await app.b.start(true);
+  assert.equal(app.calls.filter(([kind])=>kind==='homogeneous').length,1);
+  assert.equal(app.calls.filter(([kind])=>kind==='create').length,0);
+  const legacy=await mount();t.after(legacy.unmount);await legacy.b.start(true);
+  assert.equal(legacy.calls.filter(([kind])=>kind==='create').length,1);
+});
+test('homogeneous opt-in rejects nonweb single and approved tools without silently changing intent', async t=>{
+  for(const setup of [a=>a.b.mode.value='code',a=>a.b.form.orchestrationMode='single',a=>a.b.form.approvedToolIds=['aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa']]) {
+    const app=await mount();t.after(app.unmount);app.b.form.homogeneousWorkers=true;app.b.form.orchestrationMode='multi';setup(app);await app.b.start(true);assert.equal(app.calls.length,0);
+  }
+});

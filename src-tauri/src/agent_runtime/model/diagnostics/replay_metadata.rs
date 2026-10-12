@@ -50,7 +50,8 @@ pub(super) fn load(
         .map_err(|_| "native_sdk_log_read_failed")?;
     let mut owners = Vec::new();
     for value in values {
-        let (o, identity) = value.map_err(|_| "native_sdk_log_read_failed")?;
+        let (mut o, identity) = value.map_err(|_| "native_sdk_log_read_failed")?;
+        super::owner_mapper_loop::restore_logical(db, &mut o, &identity)?;
         if stable_hash(&serde_json::to_string(&o).map_err(|_| "native_sdk_log_read_failed")?)
             != identity
         {
@@ -127,7 +128,8 @@ pub(super) fn load(
 }
 
 fn verify_id(db: &Connection, id: &str) -> Result<(), String> {
-    let(o,identity)=db.query_row("SELECT owner_id,domain,dispatch_key,scan_id,attempt_number,root_run_id,run_id,assignment_id,lease_attempt_id,worker_id,round_number,request_hash,identity_hash FROM native_sdk_log_owners WHERE owner_id=?1",[id],|r|Ok((Owner{owner_id:r.get(0)?,domain:r.get(1)?,dispatch_key:r.get(2)?,scan_id:r.get(3)?,attempt:r.get(4)?,root_run_id:r.get(5)?,run_id:r.get(6)?,assignment_id:r.get(7)?,lease_attempt_id:r.get(8)?,worker_id:r.get(9)?,round:r.get(10)?,request_hash:r.get(11)?},r.get::<_,String>(12)?))).map_err(|_|"native_sdk_log_owner_unverified")?;
+    let(mut o,identity)=db.query_row("SELECT owner_id,domain,dispatch_key,scan_id,attempt_number,root_run_id,run_id,assignment_id,lease_attempt_id,worker_id,round_number,request_hash,identity_hash FROM native_sdk_log_owners WHERE owner_id=?1",[id],|r|Ok((Owner{owner_id:r.get(0)?,domain:r.get(1)?,dispatch_key:r.get(2)?,scan_id:r.get(3)?,attempt:r.get(4)?,root_run_id:r.get(5)?,run_id:r.get(6)?,assignment_id:r.get(7)?,lease_attempt_id:r.get(8)?,worker_id:r.get(9)?,round:r.get(10)?,request_hash:r.get(11)?},r.get::<_,String>(12)?))).map_err(|_|"native_sdk_log_owner_unverified")?;
+    super::owner_mapper_loop::restore_logical(db, &mut o, &identity)?;
     if stable_hash(&serde_json::to_string(&o).map_err(|_| "native_sdk_log_owner_unverified")?)
         != identity
     {

@@ -200,7 +200,7 @@ fn single_finally_exit_late_original_invoice_preserves_cutoff_and_denies_next_wo
             .filter(|(name, _)| {
                 !matches!(
                     name.as_str(),
-                    "agent_budget_entries" | "agent_root_model_journal"
+                    "agent_budget_entries" | "agent_root_model_journal" | "agent_root_model_cache_provenance" | "agent_root_model_cache_capture"
                 )
             })
             .collect::<Vec<_>>()
@@ -227,6 +227,15 @@ fn single_finally_exit_late_original_invoice_preserves_cutoff_and_denies_next_wo
         budget::balance(&db, root, None, "wall_time_ms").unwrap(),
         wall
     );
+    assert_eq!(db.query_row("SELECT count(*) FROM agent_root_model_cache_provenance p JOIN agent_root_model_journal j
+ ON p.call_id=j.call_id AND p.root_run_id=j.root_run_id AND p.lease_attempt_id=j.lease_attempt_id
+ AND p.round=j.round AND p.request_hash=j.request_hash AND p.response_hash=json_extract(j.receipt_json,'$.responseHash')
+ WHERE j.root_run_id=?1 AND j.phase='received' AND p.cached_usage_reported=0", [root], |r|r.get::<_,i64>(0)).unwrap(),1);
+    assert_eq!(db.query_row("SELECT count(*) FROM agent_root_model_cache_provenance", [], |r|r.get::<_,i64>(0)).unwrap(),1);
+    assert_eq!(db.query_row("SELECT count(*) FROM agent_root_model_cache_capture c JOIN agent_root_model_cache_provenance p ON p.call_id=c.call_id
+ WHERE p.root_run_id=?1 AND length(c.signature)=32", [root], |r|r.get::<_,i64>(0)).unwrap(),1);
+    assert_eq!(db.query_row("SELECT count(*) FROM agent_root_model_cache_capture", [], |r|r.get::<_,i64>(0)).unwrap(),1);
+    assert!(!call.verify_original_cache_for_test(&db,&response).unwrap());
     assert_eq!(fixed(&db), original);
     assert!(call.require_next_work(&db).is_err());
     assert_eq!(seen.lock().unwrap().len(),1);

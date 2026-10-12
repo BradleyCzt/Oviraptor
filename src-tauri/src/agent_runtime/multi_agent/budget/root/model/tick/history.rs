@@ -122,9 +122,13 @@ fn capture(
     let protocol: i64 = db.query_row("SELECT json_extract(fact_json,'$.request.version') FROM agent_root_tick_receipts WHERE call_id=?1 AND root_run_id=?2 AND lease_attempt_id=?3 AND round=?4 AND phase='request'",scoped,|r|r.get(0)).map_err(|e|e.to_string())?;
     if matches!(protocol, 2 | 3) {
         let terminal = rows(db,"SELECT rowid,* FROM agent_root_tick_terminal_proofs WHERE call_id=?1 AND root_run_id=?2 AND lease_attempt_id=?3 AND round=?4",scoped)?;
-        if terminal.as_array().is_none_or(|r| r.len()!=1) { return Err("root_local_original_terminal_missing".into()); }
+        if terminal.as_array().is_none_or(|r| r.len() != 1) {
+            return Err("root_local_original_terminal_missing".into());
+        }
         proof["terminalProof"] = terminal;
-    } else if protocol != 1 { return Err("root_local_original_parent_invalid".into()); }
+    } else if protocol != 1 {
+        return Err("root_local_original_parent_invalid".into());
+    }
     Ok(proof)
 }
 fn rows(db: &Connection, sql: &str, params: impl Params) -> Result<Value, String> {

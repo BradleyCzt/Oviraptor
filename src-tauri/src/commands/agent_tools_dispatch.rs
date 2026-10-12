@@ -110,6 +110,15 @@ fn agent_execute_tool_inner(
     if agent_is_source_tool(name) {
         return agent_execute_source_tool(context, name, arguments);
     }
+    // Rehydrate a denial from durable state before reaching any target adapter.
+    if runtime.protected_stop.is_none() {
+        let persisted = db::open(&context.db_path)
+            .and_then(|db| agent_protection_stop_on(&db, context));
+        match persisted {
+            Ok(stop) => runtime.protected_stop = stop,
+            Err(_) => return agent_tool_error("无法核验目标的持久保护状态", "tool_authorization_unavailable"),
+        }
+    }
     if let Some(stop) = &runtime.protected_stop {
         // Once the target is protected, further requests are not authorized.
         return serde_json::json!({"code": "protected", "stop": stop});
@@ -122,6 +131,17 @@ fn agent_execute_tool_inner(
             "目标请求总数已达到本轮硬上限，请调用 finish_target 收口",
             "request_budget_exhausted",
         );
+    }
+    if name != "finish_target" {
+        if let Err(reason) = agent_target_budget_preflight(context, runtime, name) {
+            return agent_http_claim_error(reason);
+        }
+        if let Err(reason) = native_coordinator_budget_consumption_before_action(context) {
+            return agent_http_claim_error(reason);
+        }
+        if let Err(reason) = native_coordinator_http_budget_consumption_before_action(context) {
+            return agent_http_claim_error(reason);
+        }
     }
     match name {
         "inspect_evidence" => agent_tool_inspect_evidence(context, arguments),

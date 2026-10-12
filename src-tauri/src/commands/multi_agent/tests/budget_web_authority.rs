@@ -6,6 +6,11 @@ fn budget_web_model_inflight_root_and_child_cancellation_close_transport_keep_co
         let child = f.context().run.as_ref().unwrap().run_id.clone();
         let accepted = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
         let entered = accepted.clone();
+        // Measure transport closure from the moment the provider holds the
+        // request (cancel already durable), not from fixture/bootstrap work
+        // that parallel test load can slow down.
+        let accepted_at = std::sync::Arc::new(std::sync::Mutex::new(None));
+        let accepted_clock = accepted_at.clone();
         f.set_web_reply(move |_| {
             let db = db::open(&path).unwrap();
             let cancelled = if root_cancel {
@@ -23,20 +28,25 @@ fn budget_web_model_inflight_root_and_child_cancellation_close_transport_keep_co
                 [cancelled],
             )
             .unwrap();
+            *accepted_clock.lock().unwrap() = Some(std::time::Instant::now());
             entered.store(true, std::sync::atomic::Ordering::SeqCst);
             std::thread::sleep(std::time::Duration::from_secs(2));
             (200, "application/json", model_round(&[], 10))
         });
         let start = std::time::Instant::now();
         let result = NativeAgentBackend.execute(f.context());
+        let returned_at = std::time::Instant::now();
         assert!(
             accepted.load(std::sync::atomic::Ordering::SeqCst),
             "{}",
             result.detail()
         );
+        let in_flight = returned_at.duration_since(accepted_at.lock().unwrap().unwrap());
         assert!(
-            start.elapsed() < std::time::Duration::from_secs(1),
-            "cancel flag must close transport before delayed response"
+            in_flight < std::time::Duration::from_secs(1),
+            "cancel flag must close transport before delayed response: \
+             {in_flight:?} after provider accepted, {:?} total",
+            start.elapsed()
         );
         assert_eq!(
             result.terminal_code(),

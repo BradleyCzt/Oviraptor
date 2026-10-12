@@ -110,7 +110,7 @@ mod closure_writer;
 mod final_receipt;
 mod finalization;
 mod pause_authority;
-pub(crate) use closure_writer::{closure_write, source_pause_write};
+pub(crate) use closure_writer::{closure_write, financial_assessment_write, source_pause_write};
 pub(crate) use finalization::FinalClock;
 
 // Preserve the existing unique closed-worker financial contract test. All
@@ -219,3 +219,5 @@ pub(crate) fn sample(
 pub(crate) mod elapsed_fact;
 
 pub(crate) mod observation;
+
+pub(crate) mod original_worker_samples;

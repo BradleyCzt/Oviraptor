@@ -112,9 +112,9 @@ fn verify_decision(
     Ok(())
 }
 
-pub(super) fn argument_hash(kind: &str, argument: &str) -> String {
-    let safe = crate::agent_runtime::secrets::redact_text_with(argument.trim(), None);
-    safe_argument_hash(kind, &safe)
+pub(super) fn argument_hash(connection: &Connection, root: &str, kind: &str, argument: &str) -> Result<String, String> {
+    let safe = crate::agent_runtime::multi_agent::homogeneous::material_policy::text(connection, root, argument.trim())?;
+    Ok(safe_argument_hash(kind, &safe))
 }
 
 // Persisted text has already been redacted. Re-redacting its markers changes
@@ -136,8 +136,8 @@ pub(super) fn record(
         "draftId":draft.id,"revision":draft.revision,"draftHash":draft.draft_hash,
         "scanId":draft.scan_id,"attemptNumber":draft.attempt_number,"rootRunId":draft.root_run_id,
         "targetKey":draft.target_key,"threadKey":draft.thread_key,
-        "argumentHash":argument_hash(kind,argument),
-        "reason":if kind=="reject" {crate::agent_runtime::secrets::redact_text_with(argument.trim(),None)} else {String::new()},
+        "argumentHash":argument_hash(connection, &draft.root_run_id, kind, argument)?,
+        "reason":if kind=="reject" {crate::agent_runtime::multi_agent::homogeneous::material_policy::text(connection, &draft.root_run_id, argument.trim())?} else {String::new()},
         "directiveId":directive_id,"successorDraftId":successor.map(|d|d.id.as_str()),
         "successorRevision":successor.map(|d|d.revision),"successorHash":successor.map(|d|d.draft_hash.as_str()),
         "requiresConfirmation":successor.is_some_and(|d|d.confirmation_required),

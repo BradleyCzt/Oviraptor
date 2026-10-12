@@ -2,11 +2,11 @@
 #[test]
 fn scan_deletion_paid_single_atomic_failures_preserve_original_rows_and_files() {
     for fault in [
-        "CREATE TRIGGER audit_fault BEFORE INSERT ON native_deleted_scan_audits BEGIN SELECT RAISE(IGNORE); END;",
+        "CREATE TRIGGER audit_fault BEFORE INSERT ON native_deleted_scan_audits_v2 BEGIN SELECT RAISE(IGNORE); END;",
         "CREATE TRIGGER audit_fault BEFORE INSERT ON sentinel_deleted_scans BEGIN SELECT RAISE(IGNORE); END;",
         "CREATE TRIGGER audit_fault BEFORE DELETE ON sentinel_scans BEGIN SELECT RAISE(IGNORE); END;",
         "CREATE TRIGGER audit_fault AFTER DELETE ON sentinel_scans BEGIN UPDATE private_business SET value='changed'; END;",
-        "CREATE TRIGGER audit_fault AFTER INSERT ON native_deleted_scan_audits BEGIN DELETE FROM sentinel_targets WHERE scan_id='other-scan'; END;",
+        "CREATE TRIGGER audit_fault AFTER INSERT ON native_deleted_scan_audits_v2 BEGIN DELETE FROM sentinel_targets WHERE scan_id='other-scan'; END;",
     ] {
         let (f,context,_root)=paid_single_deletion_fixture();let db=db::open(&f.path).unwrap();
         db.execute_batch("CREATE TABLE private_business(value TEXT);INSERT INTO private_business VALUES('original');INSERT INTO sentinel_scans(id,project_id,project_name,status,task_name) VALUES('other-scan',9001,'Mode test','draft','original');INSERT INTO sentinel_targets(project_id,scan_id,company,url) VALUES(9001,'other-scan','other','https://other.example.test/');").unwrap();
@@ -91,10 +91,10 @@ fn scan_deletion_paid_single_deleted_audit_is_immutable_and_rehashed_source_dama
     let db = db::open(&f.path).unwrap();
     delete_sentinel_scan_inner(&f.path, &f.scan).unwrap();
     let after = single_finally_physical(&db);
-    for sql in ["UPDATE native_deleted_scan_audits SET audit_hash='ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff'","DELETE FROM native_deleted_scan_audits","INSERT OR REPLACE INTO native_deleted_scan_audits SELECT * FROM native_deleted_scan_audits"] {assert!(db.execute_batch(sql).is_err());assert_eq!(single_finally_physical(&db),after);}
+    for sql in ["UPDATE native_deleted_scan_audits_v2 SET audit_hash='ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff'","DELETE FROM native_deleted_scan_audits_v2","INSERT OR REPLACE INTO native_deleted_scan_audits_v2 SELECT * FROM native_deleted_scan_audits_v2"] {assert!(db.execute_batch(sql).is_err());assert_eq!(single_finally_physical(&db),after);}
     let text: String = db
         .query_row(
-            "SELECT audit_json FROM native_deleted_scan_audits WHERE scan_id=?1",
+            "SELECT audit_json FROM native_deleted_scan_audits_v2 WHERE scan_id=?1",
             [&f.scan],
             |r| r.get(0),
         )
@@ -115,10 +115,10 @@ fn scan_deletion_paid_single_deleted_audit_is_immutable_and_rehashed_source_dama
     run["rows"][0][column]["value"] = json!("running");
     let corrupt = value.to_string();
     // Deliberate corruption in disposable DB only; no production trigger removal.
-    db.execute_batch("DROP TRIGGER deleted_audit_no_update")
+    db.execute_batch("DROP TRIGGER deleted_audit_v2_no_update")
         .unwrap();
     db.execute(
-        "UPDATE native_deleted_scan_audits SET audit_json=?1,audit_hash=?2 WHERE scan_id=?3",
+        "UPDATE native_deleted_scan_audits_v2 SET audit_json=?1,audit_hash=?2 WHERE scan_id=?3",
         params![
             corrupt,
             crate::agent_runtime::store::stable_hash(&corrupt),
@@ -141,7 +141,7 @@ fn scan_deletion_paid_single_missing_audit_cannot_acknowledge_ambiguous_retry() 
     let db = db::open(&f.path).unwrap();
     delete_sentinel_scan_inner(&f.path, &f.scan).unwrap();
     db.execute_batch(
-        "DROP TRIGGER deleted_audit_no_delete;DELETE FROM native_deleted_scan_audits;",
+        "DROP TRIGGER deleted_audit_v2_no_delete;DELETE FROM native_deleted_scan_audits_v2;",
     )
     .unwrap();
     let before = single_finally_physical(&db);
@@ -149,4 +149,42 @@ fn scan_deletion_paid_single_missing_audit_cannot_acknowledge_ambiguous_retry() 
         .unwrap_err()
         .contains("deleted_audit_original_sources_missing"));
     assert_eq!(single_finally_physical(&db), before);
+}
+
+#[test]
+fn scan_deletion_paid_single_v2_dual_archive_and_body_version_damage_are_rejected() {
+    for dual in [false, true] {
+        let (f, _context, _root) = paid_single_deletion_fixture();
+        let db = db::open(&f.path).unwrap();
+        delete_sentinel_scan_inner(&f.path, &f.scan).unwrap();
+        assert!(crate::agent_runtime::deleted_scan_audit::verify_deleted(&db, &f.scan).unwrap());
+        let (version,raw,hash,stamp):(i64,String,String,String)=db.query_row("SELECT version,audit_json,audit_hash,deleted_at FROM native_deleted_scan_audits_v2 WHERE scan_id=?1",[&f.scan],|r|Ok((r.get(0)?,r.get(1)?,r.get(2)?,r.get(3)?))).unwrap();
+        assert_eq!(version, 2);
+        let mut body: JsonValue = serde_json::from_str(&raw).unwrap();
+        assert_eq!(body["version"], 2);
+        if dual {
+            // Disposable cold collision; this is an invalid second archive,
+            // not a claim that newly born v2 sources were historically v1.
+            db.execute_batch("DROP TRIGGER deleted_audit_v1_v2_conflict")
+                .unwrap();
+            db.execute("INSERT INTO native_deleted_scan_audits(scan_id,version,audit_json,audit_hash,deleted_at) VALUES(?1,1,?2,?3,?4)",params![f.scan,raw,hash,stamp]).unwrap();
+        } else {
+            body["version"] = json!(1);
+            let corrupt = body.to_string();
+            db.execute_batch("DROP TRIGGER deleted_audit_v2_no_update")
+                .unwrap();
+            db.execute("UPDATE native_deleted_scan_audits_v2 SET audit_json=?1,audit_hash=?2 WHERE scan_id=?3",params![corrupt,crate::agent_runtime::store::stable_hash(&corrupt),f.scan]).unwrap();
+        }
+        let before = single_finally_physical(&db);
+        assert_eq!(
+            crate::agent_runtime::deleted_scan_audit::verify_deleted(&db, &f.scan).unwrap_err(),
+            if dual {
+                "deleted_audit_duplicate_archive"
+            } else {
+                "deleted_audit_deletion_conflict"
+            }
+        );
+        assert!(delete_sentinel_scan_inner(&f.path, &f.scan).is_err());
+        assert_eq!(single_finally_physical(&db), before);
+    }
 }

@@ -106,7 +106,7 @@ fn with_authority(
     }
     let id = uuid::Uuid::new_v4().to_string();
     let dedup_key = format!("{assignment_id}:{kind}:{correlation_id}:{evidence_revision}");
-    let payload_text = redact_json(payload).to_string();
+    let payload_text = crate::agent_runtime::multi_agent::homogeneous::material_policy::json(connection, &lease.root_run_id, payload)?.to_string();
     let inserted = connection
         .execute(
             "INSERT INTO agent_messages(id,run_id,from_agent,to_agent,kind,correlation_id,dedup_key,payload_json,root_run_id,from_run_id,to_run_id,assignment_id,evidence_revision) \

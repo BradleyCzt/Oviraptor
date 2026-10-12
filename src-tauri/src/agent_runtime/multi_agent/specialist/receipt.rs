@@ -61,7 +61,7 @@ fn event_payload(db: &Connection, call: &PendingCall, usage: &UsageDelta) -> Res
     )
 }
 
-fn verify_response(
+pub(super) fn verify_response(
     connection: &Connection,
     call: &PendingCall,
     row: &CallRow,
@@ -187,7 +187,9 @@ pub fn record_received_with_provenance(
     let text = if too_large {
         String::new()
     } else {
-        redact_text_with(text, None)
+        if super::super::homogeneous::material_policy::for_root(connection, &call.lease.root_run_id)? {
+            text.to_string()
+        } else { redact_text_with(text, None) }
     };
     let rejection = if !usage_reported {
         "model_usage_requires_reconciliation"

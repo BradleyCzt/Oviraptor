@@ -3,6 +3,13 @@
 fn fresh_multi_anonymous_control_dispatch(
     revoke: bool,
 ) -> (AgentHarness, OwnedAgentTargetOutcome, usize) {
+    fresh_multi_anonymous_control_dispatch_with_extra(revoke, 1)
+}
+
+fn fresh_multi_anonymous_control_dispatch_with_extra(
+    revoke: bool,
+    extra: usize,
+) -> (AgentHarness, OwnedAgentTargetOutcome, usize) {
     use std::sync::{
         atomic::{AtomicUsize, Ordering},
         Arc,
@@ -47,11 +54,18 @@ fn fresh_multi_anonymous_control_dispatch(
         &[("session-a", "cookie-alpha", "Bearer alpha")],
         "multi",
     );
+    let config_target = h.context.target_url.clone();
     let executor_round = AtomicUsize::new(0);
     let (port, seen, stop) = spawn_endpoint(Arc::new(move |wire| {
         let system = fresh_multi_wire_system(&wire);
         let response = if system.contains("You are the Root Coordinator") {
-            if wire.contains("client-side-output") {
+            let body: JsonValue = serde_json::from_str(wire.split_once("\r\n\r\n").unwrap().1).unwrap();
+            let input: JsonValue = serde_json::from_str(body["messages"][1]["content"].as_str().unwrap()).unwrap();
+            if input["basis"]["phase"] == "budget-consumption" {
+                proposal_model_response(&json!({"schemaVersion":1,"observed":["original settled Web SDK invoice"],"missing":[],"suggestions":["assess:budget_consumption"],"costNotes":[],"risks":[]}).to_string())
+            } else if input["basis"]["phase"] == "http-budget-consumption" {
+                proposal_model_response(&json!({"schemaVersion":1,"observed":["original sealed received HTTP fee"],"missing":[],"suggestions":["assess:http_budget_consumption"],"costNotes":[],"risks":[]}).to_string())
+            } else if wire.contains("client-side-output") {
                 proposal_model_response(&json!({"schemaVersion":1,"observed":["original configuration only"],"missing":["missing_browser_validation"],"suggestions":["assess:client_side_configuration"],"costNotes":[],"risks":[]}).to_string())
             } else if wire.contains("identity-session-output") {
                 proposal_model_response(&json!({"schemaVersion":1,"observed":["one captured account"],"missing":["no target comparison in metadata"],"suggestions":["assess:identity_session_metadata"],"costNotes":[],"risks":[]}).to_string())
@@ -81,13 +95,20 @@ fn fresh_multi_anonymous_control_dispatch(
                 .collect();
             proposal_model_response(&json!({"summary":"readonly configuration, no impact proof","observationRefs":refs,"gaps":["missing_browser_validation"],"candidates":[]}).to_string())
         } else if executor_round.fetch_add(1, Ordering::SeqCst) == 0 {
-            model_round(
-                &[(
-                    "compare_identities",
-                    json!({"leftIdentity":"session-a", "rightIdentity":"anonymous", "method":"GET", "path":"/api/profile", "family":"authentication_session"}),
-                )],
-                100,
-            )
+            let mut calls = vec![(
+                "compare_identities",
+                json!({"leftIdentity":"session-a", "rightIdentity":"anonymous", "method":"GET", "path":"/api/profile", "family":"authentication_session"}),
+            )];
+            if !revoke {
+                for index in 0..extra {
+                    let mut request = json!({"identity":"anonymous", "method":"GET", "url":format!("{}/",config_target.trim_end_matches('/')), "family":"authentication_session"});
+                    if extra>1 {
+                        request["headers"]=json!({"X-Oviraptor-Fixture-Observation":index.to_string()});
+                    }
+                    calls.push(("replay_http", request));
+                }
+            }
+            model_round(&calls, 100)
         } else {
             model_round(
                 &[(
@@ -150,7 +171,7 @@ fn fresh_multi_authenticated_anonymous_control_actual_entry_preserves_account_me
         h.model_seen.lock().unwrap().len(),
         owned.outcome.detail()
     );
-    assert_eq!(requests.len(), 3);
+    assert_eq!(requests.len(), 4, "the extra anonymous Broker configuration capture is real");
     let authenticated: Vec<_> = profiles
         .iter()
         .filter(|r| r.contains("cookie-alpha"))
@@ -178,6 +199,10 @@ fn fresh_multi_authenticated_anonymous_control_actual_entry_preserves_account_me
             assert_eq!(input["identityCount"], 1);
         }
     }
+    let diagnostic_db = db::open(&h.db_path).unwrap();
+    let diagnostic_usage = diagnostic_db.prepare("SELECT role,hard_request_budget,used_requests,status FROM agent_runs ORDER BY rowid").unwrap()
+        .query_map([], |r| Ok((r.get::<_,String>(0)?,r.get::<_,i64>(1)?,r.get::<_,i64>(2)?,r.get::<_,String>(3)?))).unwrap()
+        .collect::<rusqlite::Result<Vec<_>>>().unwrap();
     for role in [
         "Root Coordinator",
         "SPA/API Mapper",
@@ -189,7 +214,8 @@ fn fresh_multi_authenticated_anonymous_control_actual_entry_preserves_account_me
             models
                 .iter()
                 .any(|w| fresh_multi_wire_system(w).contains(role)),
-            "actual SDK missing {role}"
+            "actual SDK missing {role}; outcome={}; SDK={}; originalUsage={:?}",
+            owned.outcome.detail(), models.len(), diagnostic_usage
         );
     }
     let calls = models.len();
@@ -204,6 +230,14 @@ fn fresh_multi_authenticated_anonymous_control_actual_entry_preserves_account_me
     );
     let db = db::open(&h.db_path).unwrap();
     let root = owned.original_terminal.root_run_id.as_ref().unwrap();
+    let independent: (i64,i64) = db.query_row(
+        "SELECT count(*),count(DISTINCT json_extract(q.fact_json,'$.request.basis.changedFact.semantic.binding.evidenceId'))
+         FROM agent_root_tick_receipts q JOIN agent_root_tick_receipts p
+          ON p.call_id=q.call_id AND p.root_run_id=q.root_run_id AND p.phase='publication'
+         WHERE q.root_run_id=?1 AND q.phase='request' AND json_extract(q.fact_json,'$.request.basis.phase')='new-evidence'",
+        [root], |r| Ok((r.get(0)?,r.get(1)?)),
+    ).unwrap();
+    assert_eq!(independent,(3,3),"each of the three real Web HTTP effects retains a separate paid Root publication");
     assert_eq!(
         native_frozen_web_root_mode(&h.context).unwrap(),
         crate::agent_runtime::web_mode::WebMode::Multi
@@ -242,7 +276,7 @@ fn fresh_multi_authenticated_anonymous_control_actual_entry_preserves_account_me
             assert_eq!(b.consumed, calls as i64);
         }
         if dimension == "target_requests" {
-            assert_eq!(b.consumed, 3);
+            assert_eq!(b.consumed, 4);
         }
     }
     let mut tally = AgentPipelineTally::default();
@@ -266,7 +300,7 @@ fn fresh_multi_authenticated_anonymous_control_actual_entry_preserves_account_me
     assert_eq!(single_finally_physical(&db), before);
     assert_eq!(tally.counted(), 1);
     assert_eq!(h.model_seen.lock().unwrap().len(), calls);
-    assert_eq!(h.site_seen.lock().unwrap().len(), 3);
+    assert_eq!(h.site_seen.lock().unwrap().len(), 4);
 }
 
 #[test]
@@ -475,4 +509,37 @@ fn fresh_multi_anonymous_control_original_usage_rejects_imported_receipt_corrupt
     }
     assert_eq!(h.model_seen.lock().unwrap().len(), calls);
     assert_eq!(h.site_seen.lock().unwrap().len(), 2);
+}
+
+#[test]
+fn fresh_multi_http_supervision_capacity_refuses_batch_before_io_and_preserves_paid_web() {
+    let (h, owned, _) = fresh_multi_anonymous_control_dispatch_with_extra(false, 10);
+    assert!(matches!(owned.outcome, AgentTargetOutcome::Limited(_)), "{}", owned.outcome.detail());
+    assert!(owned.outcome.detail().contains("后续 Root 监督"), "{}", owned.outcome.detail());
+    assert!(!owned.outcome.detail().contains("executor_settlement_failed:"));
+    let db = db::open(&h.db_path).unwrap();
+    let web: (String,i64,i64,String) = db.query_row(
+        "SELECT r.status,r.used_requests,r.used_tokens,a.budget_settled_at FROM agent_runs r JOIN agent_assignments a ON a.child_run_id=r.id WHERE r.role='web_executor'",
+        [], |r| Ok((r.get(0)?,r.get(1)?,r.get(2)?,r.get(3)?)),
+    ).unwrap();
+    assert_eq!((web.0.as_str(),web.1,web.2), ("terminal",1,140));
+    assert!(!web.3.is_empty(), "post-exit failure cannot un-settle the actual Web invoice");
+    let physical = h.site_seen.lock().unwrap().len();
+    assert!(physical>3 && physical<13,"a batch proposes 12 Web requests, but only funded requests reach the actual server: {physical}");
+    let root = owned.original_terminal.root_run_id.as_ref().unwrap();
+    let (claims,paid): (i64,i64) = db.query_row(
+        "SELECT (SELECT count(*) FROM agent_http_request_claims c JOIN agent_runs r ON r.id=c.run_id WHERE r.root_run_id=?1 AND r.role='web_executor'),
+         (SELECT count(*) FROM agent_root_tick_receipts p JOIN agent_root_tick_receipts q ON q.call_id=p.call_id AND q.root_run_id=p.root_run_id AND q.phase='request'
+          WHERE p.root_run_id=?1 AND p.phase='publication' AND json_extract(q.fact_json,'$.request.basis.phase')='new-evidence')",
+        [root], |r| Ok((r.get(0)?,r.get(1)?)),
+    ).unwrap();
+    assert_eq!(claims,physical as i64-1,"the initial frontend capture is not a Web claim");
+    assert_eq!(paid,claims,"all admitted physical claims have independently paid supervision");
+    assert_eq!(h.model_seen.lock().unwrap().iter().filter(|wire| fresh_multi_wire_system(wire).contains("独立ClientSide配置事实专家")).count(),1);
+    for dimension in crate::agent_runtime::multi_agent::budget::DIMENSIONS {
+        let b=crate::agent_runtime::multi_agent::budget::balance(&db,root,None,dimension).unwrap();
+        assert_eq!((b.reserved,b.indeterminate),(0,0));
+        if dimension=="model_requests" {assert_eq!(b.consumed,h.model_seen.lock().unwrap().len() as i64);}
+        if dimension=="target_requests" {assert_eq!(b.consumed,physical as i64);}
+    }
 }

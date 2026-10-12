@@ -46,7 +46,12 @@ fn directive_action_native_request_uses_the_committed_priority_not_only_chat_tex
     let id = confirm_queue_directive(&connection, &session.lease, "请优先检查权限控制");
     let outcome = NativeAgentBackend.execute(&harness.context);
     let wire = seen.lock().unwrap().clone();
-    assert_eq!(wire.len(), 7, "four original paid Root including HumanDirective, one Mapper, two actual WebExecutor requests: {outcome:?}");
+    let root_calls = wire.iter().filter(|request| fresh_multi_wire_system(request).contains("You are the Root Coordinator")).count();
+    assert_eq!(root_calls, 5, "existing business-logic assessment plus HumanDirective and feedback rounds");
+    assert_eq!(wire.len(), root_calls + 3, "one Mapper, two actual WebExecutor requests: {outcome:?}");
+    let recorded: i64 = connection.query_row("SELECT COUNT(*) FROM agent_root_model_journal WHERE root_run_id=?1 AND phase='received'", [&session.lease.root_run_id], |row| row.get(0)).unwrap();
+    assert_eq!(recorded, root_calls as i64, "every physical Root call retains its original receipt");
+    assert_eq!(crate::agent_runtime::multi_agent::budget::balance(&connection, &session.lease.root_run_id, Some(""), "model_requests").unwrap().consumed, root_calls as i64);
     let requests = wire.iter().filter(|request| {
         let system = fresh_multi_wire_system(request);
         !system.contains("You are the Root Coordinator") && !system.contains("SPA/API Mapper")

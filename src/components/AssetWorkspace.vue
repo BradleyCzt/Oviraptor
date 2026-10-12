@@ -57,6 +57,10 @@ const allColumns = [
   ["title", "标题", "Title"],
   ["statusCode", "状态码", "Status"],
   ["probeOutcome", "探测结果", "Probe result"],
+  ["hasLogin", "登录口", "Login portal"],
+  ["hasRegister", "注册口", "Register portal"],
+  ["entrySeen", "是否看过", "Seen"],
+  ["entryOpenedAt", "访问入口打开时间", "Entry opened at"],
   ["probeEntryState", "入口状态", "Entry state"],
   ["contentCategory", "内容分类", "Content"],
   ["score", "评分", "Score"],
@@ -67,7 +71,7 @@ const allColumns = [
   ["authorizationStatus", "授权状态", "Authorization"],
   ["exposureEligible", "暴露面准入", "Exposure eligible"],
   ["ownershipReason", "归属依据", "Ownership reason"],
-  ["sentinelStatus", "调查状态", "Investigation state"],
+  ["sentinelStatus", "调查状态 / 是否发送扫描", "Investigation state / Sent for scanning"],
   ["sentinelScanCount", "扫描次数", "Scan count"],
   ["sentinelSentAt", "最近送扫", "Last sent"],
   ["firstSeen", "全局首次发现", "Global first seen"],
@@ -113,21 +117,33 @@ const sentinelStatusOptions = [
   ["completed", "已完成", "Completed"],
   ["failed", "失败", "Failed"],
 ] as const;
+const portalPresenceOptions = [
+  ["1", "有", "Present"],
+  ["0", "无", "Absent"],
+  ["-1", "未识别", "Not screened"],
+] as const;
+const entrySeenOptions = [
+  ["1", "已看", "Seen"],
+  ["0", "未看", "Not seen"],
+] as const;
 const selectFieldOptions: Record<string, readonly (readonly [string, string, string])[]> = {
   probeOutcome: probeOutcomeOptions,
   decision: decisionOptions,
   reviewTier: reviewTierOptions,
   sentinelStatus: sentinelStatusOptions,
   isDeleted: [["0", "正常", "Active"], ["1", "回收站", "Trash"]],
+  hasLogin: portalPresenceOptions,
+  hasRegister: portalPresenceOptions,
+  entrySeen: entrySeenOptions,
 };
 const numericFields = new Set(["port", "statusCode", "score", "sentinelScanCount", "lastRunId", "ownershipConfidence"]);
-const dateFields = new Set(["firstSeen", "lastSeen", "lastAlive", "projectFirstSeen", "projectLastSeen", "sentinelSentAt", "deletedAt"]);
-const sortableFields = new Set(["company", "host", "title", "statusCode", "score", "decision", "ownershipStatus", "ownershipConfidence", "exposureEligible", "probeOutcome", "firstSeen", "projectLastSeen", "lastAlive"]);
-const defaultColumns = ["projectName", "company", "reviewTier", "host", "ip", "port", "statusCode", "probeOutcome", "title", "decision", "sentinelStatus", "projectLastSeen"];
+const dateFields = new Set(["firstSeen", "lastSeen", "lastAlive", "projectFirstSeen", "projectLastSeen", "sentinelSentAt", "deletedAt", "entryOpenedAt"]);
+const sortableFields = new Set(["company", "host", "title", "statusCode", "score", "decision", "ownershipStatus", "ownershipConfidence", "exposureEligible", "probeOutcome", "hasLogin", "hasRegister", "entrySeen", "firstSeen", "projectLastSeen", "lastAlive"]);
+const defaultColumns = ["projectName", "company", "reviewTier", "host", "ip", "port", "statusCode", "probeOutcome", "hasLogin", "hasRegister", "entrySeen", "title", "decision", "sentinelStatus", "projectLastSeen"];
 const defaultColumnWidths: Record<string, number> = {
   projectName: 150, assetKey: 230, company: 170, reviewTier: 90, host: 230, link: 260,
   ip: 140, port: 76, protocol: 92, domain: 190, title: 280, statusCode: 86,
-  probeOutcome: 145, probeEntryState: 165, contentCategory: 120, score: 80,
+  probeOutcome: 145, hasLogin: 88, hasRegister: 88, entrySeen: 92, entryOpenedAt: 168, probeEntryState: 165, contentCategory: 120, score: 80,
   decision: 120, note: 260, sentinelStatus: 160, sentinelScanCount: 92,
   ownershipStatus: 110, ownershipConfidence: 95, authorizationStatus: 100,
   exposureEligible: 105, ownershipReason: 300,
@@ -136,7 +152,19 @@ const defaultColumnWidths: Record<string, number> = {
 };
 const validColumnKeys = new Set<string>(allColumns.map((item) => item[0]));
 const savedColumns = JSON.parse(localStorage.getItem("asset-columns") || "[]") as string[];
-const visibleColumns = ref<string[]>(savedColumns.filter((item) => validColumnKeys.has(item)).length ? savedColumns.filter((item) => validColumnKeys.has(item)) : [...defaultColumns]);
+const savedVisible = savedColumns.filter((item) => validColumnKeys.has(item));
+function withPortalColumns(columns: string[]) {
+  if (localStorage.getItem("asset-portal-columns-v1")) return columns;
+  const next = [...columns];
+  const at = next.indexOf("probeOutcome");
+  const insertAt = at >= 0 ? at + 1 : next.length;
+  for (const key of ["entrySeen", "hasRegister", "hasLogin"]) {
+    if (!next.includes(key)) next.splice(insertAt, 0, key);
+  }
+  localStorage.setItem("asset-portal-columns-v1", "1");
+  return next;
+}
+const visibleColumns = ref<string[]>(savedVisible.length ? withPortalColumns(savedVisible) : [...defaultColumns]);
 const columnWidths = ref<Record<string, number>>({ ...defaultColumnWidths, ...JSON.parse(localStorage.getItem("asset-column-widths") || "{}") });
 const showColumns = ref(false);
 const showFilters = ref(false);
@@ -166,6 +194,9 @@ const query = ref<AssetQuery>({
   sentinelView: "all",
   decisionView: props.quarantineOnly ? "all" : "review",
   ownershipView: "all",
+  hasLoginView: "all",
+  hasRegisterView: "all",
+  entrySeenView: "all",
   sortBy: "priority",
   sortDirection: "desc",
 });
@@ -252,6 +283,9 @@ function resetQueryFilters() {
   query.value.sentinelView = "all";
   query.value.decisionView = props.quarantineOnly ? "all" : "review";
   query.value.ownershipView = "all";
+  query.value.hasLoginView = "all";
+  query.value.hasRegisterView = "all";
+  query.value.entrySeenView = "all";
   query.value.deletedView = "active";
   query.value.sortBy = "priority";
   query.value.sortDirection = "desc";
@@ -301,7 +335,12 @@ function sortColumn(column: string) {
   search(false);
 }
 function columnLabel(column: string) { const item = allColumns.find((candidate) => candidate[0] === column); return item ? tr(item[1], item[2]) : column; }
-function value(asset: Asset, column: string) { return (asset as unknown as Record<string, unknown>)[column] ?? ""; }
+function value(asset: Asset, column: string) {
+  if (column === "entrySeen") return asset.entryOpenedAt ? "1" : "0";
+  if (column === "hasLogin") return asset.hasLogin ?? -1;
+  if (column === "hasRegister") return asset.hasRegister ?? -1;
+  return (asset as unknown as Record<string, unknown>)[column] ?? "";
+}
 function decisionLabel(value: string) { const item = decisionOptions.find((option) => option[0] === (value || "pending")); return item ? tr(item[1], item[2]) : value; }
 function badgeClass(column: string, raw: string) {
   if (column === "probeOutcome") return `status-${raw || "unknown"}`;
@@ -312,6 +351,8 @@ function badgeClass(column: string, raw: string) {
   if (column === "contentCategory") return `content-${raw || "unknown"}`;
   if (column === "sentinelStatus") return `sentinel-${raw || "not_sent"}`;
   if (column === "isDeleted") return raw === "true" || raw === "1" ? "decision-rejected" : "decision-confirmed";
+  if (column === "hasLogin" || column === "hasRegister") return raw === "1" ? "decision-confirmed" : raw === "0" ? "decision-not_applicable" : "status-unknown";
+  if (column === "entrySeen") return raw === "1" ? "decision-confirmed" : "status-unknown";
   return "";
 }
 function probeLabel(raw: string) { const item = probeOutcomeOptions.find((option) => option[0] === raw); return item ? tr(item[1], item[2]) : raw; }
@@ -321,12 +362,38 @@ function sentinelLabel(asset: Asset) {
   const label = item ? tr(item[1], item[2]) : asset.sentinelStatus;
   return asset.sentinelScanCount > 1 ? tr(`${label} · ${asset.sentinelScanCount} 次`, `${label} · ${asset.sentinelScanCount} scans`) : label;
 }
+function portalLabel(flag: number) {
+  if (flag === 1) return tr("有", "Present");
+  if (flag === 0) return tr("无", "Absent");
+  return tr("未识别", "Not screened");
+}
+function entryUrl(asset: Asset) {
+  const url = asset.extra?.probe_effective_url || asset.link || asset.host;
+  return url?.startsWith("http") ? url : "";
+}
+function stampEntryOpened(asset: Asset, openedAt: string) {
+  const stamped = { ...asset, entryOpenedAt: openedAt };
+  if (query.value.entrySeenView === "unseen") {
+    assets.value = assets.value.filter((item) => !(item.projectId === asset.projectId && item.id === asset.id));
+    total.value = Math.max(0, total.value - 1);
+  } else {
+    assets.value = assets.value.map((item) => item.projectId === asset.projectId && item.id === asset.id ? stamped : item);
+  }
+  if (selected.value.has(selectionKey(asset))) {
+    const next = new Map(selected.value);
+    next.set(selectionKey(asset), stamped);
+    selected.value = next;
+  }
+}
 function displayValue(asset: Asset, column: string) {
   if (column === "decision") return decisionLabel(asset.decision);
   if (column === "ownershipStatus") return ({ unreviewed: tr("未判断","Unreviewed"), attributed: tr("疑似归属","Attributed"), confirmed: tr("确认归属","Confirmed"), related: tr("仅关联","Related"), third_party: tr("第三方","Third party"), excluded: tr("已排除","Excluded") } as Record<string,string>)[asset.ownershipStatus] || asset.ownershipStatus;
   if (column === "authorizationStatus") return ({ allowed: tr("允许","Allowed"), denied: tr("禁止","Denied"), unknown: tr("未知","Unknown") } as Record<string,string>)[asset.authorizationStatus] || asset.authorizationStatus;
   if (column === "exposureEligible") return asset.exposureEligible ? tr("允许准入","Eligible") : tr("不准入","Not eligible");
   if (column === "probeOutcome") return probeLabel(asset.probeOutcome);
+  if (column === "hasLogin") return portalLabel(Number(asset.hasLogin ?? -1));
+  if (column === "hasRegister") return portalLabel(Number(asset.hasRegister ?? -1));
+  if (column === "entrySeen") return asset.entryOpenedAt ? tr("已看", "Seen") : tr("未看", "Not seen");
   if (column === "isDeleted") return asset.isDeleted ? tr("回收站", "Trash") : tr("正常", "Active");
   return String(value(asset, column) || "—");
 }
@@ -377,9 +444,30 @@ async function exportCurrent() {
     emit("notify", "success", tr(`已导出 ${result.rows} 条：${result.path}`, `Exported ${result.rows} rows: ${result.path}`));
   } catch (error) { emit("notify", "error", String(error)); }
 }
+async function openLink(asset: Asset) {
+  const url = String(value(asset, "link") || "");
+  if (!url.startsWith("http")) return;
+  try {
+    await openUrl(url);
+  } catch (error) {
+    emit("notify", "error", String(error));
+  }
+}
 async function openAsset(asset: Asset) {
-  const url = asset.extra?.probe_effective_url || asset.link || asset.host;
-  if (url?.startsWith("http")) await openUrl(url);
+  const url = entryUrl(asset);
+  if (!url) return;
+  try {
+    await openUrl(url);
+  } catch (error) {
+    emit("notify", "error", String(error));
+    return;
+  }
+  try {
+    const openedAt = await api.markAssetEntryOpened(asset.projectId, asset.id);
+    stampEntryOpened(asset, openedAt);
+  } catch (error) {
+    emit("notify", "error", String(error));
+  }
 }
 function captureTitleSelection(event: MouseEvent, asset: Asset) {
   const selection = window.getSelection();
@@ -438,10 +526,13 @@ onMounted(refresh);
         <label><span>{{tr('具体探测结果（二次筛选）','Exact probe result')}}</span><select v-model="query.probeOutcomeView" class="toolbar-select" @change="changeProbeOutcome"><option value="all">{{tr('全部具体结果','All exact results')}}</option><option v-for="option in probeOutcomeOptions" :key="option[0]" :value="option[0]">{{tr(option[1],option[2])}}</option></select></label>
         <label><span>{{tr('人工结论','Decision')}}</span><select v-model="query.decisionView" class="toolbar-select" @change="search"><option value="review">{{tr('待复核（未审核 + 待补证据）','Review: pending + needs evidence')}}</option><option value="pending">{{tr('仅未审核','Not reviewed only')}}</option><option value="uncertain">{{tr('仅待补证据','Needs evidence only')}}</option><option value="confirmed">{{tr('已确认有效','Confirmed valid')}}</option><option value="rejected">{{tr('已排除','Rejected')}}</option><option value="not_applicable">{{tr('不适用 Web','Not applicable')}}</option><option value="all">{{tr('全部人工结论','All decisions')}}</option></select></label>
         <label><span>{{tr('调查状态','Investigation state')}}</span><select v-model="query.sentinelView" class="toolbar-select" @change="search"><option value="all">{{tr('全部调查状态','All investigation states')}}</option><option value="sent">{{tr('已发起调查','Investigated')}}</option><option value="not_sent">{{tr('未发起调查','Not investigated')}}</option></select></label>
+        <label><span>{{tr('登录口','Login portal')}}</span><select v-model="query.hasLoginView" class="toolbar-select" @change="search"><option value="all">{{tr('全部','All')}}</option><option value="yes">{{tr('有','Present')}}</option><option value="no">{{tr('无','Absent')}}</option><option value="unknown">{{tr('未识别','Not screened')}}</option></select></label>
+        <label><span>{{tr('注册口','Register portal')}}</span><select v-model="query.hasRegisterView" class="toolbar-select" @change="search"><option value="all">{{tr('全部','All')}}</option><option value="yes">{{tr('有','Present')}}</option><option value="no">{{tr('无','Absent')}}</option><option value="unknown">{{tr('未识别','Not screened')}}</option></select></label>
+        <label><span>{{tr('是否看过','Seen')}}</span><select v-model="query.entrySeenView" class="toolbar-select" @change="search"><option value="all">{{tr('全部','All')}}</option><option value="seen">{{tr('已看','Seen')}}</option><option value="unseen">{{tr('未看','Not seen')}}</option></select></label>
         <label><span>{{tr('数据范围','Data scope')}}</span><select v-model="query.deletedView" class="toolbar-select" @change="search"><option value="active">{{tr('正常资产','Active assets')}}</option><option value="trash">{{tr('仅回收站','Trash only')}}</option><option value="all">{{tr('正常 + 回收站','Active + trash')}}</option></select></label>
-        <label><span>{{tr('排序','Sort')}}</span><span class="sort-control"><select v-model="query.sortBy" class="toolbar-select" @change="search(false)"><option value="priority">{{tr('复核优先级','Review priority')}}</option><option value="projectLastSeen">{{tr('项目最后发现','Project last seen')}}</option><option value="lastAlive">{{tr('最后存活','Last alive')}}</option><option value="score">{{tr('评分','Score')}}</option><option value="statusCode">{{tr('状态码','Status')}}</option><option value="company">{{tr('公司名称','Company')}}</option><option value="host">{{tr('访问入口','Host')}}</option><option value="title">{{tr('标题','Title')}}</option></select><button class="sort-direction" :title="query.sortDirection === 'desc' ? tr('当前降序','Descending') : tr('当前升序','Ascending')" @click="query.sortDirection=query.sortDirection==='desc'?'asc':'desc';search(false)">{{query.sortDirection==='desc'?'↓':'↑'}}</button></span></label>
+        <label><span>{{tr('排序','Sort')}}</span><span class="sort-control"><select v-model="query.sortBy" class="toolbar-select" @change="search(false)"><option value="priority">{{tr('复核优先级','Review priority')}}</option><option value="projectLastSeen">{{tr('项目最后发现','Project last seen')}}</option><option value="lastAlive">{{tr('最后存活','Last alive')}}</option><option value="score">{{tr('评分','Score')}}</option><option value="statusCode">{{tr('状态码','Status')}}</option><option value="company">{{tr('公司名称','Company')}}</option><option value="host">{{tr('访问入口','Host')}}</option><option value="title">{{tr('标题','Title')}}</option><option value="hasLogin">{{tr('登录口','Login portal')}}</option><option value="hasRegister">{{tr('注册口','Register portal')}}</option><option value="entrySeen">{{tr('是否看过','Seen')}}</option></select><button class="sort-direction" :title="query.sortDirection === 'desc' ? tr('当前降序','Descending') : tr('当前升序','Ascending')" @click="query.sortDirection=query.sortDirection==='desc'?'asc':'desc';search(false)">{{query.sortDirection==='desc'?'↓':'↑'}}</button></span></label>
       </div>
-      <div class="asset-filter-hint"><span>{{tr('“探测队列”确定一级范围，“具体探测结果”会在当前范围内继续筛选；高级查询可再叠加状态码、入口状态、标题和调查状态。','Probe queue sets the primary scope; exact probe result filters within it. Advanced conditions can add status, entry state, title and investigation state.')}}</span><b v-if="query.probeOutcomeView && query.probeOutcomeView !== 'all'">{{tr('当前二次筛选：','Secondary filter: ')}}{{probeLabel(query.probeOutcomeView)}}</b></div>
+      <div class="asset-filter-hint"><span>{{tr('探测队列确定一级范围。登录口、注册口和是否看过可以在这里筛选，高级查询里也能按同样的值过滤。点「访问入口」打开浏览器后，这条资产会记为已看。','Probe queue sets the primary scope. Login portal, register portal and seen state can be filtered here or in advanced query. Opening a browser from Access entry marks that asset as seen.')}}</span><b v-if="query.probeOutcomeView && query.probeOutcomeView !== 'all'">{{tr('当前二次筛选：','Secondary filter: ')}}{{probeLabel(query.probeOutcomeView)}}</b></div>
       <div class="asset-toolbar-actions">
         <button class="button ghost compact" :class="{ active: showFilters }" @click="showFilters=!showFilters"><Filter :size="15" /> {{tr('高级查询','Advanced')}} <span v-if="query.conditions.length" class="mini-count">{{query.conditions.length}}</span></button>
         <button class="button ghost compact" :title="tr('清除搜索、探测结果和组合条件','Clear search, probe result and combined conditions')" @click="resetQueryFilters"><RotateCcw :size="14" /> {{tr('重置查询','Reset query')}}</button>
@@ -492,11 +583,12 @@ onMounted(refresh);
           <colgroup><col style="width:40px" /><col v-for="column in visibleColumns" :key="column" :style="{width:`${columnWidth(column)}px`}" /></colgroup>
           <thead><tr><th class="check-cell"><input v-model="selectedAll" type="checkbox" /></th><th v-for="column in visibleColumns" :key="column" :style="{width:`${columnWidth(column)}px`}"><button class="asset-sort-heading" :class="{ sortable: sortableFields.has(column), active: query.sortBy === column }" :disabled="!sortableFields.has(column)" @click="sortColumn(column)"><span>{{columnLabel(column)}}</span><ArrowUpDown v-if="sortableFields.has(column)" :size="12" /><b v-if="query.sortBy === column">{{query.sortDirection === 'desc' ? '↓' : '↑'}}</b></button><i class="column-resizer" :title="tr('拖动调整列宽，双击恢复','Drag to resize; double-click to reset')" @pointerdown="startColumnResize($event,column)" @dblclick.stop="resetColumnWidth(column)"></i></th></tr></thead>
           <tbody>
-            <tr v-for="asset in assets" :key="`${asset.projectId}-${asset.id}`" :class="{ selected: selected.has(selectionKey(asset)), deleted: asset.isDeleted }">
+            <tr v-for="asset in assets" :key="`${asset.projectId}-${asset.id}`" :class="{ selected: selected.has(selectionKey(asset)), deleted: asset.isDeleted, 'entry-seen': !!asset.entryOpenedAt }">
               <td class="check-cell"><input type="checkbox" :checked="selected.has(selectionKey(asset))" @change="onAssetCheckbox(asset,$event)" /></td>
               <td v-for="column in visibleColumns" :key="column" :class="[`col-${column}`]">
-                <button v-if="['host','link'].includes(column) && String(value(asset,column)).startsWith('http')" class="asset-link" :title="String(value(asset,column))" @click="openAsset(asset)">{{ displayValue(asset,column) }}</button>
-                <span v-else-if="['probeOutcome','reviewTier','decision','ownershipStatus','exposureEligible','contentCategory','isDeleted'].includes(column)" class="data-badge" :class="badgeClass(column,String(value(asset,column)))">{{displayValue(asset,column)}}</span>
+                <button v-if="column === 'host' && entryUrl(asset)" class="asset-link" :title="entryUrl(asset)" @click="openAsset(asset)">{{ displayValue(asset,column) }}</button>
+                <button v-else-if="column === 'link' && String(value(asset,column)).startsWith('http')" class="asset-link" :title="String(value(asset,column))" @click="openLink(asset)">{{ displayValue(asset,column) }}</button>
+                <span v-else-if="['probeOutcome','reviewTier','decision','ownershipStatus','exposureEligible','contentCategory','isDeleted','hasLogin','hasRegister','entrySeen'].includes(column)" class="data-badge" :class="badgeClass(column,String(value(asset,column)))" :title="column === 'entrySeen' ? (asset.entryOpenedAt || '') : ''">{{displayValue(asset,column)}}</span>
                 <span v-else-if="column==='sentinelStatus'" class="data-badge" :class="badgeClass(column,asset.sentinelStatus)" :title="asset.sentinelSentAt||''">{{sentinelLabel(asset)}}</span>
                 <span v-else-if="column==='title'" class="title-rule-source" :title="String(value(asset,column))" @mouseup="captureTitleSelection($event,asset)">{{value(asset,column)||'—'}}</span>
                 <span v-else :title="String(value(asset,column))">{{ displayValue(asset,column) }}</span>

@@ -18,6 +18,8 @@ use std::{
 };
 
 pub const RUNTIME_EVENT_LIMIT: i64 = 20_000;
+mod financial_continuation;
+pub(crate) use financial_continuation::insert_financial_continuation_root_in;
 
 /// Only this store can construct proof of an insert in the current transaction.
 /// Sidecar writers cannot take an arbitrary existing Root id and upgrade it.
@@ -25,8 +27,8 @@ pub(crate) struct NewlyInsertedNativeRoot<'tx, 'connection> {
     transaction: &'tx Transaction<'connection>,
     id: &'tx str,
 }
-impl NewlyInsertedNativeRoot<'_, '_> {
-    pub(crate) fn transaction(&self) -> &Transaction<'_> {
+impl<'tx, 'connection> NewlyInsertedNativeRoot<'tx, 'connection> {
+    pub(crate) fn transaction(&self) -> &'tx Transaction<'connection> {
         self.transaction
     }
     pub(crate) fn id(&self) -> &str {
@@ -274,12 +276,24 @@ pub(crate) fn record_attempt_plan_with_declarations(
     declaration:Option<&super::multi_agent::budget::root_definition::NewRootBudgetDeclaration>,
     mode_declaration:Option<&super::web_mode::root::NewRootModeDeclaration>,
 ) -> Result<(),String> {
+    record_attempt_plan_with_declarations_and_tool_configuration(connection,scan_id,attempt_number,target_url,
+        backend,plan_hash,plan,declaration,mode_declaration,None)
+}
+
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn record_attempt_plan_with_declarations_and_tool_configuration(
+    connection:&Connection, scan_id:&str, attempt_number:i64, target_url:&str,
+    backend:AgentBackendKind, plan_hash:&str, plan:&JsonValue,
+    declaration:Option<&super::multi_agent::budget::root_definition::NewRootBudgetDeclaration>,
+    mode_declaration:Option<&super::web_mode::root::NewRootModeDeclaration>,
+    configuration:Option<&crate::tool_supply::ToolAdministratorConfiguration>,
+) -> Result<(),String> {
     record_attempt_plan_with_declarations_on(connection,scan_id,attempt_number,target_url,
-        backend,plan_hash,plan,declaration,mode_declaration,ModeFinancialCreation::New)
+        backend,plan_hash,plan,declaration,mode_declaration,ModeFinancialCreation::New(configuration))
 }
 
 #[derive(Clone,Copy)]
-enum ModeFinancialCreation {New, #[cfg(test)] HistoricalFixture}
+enum ModeFinancialCreation<'a> {New(Option<&'a crate::tool_supply::ToolAdministratorConfiguration>), #[cfg(test)] HistoricalFixture}
 
 #[allow(clippy::too_many_arguments)]
 fn record_attempt_plan_with_declarations_on(
@@ -287,7 +301,7 @@ fn record_attempt_plan_with_declarations_on(
     backend:AgentBackendKind, plan_hash:&str, plan:&JsonValue,
     declaration:Option<&super::multi_agent::budget::root_definition::NewRootBudgetDeclaration>,
     mode_declaration:Option<&super::web_mode::root::NewRootModeDeclaration>,
-    financial_creation:ModeFinancialCreation,
+    financial_creation:ModeFinancialCreation<'_>,
 ) -> Result<(),String> {
     if let Some(mode)=mode_declaration {mode.validate_scope(scan_id,attempt_number,target_url,plan_hash)?;}
     if backend != AgentBackendKind::Native {
@@ -332,7 +346,7 @@ fn record_attempt_plan_with_declarations_on(
         return Err("budget_declaration_requires_new_root".into());
     }
     let mut mode_writer=mode_declaration.map(|mode|match financial_creation {
-        ModeFinancialCreation::New=>super::web_mode::writer::ModeRootWriter::install(&transaction,mode,declaration),
+        ModeFinancialCreation::New(_)=>super::web_mode::writer::ModeRootWriter::install(&transaction,mode,declaration),
         #[cfg(test)] ModeFinancialCreation::HistoricalFixture=>super::web_mode::writer::ModeRootWriter::install_historical_for_test(&transaction,mode,declaration),
     }).transpose()?;
     // authorizer is one setter: choose exactly one writer, never nest them.
@@ -363,7 +377,7 @@ fn record_attempt_plan_with_declarations_on(
             "plan-{scan_id}-{attempt_number}-{}",
             &stable_hash(target_url)[..12]
         );
-        let born_ceilings=if mode_declaration.is_some() && matches!(financial_creation,ModeFinancialCreation::New) {
+        let born_ceilings=if mode_declaration.is_some() && matches!(financial_creation,ModeFinancialCreation::New(_)) {
             ["softUncachedTokens","hardTotalTokens","softModelRequests","hardModelRequests"]
                 .map(|key|plan["budgets"][key].as_i64().filter(|v|*v>=0).ok_or("web_finance_original_ceiling_invalid"))
                 .into_iter().collect::<Result<Vec<_>,_>>()?
@@ -387,6 +401,14 @@ fn record_attempt_plan_with_declarations_on(
         }
         if let Some(mode)=mode_declaration {super::web_mode::root::freeze_new(&fresh,mode)?;}
         if let Some(writer)=mode_writer.as_mut() {writer.publish_finance(&fresh)?;}
+        if let ModeFinancialCreation::New(Some(configuration)) = financial_creation {
+            mode_writer.as_mut().ok_or("tool_supply_private_mode_required")?
+                .publish_tool_supply(&fresh, configuration)?;
+        }
+        #[cfg(test)]
+        if let Some(writer)=mode_writer.as_mut().filter(|_| matches!(financial_creation,ModeFinancialCreation::New(None))) {
+            crate::tool_supply::frozen_plan::tests::capture_original_fresh_root_for_test(&fresh,writer)?;
+        }
     } else {
         for (id, stored_json, _, _, _) in &existing {
             if stored_json == "{}" || stored_json.is_empty() {

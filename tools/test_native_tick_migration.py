@@ -1,5 +1,6 @@
 """Temporary SQLite fault tests; not real model or installed-app acceptance."""
 import json
+import re
 import sqlite3
 import tempfile
 import unittest
@@ -158,6 +159,41 @@ class NativeTickMigrationTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, 'schema_unrecognized'):
             inventory(self.path, self.root / 'backups')
         self.assertEqual(self.original(), before)
+
+    def test_wal_source_backup_verifies_without_sidecar_files(self):
+        # The app database is WAL; its online backup keeps the WAL header. The
+        # backup must verify on every SQLite build (macOS's system libsqlite3
+        # refuses mode=ro without -shm) and nothing may be written beside it.
+        db = sqlite3.connect(self.path)
+        self.assertEqual(db.execute('PRAGMA journal_mode=WAL').fetchone()[0], 'wal')
+        db.close()
+        before, report = self.prepare()
+        backup = Path(json.loads(Path(report['inventory']).read_bytes())['backup'])
+        self.assertEqual(sorted(p.name for p in backup.parent.iterdir()), ['database.sqlite3.backup', 'inventory.json'])
+        self.assertEqual(self.upgrade(report), {'state': 'current', 'changed': True})
+        self.assertEqual(sorted(p.name for p in backup.parent.iterdir()), ['database.sqlite3.backup', 'inventory.json'])
+        self.assertEqual(self.original()['tables'], before['tables'])
+
+    def test_upgrade_never_creates_tick_tables_outside_its_scope(self):
+        db = sqlite3.connect(self.path)
+        db.execute('DROP TABLE agent_root_tick_terminal_proofs')
+        db.close()
+        _, report = self.prepare()
+        self.assertTrue(self.upgrade(report)['changed'])
+        db = sqlite3.connect(self.path)
+        names = {r[0] for r in db.execute("SELECT name FROM sqlite_master")}
+        db.close()
+        self.assertNotIn('agent_root_tick_terminal_proofs', names)
+
+    def test_unrecognized_or_incomplete_trusted_ddl_fails_closed(self):
+        from native_tick_migration_schema import SCHEMA_PATH as trusted, managed_statements
+        text = trusted.read_text()
+        with self.assertRaisesRegex(ValueError, 'trusted_ddl_unrecognized'):
+            list(managed_statements(text + '\nCREATE INDEX IF NOT EXISTS sneaky ON agent_root_tick_receipts(round);\n'))
+        with self.assertRaisesRegex(ValueError, 'trusted_ddl_unrecognized'):
+            list(managed_statements(text + "\nCREATE TRIGGER IF NOT EXISTS sneaky BEFORE INSERT ON agent_root_tick_receipts BEGIN SELECT 1; END;\n"))
+        with self.assertRaisesRegex(ValueError, 'trusted_ddl_incomplete'):
+            list(managed_statements(re.sub(r'CREATE TRIGGER IF NOT EXISTS root_tick_no_update .*?END;', '', text, count=1, flags=re.S)))
 
 
 if __name__ == '__main__':

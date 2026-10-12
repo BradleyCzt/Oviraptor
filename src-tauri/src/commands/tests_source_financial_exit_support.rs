@@ -12,12 +12,42 @@ fn source_exit_snapshot(db: &rusqlite::Connection) -> SourceExitSnapshot {
     names
         .into_iter()
         .map(|name| {
-            let mut query = db
-                .prepare(&format!(
-                    "SELECT rowid,* FROM \"{}\" ORDER BY rowid",
-                    name.replace('"', "\"\"")
-                ))
+            let quote = |name: &str| format!("\"{}\"", name.replace('"', "\"\""));
+            let without_rowid: bool = db
+                .query_row(
+                    "SELECT wr FROM pragma_table_list WHERE schema='main' AND name=?1",
+                    [&name],
+                    |r| r.get(0),
+                )
                 .unwrap();
+            let sql = if without_rowid {
+                // Retain every original column. These immutable receipt tables
+                // have no rowid; their declared composite PK defines stable order.
+                let keys = db
+                    .prepare("SELECT name FROM pragma_table_info(?1) WHERE pk>0 ORDER BY pk")
+                    .unwrap()
+                    .query_map([&name], |r| r.get::<_, String>(0))
+                    .unwrap()
+                    .collect::<rusqlite::Result<Vec<_>>>()
+                    .unwrap();
+                assert!(
+                    !keys.is_empty(),
+                    "WITHOUT ROWID table missing original PK: {name}"
+                );
+                format!(
+                    "SELECT * FROM {} ORDER BY {}",
+                    quote(&name),
+                    keys.iter()
+                        .map(|key| quote(key))
+                        .collect::<Vec<_>>()
+                        .join(",")
+                )
+            } else {
+                // Keep the original rowid prefix and index positions used by
+                // financial append assertions below, rather than reshaping them.
+                format!("SELECT rowid,* FROM {} ORDER BY rowid", quote(&name))
+            };
+            let mut query = db.prepare(&sql).unwrap();
             let count = query.column_count();
             let rows = query
                 .query_map([], |r| {

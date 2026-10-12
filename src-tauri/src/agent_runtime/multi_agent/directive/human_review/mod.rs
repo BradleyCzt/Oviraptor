@@ -39,7 +39,7 @@ pub(crate) fn review(
     scope::current(&tx, &draft)?;
     if let Some(receipt) = receipt_for(&tx, draft_id)? {
         if receipt["kind"] != kind
-            || receipt["argumentHash"] != store::argument_hash(kind, argument)
+            || receipt["argumentHash"] != store::argument_hash(&tx, &draft.root_run_id, kind, argument)?
         {
             return Err("directive_human_review_conflict".into());
         }
@@ -50,9 +50,10 @@ pub(crate) fn review(
             .transpose()?
             .flatten();
         let value = json!({"receipt":receipt,"draft":successor});
+        let value = crate::agent_runtime::multi_agent::homogeneous::material_policy::json(&tx, &draft.root_run_id, &value)?;
         tx.commit()
             .map_err(|_| "directive_human_review_commit_unconfirmed")?;
-        return Ok(crate::agent_runtime::secrets::redact_json(&value));
+        return Ok(value);
     }
     if !matches!(draft.status.as_str(), "drafted" | "need_confirmation")
         || !draft.confirmed_directive_id.is_empty()
@@ -63,7 +64,7 @@ pub(crate) fn review(
         return Err("directive_human_review_already_queued".into());
     }
     if kind == "revise"
-        && crate::agent_runtime::secrets::redact_text_with(argument, None) == draft.text
+        && crate::agent_runtime::multi_agent::homogeneous::material_policy::text(&tx, &draft.root_run_id, argument)? == draft.text
     {
         return Err("directive_human_review_revision_unchanged".into());
     }
@@ -129,8 +130,7 @@ pub(crate) fn review(
     if scope::protected(&tx, &draft)? != protected {
         return Err("directive_human_review_scope_changed".into());
     }
-    let value =
-        crate::agent_runtime::secrets::redact_json(&json!({"receipt":receipt,"draft":successor}));
+    let value = crate::agent_runtime::multi_agent::homogeneous::material_policy::json(&tx, &draft.root_run_id, &json!({"receipt":receipt,"draft":successor}))?;
     writer.finish()?;
     tx.commit()
         .map_err(|_| "directive_human_review_commit_unconfirmed")?;

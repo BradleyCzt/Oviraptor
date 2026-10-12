@@ -118,6 +118,76 @@ pub(crate) fn interruptible<T>(_pipe: &T) -> std::io::Result<()> {
     Ok(())
 }
 
+/// One captured stream as (parent read end, child write end), both carrying
+/// FD_CLOEXEC from the instant they exist. `Stdio::piped()` on macOS creates the
+/// pair with `pipe()` and only then sets FD_CLOEXEC; a process spawned by any
+/// other thread inside that window inherits the write end (observed holder: an
+/// unrelated `/bin/sh` and its child at fd 50) and EOF waits for that stranger to
+/// exit. `pipe2(O_CLOEXEC)` closes the window atomically, with no lock and no
+/// serialization. A FIFO opened with O_CLOEXEC is atomic too but holds 8 KiB and
+/// loses poll wakeups under a blocked writer (32 MiB of helper JSON took >10 s),
+/// so it is not used.
+#[cfg(unix)]
+pub(crate) fn capture_pipe() -> std::io::Result<(std::fs::File, std::fs::File)> {
+    capture_pipe_observed(&mut |_| ())
+}
+
+/// `born` runs the instant each descriptor exists (tests spawn a stranger there).
+/// macOS exports `pipe2` only from 27.0, so it is resolved at run time. Older
+/// macOS keeps std's own `pipe()` + FD_CLOEXEC sequence (no regression, window
+/// remains) and `born` then runs inside that window so the test exposes it.
+#[cfg(target_os = "macos")]
+fn capture_pipe_observed(
+    born: &mut dyn FnMut(std::os::fd::RawFd),
+) -> std::io::Result<(std::fs::File, std::fs::File)> {
+    use std::os::fd::{FromRawFd, OwnedFd};
+    type Pipe2 = unsafe extern "C" fn(*mut libc::c_int, libc::c_int) -> libc::c_int;
+    static PIPE2: std::sync::OnceLock<Option<Pipe2>> = std::sync::OnceLock::new();
+    let pipe2 = *PIPE2.get_or_init(|| {
+        // SAFETY: NUL-terminated name looked up in the default namespace.
+        let symbol = unsafe { libc::dlsym(libc::RTLD_DEFAULT, c"pipe2".as_ptr()) };
+        // SAFETY: a non-null `pipe2` is libSystem's POSIX 2024 pipe2(int[2], int).
+        (!symbol.is_null()).then(|| unsafe { std::mem::transmute::<*mut libc::c_void, Pipe2>(symbol) })
+    });
+    let mut fds = [0; 2];
+    // SAFETY: both calls fill two new descriptors that are owned immediately below.
+    let created = match pipe2 {
+        Some(pipe2) => unsafe { pipe2(fds.as_mut_ptr(), libc::O_CLOEXEC) },
+        None => unsafe { libc::pipe(fds.as_mut_ptr()) },
+    };
+    if created != 0 {
+        return Err(std::io::Error::last_os_error());
+    }
+    let (read, write) = unsafe { (OwnedFd::from_raw_fd(fds[0]), OwnedFd::from_raw_fd(fds[1])) };
+    born(fds[0]);
+    born(fds[1]);
+    if pipe2.is_none() {
+        for fd in fds {
+            // SAFETY: F_SETFD on a descriptor owned above.
+            if unsafe { libc::fcntl(fd, libc::F_SETFD, libc::FD_CLOEXEC) } < 0 {
+                return Err(std::io::Error::last_os_error());
+            }
+        }
+    }
+    Ok((std::fs::File::from(read), std::fs::File::from(write)))
+}
+
+#[cfg(all(unix, not(target_os = "macos")))]
+fn capture_pipe_observed(
+    born: &mut dyn FnMut(std::os::fd::RawFd),
+) -> std::io::Result<(std::fs::File, std::fs::File)> {
+    use std::os::fd::{FromRawFd, OwnedFd};
+    let mut fds = [0; 2];
+    // SAFETY: pipe2 fills two new descriptors that are owned immediately below.
+    if unsafe { libc::pipe2(fds.as_mut_ptr(), libc::O_CLOEXEC) } != 0 {
+        return Err(std::io::Error::last_os_error());
+    }
+    let (read, write) = unsafe { (OwnedFd::from_raw_fd(fds[0]), OwnedFd::from_raw_fd(fds[1])) };
+    born(fds[0]);
+    born(fds[1]);
+    Ok((std::fs::File::from(read), std::fs::File::from(write)))
+}
+
 pub(crate) struct OwnedChild(pub(crate) Child, bool);
 
 impl OwnedChild {
@@ -134,13 +204,9 @@ impl OwnedChild {
         {
             // SAFETY: process_group(0) created a new group with our child's PID.
             // Only that group is targeted, never the parent/application group.
-            let result = unsafe { libc::kill(-(self.0.id() as i32), libc::SIGKILL) };
-            if result != 0 {
-                let failure = std::io::Error::last_os_error();
-                if failure.raw_os_error() != Some(libc::ESRCH) {
-                    error = Some(format!("process_group_cleanup:{failure}"));
-                }
-            }
+            // The result is not final: `sweep_process_group` below decides it once
+            // the leader is reaped (a zombie leader alone makes Darwin say EPERM).
+            unsafe { libc::kill(-(self.0.id() as i32), libc::SIGKILL) };
         }
         let _ = self.0.kill();
         // Never block indefinitely on a child which the OS could not terminate.
@@ -159,7 +225,43 @@ impl OwnedChild {
                 Ok(None) => std::thread::sleep(Duration::from_millis(2)),
             }
         }
+        #[cfg(unix)]
+        if let Some(failure) = sweep_process_group(self.0.id() as i32, started) {
+            error.get_or_insert(failure);
+        }
         error
+    }
+}
+
+/// A single group SIGKILL races with members that are mid-fork: a child
+/// created while the signal is being delivered is not signalled, survives as an
+/// orphan in the same group and keeps the inherited stdout/stderr write ends
+/// open (delaying EOF past the drain grace). Repeat the group kill until the
+/// kernel reports the group empty. The group ID cannot be recycled while any
+/// member exists, so after the leader is reaped `kill(-pgid)` reaches only our
+/// own escaped descendants or fails with ESRCH.
+///
+/// Darwin answers EPERM while the only remaining members are zombies (killed
+/// orphans not yet reaped by launchd); they hold no descriptors, so EPERM is
+/// retried until ESRCH and reported only if it outlives the cleanup deadline.
+#[cfg(unix)]
+fn sweep_process_group(pgid: i32, started: Instant) -> Option<String> {
+    loop {
+        // SAFETY: targets only the group created by process_group(0) for our child.
+        let pending = if unsafe { libc::kill(-pgid, libc::SIGKILL) } == 0 {
+            "process_group_cleanup_deadline".to_string()
+        } else {
+            let failure = std::io::Error::last_os_error();
+            match failure.raw_os_error() {
+                Some(libc::ESRCH) => return None,
+                Some(libc::EPERM) => format!("process_group_cleanup:{failure}"),
+                _ => return Some(format!("process_group_cleanup:{failure}")),
+            }
+        };
+        if started.elapsed() >= Duration::from_secs(1) {
+            return Some(pending);
+        }
+        std::thread::sleep(Duration::from_millis(1));
     }
 }
 
@@ -208,20 +310,34 @@ fn run_inner(
             },
         });
     }
+    let pipe_setup = |error: std::io::Error| ProcessError::Launch {
+        program: program.display().to_string(),
+        reason: format!("pipe_setup:{error}"),
+    };
     let mut command = Command::new(program);
     command
         .args(args)
         .current_dir(cwd.unwrap_or_else(|| Path::new(".")))
-        .stdin(Stdio::null())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped());
+        .stdin(Stdio::null());
+    #[cfg(unix)]
+    let captured = {
+        let (out_read, out_write) = capture_pipe().map_err(pipe_setup)?;
+        let (err_read, err_write) = capture_pipe().map_err(pipe_setup)?;
+        command.stdout(out_write).stderr(err_write);
+        (out_read, err_read)
+    };
+    #[cfg(not(unix))]
+    command.stdout(Stdio::piped()).stderr(Stdio::piped());
     #[cfg(unix)]
     {
         use std::os::unix::process::CommandExt;
         command.process_group(0);
     }
+    let spawned = command.spawn();
+    // The parent's copies of the child write ends close here, before any read.
+    drop(command);
     let mut child = OwnedChild(
-        command.spawn().map_err(|error| {
+        spawned.map_err(|error| {
             let text = error.to_string();
             let name = program.display().to_string();
             if error.kind() == std::io::ErrorKind::NotFound {
@@ -238,18 +354,14 @@ fn run_inner(
         })?,
         false,
     );
-    for result in [
-        child.0.stdout.as_ref().map(interruptible),
-        child.0.stderr.as_ref().map(interruptible),
-    ]
-    .into_iter()
-    .flatten()
-    {
-        result.map_err(|error| ProcessError::Launch {
-            program: program.display().to_string(),
-            reason: format!("pipe_setup:{error}"),
-        })?;
-    }
+    #[cfg(unix)]
+    let (stdout_pipe, stderr_pipe) = {
+        interruptible(&captured.0).map_err(pipe_setup)?;
+        interruptible(&captured.1).map_err(pipe_setup)?;
+        (Some(captured.0), Some(captured.1))
+    };
+    #[cfg(not(unix))]
+    let (stdout_pipe, stderr_pipe) = (child.0.stdout.take(), child.0.stderr.take());
     let (out_sender, out_receiver) = mpsc::channel();
     let (err_sender, err_receiver) = mpsc::channel();
     // The reader threads only ever need the two caps, so they take copies rather than
@@ -257,14 +369,14 @@ fn run_inner(
     let stdout_cap = limits.stdout_bytes;
     let stderr_cap = limits.stderr_bytes;
     let stop_readers = Arc::new(AtomicBool::new(false));
-    if let Some(pipe) = child.0.stdout.take() {
+    if let Some(pipe) = stdout_pipe {
         let stop = Arc::clone(&stop_readers);
         let observer = channel.as_ref().map(|channel| channel.pipe("stdout"));
         std::thread::spawn(move || pump(pipe, stdout_cap, stop, out_sender, observer));
     } else {
         let _ = out_sender.send((Vec::new(), false));
     }
-    if let Some(pipe) = child.0.stderr.take() {
+    if let Some(pipe) = stderr_pipe {
         let stop = Arc::clone(&stop_readers);
         let observer = channel.as_ref().map(|channel| channel.pipe("stderr"));
         std::thread::spawn(move || pump(pipe, stderr_cap, stop, err_sender, observer));

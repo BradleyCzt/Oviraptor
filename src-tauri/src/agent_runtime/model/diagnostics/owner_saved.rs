@@ -20,6 +20,7 @@ pub(super) fn verify(db: &Connection, owner: &Owner) -> Result<(), String> {
         return Err("native_sdk_log_owner_unverified".into());
     }
     if owner.domain != Domain::Root
+        && owner.domain != Domain::MapperLoop
         && owner.dispatch_key
             != stable_hash(
                 &json!([
@@ -40,7 +41,10 @@ pub(super) fn verify(db: &Connection, owner: &Owner) -> Result<(), String> {
             &owner.root_run_id,
         )?;
     }
-    let valid:bool=if owner.domain==Domain::Root {
+    let valid:bool=if owner.domain==Domain::MapperLoop {
+        super::owner_mapper_loop::verify(db,owner,false)?;
+        Ok(true)
+    } else if owner.domain==Domain::Root {
   db.query_row("SELECT COUNT(*)=1 FROM agent_root_model_journal j JOIN agent_runs r ON r.id=j.root_run_id JOIN agent_root_budget_attempts x ON x.id=j.lease_attempt_id AND x.root_run_id=r.id
    WHERE j.call_id=?1 AND j.root_run_id=?2 AND j.round=?3 AND j.request_hash=?4 AND j.lease_attempt_id=?5 AND j.phase='dispatch'
    AND r.scan_id=?6 AND r.attempt_number=?7 AND r.backend='native' AND r.role='coordinator' AND r.orchestration_policy IN ('single','multi')

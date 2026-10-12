@@ -73,7 +73,7 @@ fn scan_deletion_paid_multi_atomic_write_faults_preserve_all_original_rows() {
     db.execute_batch("CREATE TABLE private_business(value TEXT);INSERT INTO private_business VALUES('original');INSERT INTO sentinel_scans(id,project_id,project_name,status,task_name) VALUES('other-scan',9001,'original','draft','original');INSERT INTO sentinel_targets(project_id,scan_id,company,url) VALUES(9001,'other-scan','other','https://other.example.test/');").unwrap();
     let file = fs::read(h.context.target_dir.join("frontend-evidence.json")).unwrap();
     for fault in [
-        "CREATE TRIGGER audit_fault BEFORE INSERT ON native_deleted_scan_audits BEGIN SELECT RAISE(IGNORE); END;",
+        "CREATE TRIGGER audit_fault BEFORE INSERT ON native_deleted_scan_audits_v2 BEGIN SELECT RAISE(IGNORE); END;",
         "CREATE TRIGGER audit_fault BEFORE INSERT ON native_deleted_scan_anchors BEGIN SELECT RAISE(IGNORE); END;",
         "CREATE TRIGGER audit_fault BEFORE INSERT ON sentinel_deleted_scans BEGIN SELECT RAISE(IGNORE); END;",
         "CREATE TRIGGER audit_fault BEFORE DELETE ON sentinel_scans BEGIN SELECT RAISE(IGNORE); END;",
@@ -102,7 +102,7 @@ fn scan_deletion_paid_multi_independent_anchor_rejects_rehashed_worker_physical_
     }
     let raw: String = db
         .query_row(
-            "SELECT audit_json FROM native_deleted_scan_audits WHERE scan_id=?1",
+            "SELECT audit_json FROM native_deleted_scan_audits_v2 WHERE scan_id=?1",
             [&h.context.scan_id],
             |r| r.get(0),
         )
@@ -131,10 +131,10 @@ fn scan_deletion_paid_multi_independent_anchor_rejects_rehashed_worker_physical_
     assert_eq!(raw.matches(&old_worker).count(), 1);
     let corrupt = raw.replacen(&old_worker, &worker.to_string(), 1);
     // Only the temp audit trigger is removed; independent anchors stay immutable.
-    db.execute_batch("DROP TRIGGER deleted_audit_no_update")
+    db.execute_batch("DROP TRIGGER deleted_audit_v2_no_update")
         .unwrap();
     db.execute(
-        "UPDATE native_deleted_scan_audits SET audit_json=?1,audit_hash=?2 WHERE scan_id=?3",
+        "UPDATE native_deleted_scan_audits_v2 SET audit_json=?1,audit_hash=?2 WHERE scan_id=?3",
         params![
             corrupt,
             crate::agent_runtime::store::stable_hash(&corrupt),

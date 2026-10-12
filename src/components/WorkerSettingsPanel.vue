@@ -227,15 +227,15 @@ onMounted(load);
         <li><b>M1 添加远程节点</b><span>粘贴地址和令牌后点“检测”；任务在 Worker 上继续运行，主控端可查看、控制并同步结果。</span></li>
       </ol>
       <details>
-        <summary>旧远程 Worker 运行方案的手动环境步骤（非所有扫描的前置条件）</summary>
+        <summary>远程 Worker 运行环境（源码分析器依赖单独准备）</summary>
         <div class="manual-grid">
           <article>
             <Laptop :size="18" />
-            <div><strong>macOS（Apple / Intel）</strong><p>仅在选择需要这些依赖的旧远程 Worker 方案时，先安装并登录 Tailscale 与 Docker Desktop，再按该方案准备：</p><code>brew install python@3.12 node redis</code><p>Native HTTP 扫描不要求整套依赖；宿主依赖检测通过也不代表 Agent 工具已隔离。</p></div>
+            <div><strong>macOS（Apple / Intel）</strong><p>远程连接需要安装并登录 Tailscale；浏览器与 AST 工具需要 Node.js：</p><code>brew install node</code><p>资产采集和 Native HTTP 不需要 Python、Redis 或 Docker；可选源码分析器仍需要 Docker 和已批准的固定摘要镜像。</p></div>
           </article>
           <article>
             <Server :size="18" />
-            <div><strong>Windows 11 x64</strong><p>仅针对需要这些依赖的旧远程 Worker 方案，自动安装会使用 winget 准备 Tailscale、Python 3.12、Node.js LTS 与 Docker Desktop。手动环境检查：</p><code>python --version; node --version; docker version</code><p>redis-cli 可安装 Memurai CLI，并把运行方案路径设为 C:\Program Files\Memurai\memurai-cli.exe。Native 工具能力须单独审批与隔离；当前 Windows Native HTTP artifact 写入适配器尚不可用。</p></div>
+            <div><strong>Windows 11 x64</strong><p>自动安装仅准备 Tailscale 与 Node.js LTS。手动环境检查：</p><code>node --version; tailscale status</code><p>仅源码分析器需要另行准备 Docker 和固定摘要镜像。Native 工具能力须单独审批与隔离；当前 Windows Native HTTP artifact 写入适配器尚不可用。</p></div>
           </article>
         </div>
       </details>

@@ -609,11 +609,24 @@ mod tests {
             while served < 2 && std::time::Instant::now() < deadline {
                 match listener.accept() {
                     Ok((mut stream, _)) => {
+                        // macOS/BSD: an accepted socket inherits the listener's
+                        // O_NONBLOCK, so a single read returned WouldBlock at once
+                        // (ignoring the timeout) and the reply + close raced the
+                        // client's request; unread request bytes then reset the
+                        // connection ("error sending request") under load. Read the
+                        // whole request head in blocking mode, like test_http_endpoint.
+                        stream.set_nonblocking(false).unwrap();
                         stream
                             .set_read_timeout(Some(Duration::from_secs(2)))
                             .unwrap();
+                        let mut request = Vec::new();
                         let mut input = [0; 4096];
-                        let _ = stream.read(&mut input);
+                        while !request.windows(4).any(|w| w == b"\r\n\r\n") {
+                            match stream.read(&mut input) {
+                                Ok(0) | Err(_) => break,
+                                Ok(n) => request.extend_from_slice(&input[..n]),
+                            }
+                        }
                         stream.write_all(b"HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nContent-Length: 2\r\nConnection: close\r\n\r\nok").unwrap();
                         served += 1;
                     }

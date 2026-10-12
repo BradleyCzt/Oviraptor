@@ -1,6 +1,6 @@
 use super::{
     fact_refs_current,
-    interpretation::{explicit_host_boundary_request, interpret},
+    interpretation::explicit_host_boundary_request,
     source_guidance, HumanDirectiveDraft,
 };
 use crate::agent_runtime::secrets::redact_text_with;
@@ -147,7 +147,9 @@ pub(super) fn create_revision_in_transaction(
         return Err("directive_length_invalid".into());
     }
     validate_thread_key(transaction, root_run_id, target_key, thread_key)?;
-    let mut interpreted = interpret(text, target_key);
+    let plaintext = super::super::homogeneous::material_policy::for_root(transaction, root_run_id)?;
+    let mut interpreted = super::interpretation::interpret_with_material(text, target_key, plaintext);
+    let redacted = if plaintext { text.to_string() } else { redact_text_with(text, None) };
     source_guidance::interpret_focus(
         transaction,
         root_run_id,
@@ -188,7 +190,7 @@ pub(super) fn create_revision_in_transaction(
         "targetKey": target_key,
         "recipientRole": recipient_role,
         "threadKey": thread_key,
-        "text": redact_text_with(text, None),
+        "text": redacted,
         "intent": interpreted.intent,
         "requestedRoles": interpreted.requested_roles,
         "referencedFactIds": interpreted.referenced_fact_ids,
@@ -209,7 +211,6 @@ pub(super) fn create_revision_in_transaction(
     });
     super::ordered_plan::append_hash_material(&mut hash_material)?;
     let draft_hash = crate::agent_runtime::store::stable_hash(&hash_material.to_string());
-    let redacted = redact_text_with(text, None);
     // A rejected host request must leave an auditable, non-executable boundary
     // record in the same commit as its chat draft. This is not an approval lane.
     let host_boundary_requested = explicit_host_boundary_request(text);

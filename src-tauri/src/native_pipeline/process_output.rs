@@ -10,6 +10,9 @@ use std::{
 };
 const RECORD_BYTES: usize = 16 * 1024;
 const QUEUE_CAPACITY: usize = 64;
+/// Bounded time a stopped reader keeps draining for EOF after the owner killed
+/// the process group. Callers wait 250 ms for the drained capture.
+pub(crate) const STOP_DRAIN_GRACE: Duration = Duration::from_millis(100);
 
 #[derive(Default)]
 struct DropStats {
@@ -192,11 +195,15 @@ pub(crate) fn pump(
     let mut truncated = false;
     let mut capture_failed = false;
     let mut stopping_at = None;
+    // Whether the latest read found the pipe open but empty. A stop grace that
+    // expires while idle means a write end is still held (capture incomplete);
+    // expiring while bytes still flow additionally means output was cut.
+    let mut idle = false;
     loop {
         if stop.load(Ordering::Acquire) {
             let since = stopping_at.get_or_insert_with(Instant::now);
-            if since.elapsed() >= Duration::from_millis(100) {
-                truncated = true;
+            if since.elapsed() >= STOP_DRAIN_GRACE {
+                truncated |= !idle;
                 capture_failed = true;
                 break;
             }
@@ -205,10 +212,13 @@ pub(crate) fn pump(
             Ok(read) => read,
             Err(error) if error.kind() == std::io::ErrorKind::Interrupted => continue,
             Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
-                if stopping_at.is_some() {
-                    capture_failed = true;
-                    break;
-                }
+                // SIGKILL of the process group is asynchronous: a just-killed
+                // descendant still owns its inherited write end for a moment
+                // after `stop` is raised. Keep polling within the same bounded
+                // grace so EOF arriving then is a clean finish, not a spurious
+                // `native_process_log_record_omitted`; a write end held past the
+                // grace still fails the capture above.
+                idle = true;
                 std::thread::sleep(Duration::from_millis(2));
                 continue;
             }
@@ -221,6 +231,7 @@ pub(crate) fn pump(
         if read == 0 {
             break;
         }
+        idle = false;
         if let Some(observer) = &mut observer {
             observer.feed(&buffer[..read]);
         }
@@ -243,4 +254,10 @@ pub(crate) fn pump(
         }
     }
     let _ = sender.send((collected, truncated));
+}
+
+#[cfg(all(test, unix))]
+mod stop_drain_tests {
+    use super::*;
+    include!("process_output_stop_drain_tests.rs");
 }

@@ -1,5 +1,6 @@
 // Admission, preparation and publication of an ordinary Web attempt share one
 // IMMEDIATE transaction. No worker may be dispatched from this module.
+include!("native_web_resume_finance.rs");
 #[derive(Clone, Copy)]
 enum WebStartMode { Confirm, Resume, Retry }
 
@@ -177,9 +178,16 @@ fn prepare_web_startup_in(connection: &rusqlite::Connection, app_data: &Path, sc
         [scan_id], |r| Ok((r.get(0)?,r.get(1)?,r.get(2)?,r.get(3)?,r.get(4)?)),
     ).map_err(|e| format!("任务不存在、已删除或工作空间已归档：{e}"))?;
     if scan_type != "web" { return Err("web_start_wrong_scan_type".into()); }
+    // A staged recovery scope has no execution consumer yet. Never let ordinary
+    // confirm/resume/retry substitute current defaults for its signed contract.
+    if connection.query_row("SELECT EXISTS(SELECT 1 FROM main.native_protection_recovery_drafts WHERE scan_id=?1)",
+        [scan_id], |r|r.get::<_,bool>(0)).map_err(|e|e.to_string())? {
+        return Err("protection_recovery_requires_dedicated_fresh_birth".into());
+    }
     if verified_administrative_closure(connection,scan_id)?.is_some() {
         return Err("administrative_closure_requires_independent_task".into());
     }
+    require_web_start_financial_history_in(connection,scan_id)?;
     require_web_start_mode_on(connection,scan_id,previous_attempt,
         matches!(mode,WebStartMode::Resume) || (matches!(mode,WebStartMode::Retry) && retry_only_incomplete_targets(&status)))?;
     match mode {
@@ -256,6 +264,15 @@ fn persist_web_startup_in(connection: &rusqlite::Connection, startup: &WebStartu
     if changed != 1 { return Err("web_start_ledger_not_persisted".into()); }
     connection.execute("DELETE FROM app_settings WHERE key=?1", [format!("sentinel-next-attempt-mode:{scan_id}")]).map_err(|e| e.to_string())?;
     prepare_current_attempt_surface(connection,scan_id,attempt)?;
+    // A new attempt inherits the explicit scheduling contract, rather than
+    // silently returning a homogeneous task to the legacy role pipeline.
+    if attempt>1 && crate::agent_runtime::multi_agent::homogeneous::model_worker::enabled(connection,scan_id,1)? {
+        let text:String=connection.query_row("SELECT plan_json FROM native_scan_plans WHERE scan_id=?1 AND attempt_number=1",[scan_id],|r|r.get(0)).map_err(|e|e.to_string())?;
+        let mut frozen:JsonValue=serde_json::from_str(&text).map_err(|e|e.to_string())?;
+        frozen["attemptNumber"]=json!(attempt);
+        let text=frozen.to_string();
+        connection.execute("INSERT INTO native_scan_plans(scan_id,attempt_number,scan_type,backend,plan_json,plan_hash) VALUES(?1,?2,'web','native',?3,?4)",params![scan_id,attempt,text,crate::agent_runtime::store::stable_hash(&text)]).map_err(|e|e.to_string())?;
+    }
     connection.execute("INSERT INTO sentinel_checkpoints(scan_id,url,stage,raw_json) VALUES(?1,'','scan_backend_plan',?2) ON CONFLICT(scan_id,url,stage) DO UPDATE SET raw_json=excluded.raw_json,updated_at=datetime('now','localtime')", params![scan_id,backend]).map_err(|e| e.to_string())?;
     register_native_branches_in(connection,scan_id,attempt,&["web"])?;
     // Validate persisted rows AFTER all writes/triggers, not just row counts.

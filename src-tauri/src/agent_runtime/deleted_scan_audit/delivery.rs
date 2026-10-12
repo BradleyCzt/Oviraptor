@@ -78,6 +78,32 @@ pub(super) fn verify(db: &Connection, actor: &CoordinatorLease) -> Result<(), St
             {
                 return Err("deleted_audit_original_delivery_usage_conflict".into());
             }
+        } else if role == "spa_api_mapper"
+            && crate::agent_runtime::web_mode::root::read(db, &actor.root_run_id)?
+                .and_then(|mode| mode.bootstrap_dispatch())
+                .is_some_and(|contract| contract["schemaVersion"] == 15)
+        {
+            let child = crate::agent_runtime::multi_agent::scheduler::ScheduledChild {
+                assignment_id: assignment.clone(),
+                run_id: run.clone(),
+                role: crate::agent_runtime::contract::AgentRole::SpaApiMapper,
+            };
+            let worker = crate::agent_runtime::multi_agent::attempts::current(db, actor, &assignment)?;
+            let original_message = if worker.state == "expired" {
+                specialist::mapper_loop::expired_seal::read_original_on(db, actor, &child)?
+                    .ok_or("deleted_audit_mapper_loop_original_expired_missing")?.message_id().to_owned()
+            } else {
+                specialist::mapper_loop::final_seal::read_final_original_on(db, actor, &child)?
+                    .ok_or("deleted_audit_mapper_loop_original_final_missing")?.message_id().to_owned()
+            };
+            let output = specialist::mapper_loop::verified_original_output_on(db, actor, &child)?;
+            if original_message != *id
+                || payload != json!({"summary":output.text()})
+                || output.usage().total_tokens != tokens
+                || output.usage().model_requests != requests
+            {
+                return Err("deleted_audit_original_delivery_usage_conflict".into());
+            }
         } else {
             specialist::verify_received_original(db, actor, &assignment)?;
             let (response,usage):(String,String)=db.query_row("SELECT response_json,usage_json FROM agent_specialist_calls WHERE assignment_id=?1 AND child_run_id=?2",params![assignment,run],|r|Ok((r.get(0)?,r.get(1)?))).map_err(|e|e.to_string())?;

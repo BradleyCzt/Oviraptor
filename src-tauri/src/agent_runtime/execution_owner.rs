@@ -22,7 +22,17 @@ pub(crate) fn claim_native_invocation(
     let (directory, path) = invocation_path(db_path, scan_id, attempt, kind, target)?;
     fs::create_dir_all(&directory)
         .map_err(|error| format!("native_invocation_directory:{error}"))?;
-    open_owner(&directory, &path, true)
+    open_owner(&directory, &path, true, false)
+}
+
+/// Serialize approval writers before they acquire a SQLite write transaction.
+/// This database-wide queue also covers independent processes. It grants no
+/// execution ownership; the original transaction and receipt checks still run.
+pub(crate) fn queue_recovery_approval(db_path: &Path) -> Result<NativeInvocationOwner, String> {
+    let (directory, path) = invocation_path(db_path, "", 0, "recovery_approval", "database")?;
+    fs::create_dir_all(&directory)
+        .map_err(|error| format!("native_invocation_directory:{error}"))?;
+    open_owner(&directory, &path, true, true)
 }
 
 /// Probe only the existing original invocation inode. Absence is not an exit
@@ -41,7 +51,7 @@ pub(crate) fn probe_native_invocation(
             Err(error) => return Err(format!("native_invocation_probe:{error}")),
         }
     }
-    open_owner(&directory, &path, false).map(Some)
+    open_owner(&directory, &path, false, false).map(Some)
 }
 
 fn invocation_path(
@@ -64,7 +74,7 @@ fn invocation_path(
     Ok((directory, path))
 }
 
-fn open_owner(directory: &Path, path: &Path, create: bool) -> Result<NativeInvocationOwner, String> {
+fn open_owner(directory: &Path, path: &Path, create: bool, wait: bool) -> Result<NativeInvocationOwner, String> {
     let metadata = fs::symlink_metadata(directory).map_err(|error| error.to_string())?;
     if !metadata.is_dir() || metadata.file_type().is_symlink() {
         return Err("native_invocation_directory_not_regular".into());
@@ -93,8 +103,12 @@ fn open_owner(directory: &Path, path: &Path, create: bool) -> Result<NativeInvoc
     {
         return Err("native_invocation_lock_not_regular".into());
     }
-    lock.try_lock()
-        .map_err(|error| format!("native_invocation_not_owned:{error}"))?;
+    if wait {
+        lock.lock().map_err(|error| format!("native_invocation_queue:{error}"))?;
+    } else {
+        lock.try_lock()
+            .map_err(|error| format!("native_invocation_not_owned:{error}"))?;
+    }
     Ok(NativeInvocationOwner(lock))
 }
 
@@ -105,3 +119,7 @@ impl Drop for NativeInvocationOwner {
         let _ = self.0.unlock();
     }
 }
+
+#[cfg(test)]
+#[path = "execution_owner_tests.rs"]
+mod tests;

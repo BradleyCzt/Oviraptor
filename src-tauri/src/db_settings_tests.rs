@@ -79,3 +79,16 @@ fn non_object_settings_are_not_reinterpreted() {
         assert_eq!(normalize_settings(&value), value);
     }
 }
+
+#[test]
+fn retired_host_tools_are_inert_and_saved_history_is_preserved() {
+    let stored = json!({"pythonExecutable":"private-old-python", "redisCliExecutable":"private-old-cli", "modelApiBase":"https://current.invalid", "custom":{"pythonExecutable":"user document"}});
+    let view = super::normalize_settings(&stored);
+    assert!(view.get("pythonExecutable").is_none());
+    assert!(view.get("redisCliExecutable").is_none());
+    assert_eq!(view["custom"]["pythonExecutable"], "user document");
+    let updated = super::settings_for_update(&stored, &json!({"pythonExecutable":"new-inert", "redisCliExecutable":"new-inert", "modelApiBase":"https://new.invalid"})).unwrap();
+    assert_eq!(updated["pythonExecutable"], stored["pythonExecutable"]);
+    assert_eq!(updated["redisCliExecutable"], stored["redisCliExecutable"]);
+    assert!(super::normalize_settings(&updated).get("pythonExecutable").is_none());
+}
