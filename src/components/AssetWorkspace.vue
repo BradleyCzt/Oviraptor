@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref, shallowRef, watch } from "vue";
+import { computed, onMounted, onUnmounted, ref, shallowRef, watch } from "vue";
 import {
   Archive,
   ArrowUpDown,
@@ -36,6 +36,7 @@ const props = defineProps<{
   selectedProjectId?: number;
   initialSearch?: string;
   quarantineOnly?: boolean;
+  scanningEnabled?: boolean;
 }>();
 const emit = defineEmits<{
   notify: [type: "success" | "error" | "info", text: string];
@@ -412,20 +413,35 @@ async function act(decision: "confirmed" | "uncertain") {
   } catch (error) { emit("notify", "error", String(error)); }
   finally { bulkBusy.value = false; }
 }
+const scanningActionError = ref("");
+let scanActionGeneration=0, scanActionDisposed=false;
+let scanOwnsBulkBusy=false;
+const scanningAvailable=()=>props.scanningEnabled!==false;
+watch(()=>[props.scanningEnabled,props.selectedProjectId],()=>{scanActionGeneration++;if(scanOwnsBulkBusy){scanOwnsBulkBusy=false;bulkBusy.value=false;}},{flush:"sync"});
+onUnmounted(()=>{scanActionDisposed=true;scanActionGeneration++;});
 async function sendToSentinel() {
+  scanningActionError.value="";
+  if(!scanningAvailable()){scanningActionError.value=tr("扫描插件已停用，请先在内置插件中启用。","Scanning is disabled. Enable it under Built-in plugins first.");return;}
   if (!selectedRows.value.length || bulkBusy.value) return;
-  bulkBusy.value = true;
+  const action=++scanActionGeneration, contextProject=props.selectedProjectId;
+  const current=()=>!scanActionDisposed&&action===scanActionGeneration&&contextProject===props.selectedProjectId&&scanningAvailable();
+  bulkBusy.value = true;scanOwnsBulkBusy=true;
   try {
     const groups = new Map<number, number[]>();
     for (const asset of selectedRows.value) groups.set(asset.projectId, [...(groups.get(asset.projectId) || []), asset.id]);
     const scans = [];
-    for (const [projectId, ids] of groups) scans.push(await api.createSentinelScan(projectId, [...new Set(ids)], assetScanMode.value));
+    for (const [projectId, ids] of groups) {
+      if(!current())return;
+      scans.push(await api.createSentinelScan(projectId, [...new Set(ids)], assetScanMode.value));
+    }
+    if(!current())return;
     localStorage.setItem("asset-agent-scan-mode", assetScanMode.value);
     clearSelection();
     await refresh();
+    if(!current())return;
     emit("notify", "success", tr(`已按 ${scans.length} 个项目建立 ${assetScanModeLabel.value} 待确认调查任务`, `Created ${assetScanModeLabel.value} investigation drafts for ${scans.length} projects`));
-  } catch (error) { emit("notify", "error", String(error)); }
-  finally { bulkBusy.value = false; }
+  } catch (error) { if(current()){scanningActionError.value=String(error);emit("notify", "error", String(error));} }
+  finally { if(!scanActionDisposed&&action===scanActionGeneration){scanOwnsBulkBusy=false;bulkBusy.value = false;} }
 }
 async function archive(deleted: boolean) {
   if (!selectedRows.value.length || bulkBusy.value) return;
@@ -572,7 +588,8 @@ onMounted(refresh);
       <button class="bulk-confirm" :disabled="bulkBusy" :title="tr('确认属于有效资产；保存后从待复核队列移出','Mark valid and remove from the review queue')" @click="act('confirmed')"><Check :size="15" /><span><strong>{{tr('确认有效','Confirm valid')}}</strong><small>{{tr('移出待审核','Leave review')}}</small></span></button>
       <button class="bulk-uncertain" :disabled="bulkBusy" :title="tr('已经人工看过，但还需要补充证据；继续保留在复核队列','Reviewed but needs more evidence; keep in review')" @click="act('uncertain')"><ShieldQuestion :size="15" /><span><strong>{{tr('保留待核','Keep for review')}}</strong><small>{{tr('等待补证据','Needs evidence')}}</small></span></button>
       <label class="bulk-scan-mode" :title="tr('任务模式会固化到调查任务，确认后仍按该上限执行','The selected mode is stored with the investigation task and remains effective after confirmation')"><span>{{tr('扫描模式','Scan mode')}}</span><select v-model="assetScanMode"><option value="quick">{{tr('快速扫描','Quick')}}</option><option value="standard">{{tr('标准扫描','Standard')}}</option><option value="deep">{{tr('深度扫描','Deep')}}</option></select></label>
-      <button class="bulk-send" :disabled="bulkBusy" @click="sendToSentinel"><Send :size="15" /> {{tr(`发起自动调查 · ${assetScanModeLabel}`,`Start investigation · ${assetScanModeLabel}`)}}</button>
+      <span v-if="scanningActionError" role="alert">{{scanningActionError}}</span><span v-if="props.scanningEnabled===false">{{tr('扫描插件已停用','Scanning is disabled')}}</span>
+      <button class="bulk-send" :disabled="bulkBusy||props.scanningEnabled===false" @click="sendToSentinel"><Send :size="15" /> {{tr(`发起自动调查 · ${assetScanModeLabel}`,`Start investigation · ${assetScanModeLabel}`)}}</button>
       <button v-if="query.deletedView !== 'trash'" :disabled="bulkBusy" @click="archive(true)"><Archive :size="15" /> {{tr('移入回收站','Move to trash')}}</button><button v-else :disabled="bulkBusy" @click="archive(false)"><RotateCcw :size="15" /> {{tr('恢复','Restore')}}</button>
       <button class="bulk-close" :title="tr('清除选择','Clear selection')" @click="clearSelection"><X :size="15" /></button>
     </div>

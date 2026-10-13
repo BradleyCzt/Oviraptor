@@ -2,12 +2,13 @@
 import { computed } from "vue";
 import { Activity, BrainCircuit, Braces, Database, FileClock, Globe2, LayoutDashboard, MessageSquare, Plus, ShieldAlert, ShieldCheck } from "@lucide/vue";
 import { useI18n } from "../i18n";
+import type { PluginEnabledState } from "../plugins/types";
 import type { ViewKey } from "../types";
 import { visibleModules, workspaceNavigation, type ModuleKey, type ShellIcon, type WorkspaceNavItem } from "./moduleCatalog";
-const props = defineProps<{ module: ModuleKey; view: ViewKey; sentinelMenu: string; hackerOneEnabled: boolean; runningJobs?: number; blockedCount?: number; fuse?: number }>();
+const props = defineProps<{ module: ModuleKey; view: ViewKey; sentinelMenu: string; hackerOneEnabled: boolean; enabledPlugins?: PluginEnabledState; runningJobs?: number; blockedCount?: number; fuse?: number }>();
 const emit = defineEmits<{ moduleChange: [module: ModuleKey]; navigate: [item: WorkspaceNavItem] }>();
 const { tr } = useI18n();
-const modules = computed(() => visibleModules(props.hackerOneEnabled));
+const modules = computed(() => visibleModules(props.hackerOneEnabled,props.enabledPlugins));
 const navigation = computed(() => workspaceNavigation(props.module));
 const icons = { chat: MessageSquare, assets: Database, scan: ShieldCheck, hackerone: ShieldCheck, dashboard: LayoutDashboard, tasks: Activity, ownership: ShieldCheck, exposure: Globe2, changes: FileClock, quarantine: ShieldAlert, query: Plus, dialog: BrainCircuit, results: Globe2, skills: Braces } satisfies Record<ShellIcon, unknown>;
 </script>

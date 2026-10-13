@@ -42,6 +42,7 @@ cd src-tauri && cargo check
 ```
 
 业务模块边界、Tauri 命令归属和新增代码规则见 [`docs/architecture.md`](docs/architecture.md)。
+独立聊天主应用、内置 Assets/Scanning 插件及本地体验说明见 [`内置插件重构说明`](docs/BUILTIN_PLUGIN_HOST_2026-10-13.md)。
 Strix 退出、多智能体角色边界和发布验收以 [`Master Plan`](docs/NEST_STRIX_FREE_MULTI_AGENT_MASTER_PLAN.md) 为准；当前完成项与未完成项见 [`实施进度`](docs/NEST_IMPLEMENTATION_PROGRESS_2026-09-23.md)。
 
 生成当前平台安装包：

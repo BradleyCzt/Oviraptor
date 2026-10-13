@@ -1,7 +1,7 @@
 import { computed, onUnmounted, ref, watch } from "vue";
 import type { Project } from "../../types";
 import type { ConversationApi } from "./api";
-import type { Conversation, ConversationScope, ConversationSendInput, ConversationSnapshot } from "./types";
+import type { Conversation, ConversationLinksInput, ConversationScope, ConversationSendInput, ConversationSnapshot } from "./types";
 
 export function useConversationWorkspace(deps: { project: () => Project | undefined; api: ConversationApi; operationId?: () => string }) {
   const conversations = ref<Conversation[]>([]);
@@ -158,6 +158,29 @@ export function useConversationWorkspace(deps: { project: () => Project | undefi
     } catch (error) { if (currentSelection(epoch, projectId, id) && request === actionRequest) { actionError.value = String(error); await readSelected(false); } }
     finally { if (currentSelection(epoch, projectId, id) && request === actionRequest) busy.value = false; }
   }
+  async function setLinks(input: ConversationLinksInput): Promise<boolean> {
+    const current = snapshot.value;
+    if (!current || !canDelete.value || !writable.value || pendingSend.value) return false;
+    const { projectId, id, revision } = current.conversation;
+    if (input.projectId !== projectId || input.conversationId !== id || project.value?.id !== projectId || input.expectedRevision !== revision) {
+      actionError.value = "Conversation changed. Refresh and review linked records before saving again";
+      return false;
+    }
+    const epoch = selectionEpoch, request = ++actionRequest;
+    busy.value = true; actionError.value = "";
+    try {
+      const value = await deps.api.setConversationLinks({ ...input, links: input.links.map(link => ({ ...link })) });
+      if (!currentSelection(epoch, projectId, id) || request !== actionRequest) return false;
+      if (value.projectId !== projectId || value.id !== id || value.revision !== revision + 1) throw Error("Linked-record response does not match this conversation");
+      await readSelected(false);
+      if (!currentSelection(epoch, projectId, id) || request !== actionRequest || readError.value) return false;
+      void loadList();
+      return true;
+    } catch (error) {
+      if (currentSelection(epoch, projectId, id) && request === actionRequest) { actionError.value = String(error); await readSelected(false); }
+      return false;
+    } finally { if (currentSelection(epoch, projectId, id) && request === actionRequest) busy.value = false; }
+  }
   async function cancelReply() {
     const current = snapshot.value;
     if (cancelling.value || !current?.latestReply || !replyActive.value || current.latestReply.status === "cancel_requested" || project.value?.status !== "active") return;
@@ -235,5 +258,5 @@ export function useConversationWorkspace(deps: { project: () => Project | undefi
     searchTimer = setTimeout(() => { searchTimer = undefined; void loadList(); }, 250);
   }, { flush: "sync" });
   onUnmounted(() => { disposed = true; projectEpoch++; selectionEpoch++; actionRequest++; stopPoll(); if (searchTimer) clearTimeout(searchTimer); });
-  return { conversations, total, includeArchived, query, selectedId, snapshot, draft, titleDraft, loadingList, loading, loadingEarlier, busy, cancelling, listError, readError, actionError, hasListSnapshot, pendingSend, pendingDelete, project, writable, replyActive, messageBytes, messageTooLong, canSend, canDelete, requestDelete, cancelDelete, confirmDelete, loadList, readSelected, selectConversation, createConversation, send, updateConversation, cancelReply, loadEarlier };
+  return { conversations, total, includeArchived, query, selectedId, snapshot, draft, titleDraft, loadingList, loading, loadingEarlier, busy, cancelling, listError, readError, actionError, hasListSnapshot, pendingSend, pendingDelete, project, writable, replyActive, messageBytes, messageTooLong, canSend, canDelete, requestDelete, cancelDelete, confirmDelete, loadList, readSelected, selectConversation, createConversation, send, updateConversation, setLinks, cancelReply, loadEarlier };
 }

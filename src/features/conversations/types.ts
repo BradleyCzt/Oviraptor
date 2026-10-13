@@ -25,3 +25,5 @@ export interface ConversationReadInput extends ConversationScope { beforeSequenc
 export interface ConversationUpdateInput extends ConversationScope { expectedRevision: number; title?: string; archived?: boolean }
 export interface ConversationSendInput extends ConversationScope { expectedRevision: number; operationId: string; content: string; requestReply: boolean }
 export interface ConversationSendResult { conversation: Conversation; userMessage: ConversationMessage; reply: ConversationReply | null }
+
+export interface ConversationLinksInput extends ConversationScope { expectedRevision: number; links: { kind: "scan" | "asset"; targetId: string }[] }

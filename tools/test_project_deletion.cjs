@@ -6,7 +6,7 @@ const path = require('node:path');
 const test = require('node:test');
 const ts = require('typescript');
 const vue = require('vue');
-const { catalog, navigation } = require('./shell_module_harness.cjs');
+const { catalog, navigation, plugins } = require('./shell_module_harness.cjs');
 const { parse, compileScript, compileTemplate } = require('@vue/compiler-sfc');
 const { renderToString } = require('@vue/server-renderer');
 const transpile = (content) => ts.transpileModule(content, {
@@ -42,18 +42,19 @@ const impact = (overrides = {}) => ({ assetCount: 0, assetEventCount: 0, targetC
   findingCount: 0, validationCount: 0, opportunityCount: 0, fuseCount: 0,
   appsecVulnerabilityCount: 0, knowledgeCount: 0, learningCandidateCount: 0,
   browserAuthSessionCount: 0, otherRecordCount: 0, totalRecords: 0, ...overrides });
-function mount(overrides = {}) {
+function mount(overrides = {}, storageSeed = {}) {
   const calls = [];
   const defaults = { projectImpact: async () => impact(), deleteProject: async () => {},
     archiveProject: async () => {}, listProjects: async () => [project()], listProfiles: async () => [],
     dashboardStats: async () => ({}), getAppSettings: async () => ({}),
-    listRuns: async () => [], listEvents: async () => [] };
+    listRuns: async () => [], listEvents: async () => [], startupStatus:async()=>({reminderDays:7,interruptedJobs:[],staleProjects:[]}) };
   const api = new Proxy({}, { get(_, name) {
     const fn = overrides[name] || defaults[name];
     if (!fn) throw new Error(`Unexpected IPC ${String(name)}`);
     return (...args) => { calls.push([name, ...args]); return fn(...args); };
   } });
-  const storage = { getItem: () => null, setItem() {}, removeItem() {} };
+  const stored=new Map(Object.entries(storageSeed));
+  const storage = { getItem: key => stored.get(key)??null, setItem(key,value){stored.set(key,value);}, removeItem(key){stored.delete(key);} };
   const i18n = {};
   new Function('require', 'exports', 'localStorage', transpile(
     fs.readFileSync(path.join(__dirname, '../src/i18n.ts'), 'utf8'),
@@ -62,6 +63,8 @@ function mount(overrides = {}) {
   new Function('require', 'exports', 'localStorage', 'setTimeout', appSource.script)((name) => {
     if (name === 'vue') return { ...vue, onMounted() {} };
     if (name === './api') return { api };
+    if (name === './plugins') return plugins;
+    if (name === './shell/builtinWorkspaces') return {BUILTIN_WORKSPACES:{asset:()=>null,sentinel:()=>null,hackerone:()=>null}};
     if (name === './shell/moduleCatalog') return catalog;
     if (name === './shell/navigation') return navigation;
     if (name === './i18n') return i18n;
@@ -93,10 +96,11 @@ function mount(overrides = {}) {
   const component = { ...exports.default, setup(props, ctx) { bindings = setup(props, ctx); return () => null; } };
   const app = renderer.createApp(component);
   app.mount({});
+  const restored={module:bindings.activeModule.value,view:bindings.activeView.value};
   bindings.loading.value = false;
   bindings.projects.value = [project(), project(92)];
   bindings.activeView.value = 'projects';
-  return { b: bindings, calls, unmount: () => app.unmount(),
+  return { b: bindings, calls, storage, restored, unmount: () => app.unmount(),
     render: () => renderToString(vue.createSSRApp({ render: () => appSource.render({}, [], {}, vue.proxyRefs(bindings), {}, {}) })),
   };
 }
@@ -188,7 +192,6 @@ test('failed impact lookup clears stale confirmation and permits a fresh lookup'
 // Shell extraction regressions execute the real App setup as well as the pure
 // route tests; business views, tray targets and project refreshes stay wired.
 const flushShell = async () => { for (let i=0;i<30;i++) await vue.nextTick(); };
-const shellDeferred = () => { let resolve; const promise = new Promise(done => { resolve=done; }); return {promise,resolve}; };
 test('actual shell routes asset actions from Chat and preserves scanning tray targets', async () => {
   const m=mount();
   try {
@@ -196,29 +199,30 @@ test('actual shell routes asset actions from Chat and preserves scanning tray ta
     m.b.navigate('tasks');await flushShell();
     assert.equal(m.b.activeModule.value,'asset');assert.equal(m.b.activeView.value,'tasks');
     m.b.navigateFromTray('agent-tasks');
-    assert.equal(m.b.activeModule.value,'sentinel');assert.equal(m.b.activeView.value,'sentinel');assert.equal(m.b.sentinelSection.value,'queue');
+    assert.equal(m.b.activeModule.value,'sentinel');assert.equal(m.b.activeView.value,'sentinel');assert.equal(m.b.pluginNavigation.value.section,'queue');
     m.b.navigate('settings');assert.equal(m.b.activeModule.value,'sentinel');
     m.b.switchModule('chat');assert.equal(m.b.activeView.value,'chat');
     m.b.navigateFromTray('assets');await flushShell();assert.equal(m.b.activeModule.value,'asset');assert.equal(m.b.activeView.value,'assets');
   } finally { m.unmount(); }
 });
-test('actual shell cannot replace current project statistics with an old async response', async () => {
-  const older=shellDeferred(),newer=shellDeferred();
-  const m=mount({dashboardStats:id=>id===91?older.promise:id===92?newer.promise:Promise.resolve({assetCount:0})});
+test('actual shell validates selected projects without owning plugin statistics or result reads', async () => {
+  const m=mount();
   try {
-    m.b.selectProject(91);m.b.selectProject(92);
-    newer.resolve({assetCount:92});await flushShell();older.resolve({assetCount:91});await flushShell();
-    assert.equal(m.b.selectedProjectId.value,92);assert.equal(m.b.stats.value.assetCount,92);
-    m.b.selectProject(999);await flushShell();assert.equal(m.b.selectedProjectId.value,undefined);
-  } finally {older.resolve({});newer.resolve({});m.unmount();}
+    m.b.selectProject(91);m.b.selectProject(92);await flushShell();
+    assert.equal(m.b.selectedProjectId.value,92);
+    assert.equal(m.b.stats,undefined);assert.equal(m.b.runs,undefined);
+    assert.ok(!m.calls.some(([name])=>['dashboardStats','listRuns','listEvents','listSentinelScans'].includes(name)));
+    m.b.selectProject(999);assert.equal(m.b.selectedProjectId.value,undefined);
+  } finally {m.unmount();}
 });
-test('actual shell refuses stale secondary data after switching project and module', async () => {
-  const old=shellDeferred();
-  const m=mount({listRuns:()=>old.promise});
+test('actual shell navigation never starts hidden plugin reads and clears stale startup intents', async () => {
+  const m=mount();
   try {
-    m.b.navigate('tasks');m.b.switchModule('chat');old.resolve([{id:777,projectId:91}]);await flushShell();
-    assert.deepEqual(m.b.runs.value,[]);assert.equal(m.b.activeView.value,'chat');
-  } finally {old.resolve([]);m.unmount();}
+    m.b.quickStartProject(91);assert.equal(m.b.pendingWorkspaceIntent.value.kind,'start');
+    m.b.switchModule('chat');await flushShell();
+    assert.equal(m.b.pendingWorkspaceIntent.value,undefined);assert.equal(m.b.activeView.value,'chat');
+    assert.ok(!m.calls.some(([name])=>['listRuns','startJob'].includes(name)));
+  } finally {m.unmount();}
 });
 test('actual shell preserves HackerOne gating and configured entry', async () => {
   const m=mount();
@@ -228,4 +232,45 @@ test('actual shell preserves HackerOne gating and configured entry', async () =>
     m.b.switchModule('hackerone');assert.equal(m.b.activeModule.value,'hackerone');assert.equal(m.b.activeView.value,'hackerone');
     m.b.navigate('exposure');assert.equal(m.b.activeModule.value,'asset');assert.equal(m.b.activeView.value,'exposure');
   } finally {m.unmount();}
+});
+test('disabled stored module restores to Chat without touching profile or legacy settings',()=>{
+ const profileBlob=JSON.stringify({model:'configured',apiKey:'fixture'});
+ const m=mount({}, {'oviraptor-module':'asset','oviraptor-view':'assets','oviraptor-builtin-plugins-v1':JSON.stringify({version:1,enabled:{asset:false}}),'profiles':profileBlob,'oviraptor-accent':'#abcd12'});
+ try{assert.deepEqual(m.restored,{module:'chat',view:'chat'});assert.equal(m.storage.getItem('profiles'),profileBlob);assert.equal(m.storage.getItem('oviraptor-accent'),'#abcd12');assert.equal(m.calls.length,0);}finally{m.unmount();}
+});
+test('disabled tray and workspace entry reject atomically without silently re-enabling',()=>{
+ const m=mount();try{m.b.switchModule('chat');m.b.togglePlugin('sentinel',false);m.b.navigateFromTray('agent-tasks');assert.equal(m.b.activeModule.value,'chat');assert.equal(m.b.activeView.value,'chat');assert.equal(m.b.pluginEnabled.value.sentinel,false);assert.ok(m.b.navigationError.value);m.b.openProjectWorkspace(project(),'sentinel');assert.equal(m.b.activeModule.value,'chat');assert.equal(m.b.selectedProjectId.value,undefined);}finally{m.unmount();}
+});
+test('disabling mounted plugin returns to Chat and discards unconsumed intents without cancelling work',()=>{
+ const m=mount();try{m.b.quickStartProject(91);assert.ok(m.b.pendingWorkspaceIntent.value);m.b.togglePlugin('asset',false);assert.equal(m.b.activeModule.value,'chat');assert.equal(m.b.activeView.value,'chat');assert.equal(m.b.pendingWorkspaceIntent.value,undefined);m.b.togglePlugin('asset',true);assert.equal(m.b.pendingWorkspaceIntent.value,undefined);assert.equal(m.calls.filter(([name])=>/cancel|delete|archive|startJob/.test(name)).length,0);}finally{m.unmount();}
+});
+test('shared Settings and Projects remain available after HackerOne credentials become unavailable',async()=>{
+ const m=mount({}, {'oviraptor-module':'hackerone','oviraptor-view':'hackerone'});
+ try{assert.equal(m.b.activeWorkspace.value,undefined);m.b.activeModule.value='hackerone';m.b.navigate('settings');assert.equal(m.b.activeView.value,'settings');assert.equal(m.b.activeModule.value,'chat');m.b.activeModule.value='hackerone';m.b.navigate('projects');assert.equal(m.b.activeView.value,'projects');await m.b.refresh();assert.equal(m.b.activeModule.value,'chat');}finally{m.unmount();}
+});
+test('profile settings survive plugin changes and corrupt preference notice stays inline',async()=>{
+ const raw='{"version":99,"enabled":{"asset":false}}';const m=mount({}, {'oviraptor-builtin-plugins-v1':raw});
+ try{m.b.profiles.value=[{id:1,isDefault:true,settings:{model:'kept',fofaKey:'fixture'}}];const before=JSON.stringify(m.b.profiles.value);m.b.managePlugins();assert.ok(m.b.pluginPreferenceError.value);m.b.togglePlugin('asset',false);assert.equal(m.b.pluginEnabled.value.asset,true);assert.equal(m.storage.getItem('oviraptor-builtin-plugins-v1'),raw);assert.equal(JSON.stringify(m.b.profiles.value),before);assert.ok((await m.render()).includes('version'));}finally{m.unmount();}
+});
+test('Chat plugin handoff is current-project navigation only and refuses scope mismatch',()=>{
+ const m=mount();try{m.b.selectProject(91);m.b.switchModule('chat');m.b.pluginHost.openWorkspace({pluginId:'asset',projectId:91,page:'assets'});assert.equal(m.b.activeView.value,'assets');assert.throws(()=>m.b.pluginHost.openWorkspace({pluginId:'sentinel',projectId:92,page:'sentinel',section:'dialog'}));assert.equal(m.b.activeView.value,'assets');assert.equal(m.calls.filter(([name])=>/create|start|send/.test(name)).length,0);}finally{m.unmount();}
+});
+test('failed plugin persistence restores native checkbox to authoritative availability',()=>{
+ const m=mount({}, {'oviraptor-builtin-plugins-v1':'{broken'});try{const target={checked:false};m.b.onPluginToggle('asset',{target});assert.equal(target.checked,true);assert.equal(m.b.pluginEnabled.value.asset,true);assert.equal(m.storage.getItem('oviraptor-builtin-plugins-v1'),'{broken');}finally{m.unmount();}
+});
+test('host resume receipt survives plugin unmount, blocks duplicates and reconciles original reminder',async()=>{
+ const {mountWorkspace,deferred}=require('./plugin_workspace_harness.cjs');const ack=deferred();const job={runId:17,projectId:91,projectName:'Project 91',name:'Old run',pipeline:'full',profileId:1};
+ const m=mount();let plugin;
+ try{
+  m.b.startup.value={reminderDays:7,interruptedJobs:[job],staleProjects:[]};m.b.resumeInterrupted(job);const intent=m.b.pendingWorkspaceIntent.value;
+  plugin=mountWorkspace(null,'asset',{acknowledgeInterruptedRun:()=>ack.promise},{view:'tasks',intent,resumeWorkflow:m.b.resumeWorkflow});
+  m.b.consumeWorkspaceIntent(intent.id);await flushShell();assert.equal(m.b.resumeReceipts.value.get(17).state,'admitted');plugin.unmount();m.b.switchModule('chat');
+  m.b.resumeInterrupted(job);assert.equal(m.b.pendingWorkspaceIntent.value,undefined);assert.equal(plugin.calls.filter(([name])=>name==='startJob').length,0);
+  ack.resolve();await flushShell();assert.deepEqual(plugin.calls.filter(([name])=>name==='startJob'),[['startJob',91,1,'Old run · Resume','full']]);assert.equal(m.b.startup.value.interruptedJobs.length,0);assert.equal(m.b.resumeReceipts.value.has(17),false);assert.equal(m.b.activeView.value,'chat');assert.equal(plugin.events.filter(([name])=>name==='navigate').length,0);m.b.resumeInterrupted(job);assert.equal(m.b.pendingWorkspaceIntent.value,undefined);
+ }finally{ack.resolve();plugin?.unmount();m.unmount();}
+});
+test('failed resume reconciliation remains blocked until explicit read-only status retry',async()=>{
+ let unavailable=true;const job={runId:18,projectId:91,projectName:'Project 91',name:'Old run',pipeline:'full'};
+ const m=mount({startupStatus:async()=>{if(unavailable)throw Error('status unavailable');return{reminderDays:7,interruptedJobs:[job],staleProjects:[]};}});
+ try{m.b.resumeWorkflow.begin(job);m.b.resumeWorkflow.settle(job,{started:false,acknowledged:false,error:'start failed'});await flushShell();assert.equal(m.b.resumeReceipts.value.has(18),true);m.b.resumeInterrupted(job);assert.equal(m.b.pendingWorkspaceIntent.value,undefined);assert.match(m.b.startupReadError.value,/unverified|核实/);assert.match(m.b.startupActionError.value,/Project 91.*#18/);unavailable=false;await m.b.refreshStartupStatus();assert.equal(m.b.resumeReceipts.value.has(18),false);assert.equal(m.b.startup.value.interruptedJobs[0].runId,18);assert.equal(m.b.startupReadError.value,'');assert.match(m.b.startupActionError.value,/start failed/);assert.equal(m.calls.filter(([name])=>/startJob|resumeJob/.test(name)).length,0);}finally{m.unmount();}
 });

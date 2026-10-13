@@ -1,11 +1,13 @@
 <script setup lang="ts">
-import { computed, nextTick, ref, watch } from "vue";
+import { computed, defineAsyncComponent, nextTick, ref, watch } from "vue";
 import { Archive, ArrowUp, MessageSquare, Plus, RefreshCw, Square, Trash2 } from "@lucide/vue";
 import type { Project } from "../../types";
+import type { BuiltinPluginHost } from "../../plugins";
+const ConversationPluginPanel = defineAsyncComponent(() => import("./ConversationPluginPanel.vue"));
 import { useI18n } from "../../i18n";
 import { conversationApi } from "./api";
 import { useConversationWorkspace } from "./useConversationWorkspace";
-const props = defineProps<{ projects: Project[]; projectId?: number }>();
+const props = defineProps<{ projects: Project[]; projectId?: number; pluginHost?: BuiltinPluginHost }>();
 const emit = defineEmits<{ selectProject: [id: number]; createProject: [] }>();
 const { tr } = useI18n();
 const selectedProject = computed(() => props.projects.find(project => project.id === props.projectId));
@@ -62,6 +64,7 @@ function submit(event: KeyboardEvent) {
         <p v-if="actionError" class="conversation-error" role="alert">{{actionError}}</p>
         <p v-if="readError" class="conversation-error" role="alert">{{tr('读取失败，当前内容可能不是最新状态。','Read failed; the displayed history may be stale.')}} {{readError}} <button class="text-button" @click="state.readSelected()">{{tr('重试读取','Retry read')}}</button></p>
         <p v-if="loading" role="status">{{tr('正在读取历史…','Loading history…')}}</p>
+        <ConversationPluginPanel v-if="pluginHost" :host="pluginHost" :project-id="selectedProject.id" :project-active="selectedProject.status==='active'" :snapshot="snapshot" :blocked="busy||replyActive||!!readError||!!pendingSend" :save-links="state.setLinks"/>
         <template v-if="snapshot">
           <header class="conversation-header"><div><h2>{{snapshot.conversation.title}}</h2><small>{{tr('普通对话 · 不执行工具或扫描','Conversation · no tool or scan execution')}}<span v-if="snapshot.replyAvailability.model"> · {{snapshot.replyAvailability.model}}</span></small></div><div class="conversation-actions"><button class="button ghost compact" :disabled="loading" :title="tr('刷新历史','Refresh history')" @click="state.readSelected()"><RefreshCw :size="14"/></button><button class="button ghost compact" :disabled="busy||replyActive||!writable||!!readError" @click="renameOpen=!renameOpen">{{tr('重命名','Rename')}}</button><button class="button ghost compact" :disabled="busy||replyActive||selectedProject.status!=='active'||!!readError" @click="state.updateConversation({archived:!snapshot.conversation.archived})"><Archive :size="14"/>{{snapshot.conversation.archived?tr('恢复','Restore'):tr('归档','Archive')}}</button><button class="button ghost compact" :disabled="!canDelete" @click="state.requestDelete()"><Trash2 :size="14"/>{{tr('删除','Delete')}}</button></div></header>
           <div v-if="pendingDelete" class="conversation-delete-confirm" role="alert"><div><strong>{{tr('删除这个对话？','Delete this conversation?')}}</strong><p>{{tr('将永久删除此对话和消息，无法恢复。项目、资产、扫描和证据保持不变。','This permanently deletes the conversation and its messages. It cannot be undone. Projects, assets, scans, and evidence are kept.')}}</p></div><button class="button ghost compact" :disabled="busy" @click="state.cancelDelete()">{{tr('取消','Cancel')}}</button><button class="button danger compact" :disabled="!canDelete" @click="state.confirmDelete()">{{busy?tr('删除中…','Deleting…'):tr('永久删除对话','Delete conversation permanently')}}</button></div>
