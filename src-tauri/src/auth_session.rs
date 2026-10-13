@@ -1158,6 +1158,88 @@ fn browser_auth_validation_target(document: &Value, entry_url: &str, final_url: 
     })
 }
 
+fn validate_browser_auth_session_on(
+    connection: &rusqlite::Connection,
+    validation_session_id: &str,
+) -> Result<(), String> {
+    let (entry_url, final_url, previous_status, document_text): (String, String, String, String) = connection
+        .query_row(
+            "SELECT entry_url,final_url,status,session_json FROM browser_auth_sessions WHERE id=?1",
+            [validation_session_id],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+        )
+        .map_err(|_| "登录会话不存在或已删除".to_string())?;
+    let document: Value = serde_json::from_str(&document_text).unwrap_or_else(|_| json!({}));
+    let target = browser_auth_validation_target(&document, &entry_url, &final_url);
+    let mut headers = HeaderMap::new();
+    if let Some(values) = document.get("headers").and_then(Value::as_object) {
+        for (name, value) in values {
+            let Some(text) = value.as_str() else { continue };
+            if !reusable_header(name) { continue; }
+            if let (Ok(name), Ok(value)) = (HeaderName::from_bytes(name.as_bytes()), HeaderValue::from_str(text)) {
+                headers.insert(name, value);
+            }
+        }
+    }
+    let target_host = host_from(&target).unwrap_or_default();
+    let cookie_header = document
+        .get("cookies")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter(|cookie| {
+            let domain = cookie.get("domain").and_then(Value::as_str).unwrap_or("").trim_start_matches('.').to_ascii_lowercase();
+            domain.is_empty() || target_host == domain || target_host.ends_with(&format!(".{domain}"))
+        })
+        .filter_map(|cookie| Some(format!("{}={}", cookie.get("name")?.as_str()?, cookie.get("value")?.as_str()?)))
+        .collect::<Vec<_>>()
+        .join("; ");
+    if !cookie_header.is_empty() {
+        headers.insert(COOKIE, HeaderValue::from_str(&cookie_header).map_err(|_| "Cookie 包含无法重放的字符".to_string())?);
+    }
+    // This request carries captured credentials: retain normal certificate and
+    // hostname verification, including on every redirect. Never retry insecurely.
+    let client = Client::builder()
+        .timeout(Duration::from_secs(20))
+        .redirect(reqwest::redirect::Policy::limited(8))
+        .build()
+        .map_err(|error| error.to_string())?;
+    let now = Utc::now().to_rfc3339();
+    match client.get(&target).headers(headers).send() {
+        Ok(response) => {
+            let status_code = response.status().as_u16();
+            let response_url = response.url().to_string();
+            let response_headers = response.headers().clone();
+            let body = response.text().unwrap_or_default().chars().take(200_000).collect::<String>();
+            let waf = waf_evidence(status_code, &response_headers, &body);
+            let clear_logout = login_like(&response_url) && !login_like(&target);
+            let (status, error) = if clear_logout {
+                ("invalid", "会话校验被重定向回登录页；请重新登录".to_string())
+            } else if waf {
+                // WAF is a target fuse signal, not proof that the user's session expired.
+                (previous_status.as_str(), "检测到明确 WAF/人机挑战特征；会话保留，扫描该目标时将自动熔断".to_string())
+            } else if matches!(status_code, 401 | 403) {
+                (previous_status.as_str(), "校验地址返回权限边界响应；单个 401/403 不判定会话失效，将由业务请求继续验证".to_string())
+            } else if (200..400).contains(&status_code) {
+                ("valid", String::new())
+            } else {
+                (capture_restore_status(&previous_status), format!("校验地址返回 HTTP {status_code}，不足以证明会话失效；已保留原状态，可在登录窗口访问业务功能后重新捕获"))
+            };
+            connection.execute(
+                "UPDATE browser_auth_sessions SET status=?1,last_validated_at=?2,last_error=?3,updated_at=datetime('now','localtime') WHERE id=?4",
+                params![status, now, error, validation_session_id],
+            ).map_err(|error| error.to_string())?;
+        }
+        Err(error) => {
+            connection.execute(
+                "UPDATE browser_auth_sessions SET status=?1,last_error=?2,updated_at=datetime('now','localtime') WHERE id=?3",
+                params![capture_restore_status(&previous_status),format!("会话校验请求失败，无法据此判定会话失效；已保留原状态：{error}"),validation_session_id],
+            ).map_err(|db_error| db_error.to_string())?;
+        }
+    }
+    Ok(())
+}
+
 #[tauri::command]
 pub async fn validate_browser_auth_session(
     app: AppHandle,
@@ -1168,81 +1250,7 @@ pub async fn validate_browser_auth_session(
     let validation_session_id = session_id.clone();
     let validation = tauri::async_runtime::spawn_blocking(move || -> Result<(), String> {
         let connection = db::open(&db_path)?;
-        let (entry_url, final_url, previous_status, document_text): (String, String, String, String) = connection
-            .query_row(
-                "SELECT entry_url,final_url,status,session_json FROM browser_auth_sessions WHERE id=?1",
-                [&validation_session_id],
-                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
-            )
-            .map_err(|_| "登录会话不存在或已删除".to_string())?;
-        let document: Value = serde_json::from_str(&document_text).unwrap_or_else(|_| json!({}));
-        let target = browser_auth_validation_target(&document, &entry_url, &final_url);
-        let mut headers = HeaderMap::new();
-        if let Some(values) = document.get("headers").and_then(Value::as_object) {
-            for (name, value) in values {
-                let Some(text) = value.as_str() else { continue };
-                if !reusable_header(name) { continue; }
-                if let (Ok(name), Ok(value)) = (HeaderName::from_bytes(name.as_bytes()), HeaderValue::from_str(text)) {
-                    headers.insert(name, value);
-                }
-            }
-        }
-        let target_host = host_from(&target).unwrap_or_default();
-        let cookie_header = document
-            .get("cookies")
-            .and_then(Value::as_array)
-            .into_iter()
-            .flatten()
-            .filter(|cookie| {
-                let domain = cookie.get("domain").and_then(Value::as_str).unwrap_or("").trim_start_matches('.').to_ascii_lowercase();
-                domain.is_empty() || target_host == domain || target_host.ends_with(&format!(".{domain}"))
-            })
-            .filter_map(|cookie| Some(format!("{}={}", cookie.get("name")?.as_str()?, cookie.get("value")?.as_str()?)))
-            .collect::<Vec<_>>()
-            .join("; ");
-        if !cookie_header.is_empty() {
-            headers.insert(COOKIE, HeaderValue::from_str(&cookie_header).map_err(|_| "Cookie 包含无法重放的字符".to_string())?);
-        }
-        let client = Client::builder()
-            .timeout(Duration::from_secs(20))
-            .redirect(reqwest::redirect::Policy::limited(8))
-            .danger_accept_invalid_certs(true)
-            .build()
-            .map_err(|error| error.to_string())?;
-        let now = Utc::now().to_rfc3339();
-        match client.get(&target).headers(headers).send() {
-            Ok(response) => {
-                let status_code = response.status().as_u16();
-                let response_url = response.url().to_string();
-                let response_headers = response.headers().clone();
-                let body = response.text().unwrap_or_default().chars().take(200_000).collect::<String>();
-                let waf = waf_evidence(status_code, &response_headers, &body);
-                let clear_logout = login_like(&response_url) && !login_like(&target);
-                let (status, error) = if clear_logout {
-                    ("invalid", "会话校验被重定向回登录页；请重新登录".to_string())
-                } else if waf {
-                    // WAF is a target fuse signal, not proof that the user's session expired.
-                    (previous_status.as_str(), "检测到明确 WAF/人机挑战特征；会话保留，扫描该目标时将自动熔断".to_string())
-                } else if matches!(status_code, 401 | 403) {
-                    (previous_status.as_str(), "校验地址返回权限边界响应；单个 401/403 不判定会话失效，将由业务请求继续验证".to_string())
-                } else if (200..400).contains(&status_code) {
-                    ("valid", String::new())
-                } else {
-                    (capture_restore_status(&previous_status), format!("校验地址返回 HTTP {status_code}，不足以证明会话失效；已保留原状态，可在登录窗口访问业务功能后重新捕获"))
-                };
-                connection.execute(
-                    "UPDATE browser_auth_sessions SET status=?1,last_validated_at=?2,last_error=?3,updated_at=datetime('now','localtime') WHERE id=?4",
-                    params![status, now, error, validation_session_id],
-                ).map_err(|error| error.to_string())?;
-            }
-            Err(error) => {
-                connection.execute(
-                    "UPDATE browser_auth_sessions SET status=?1,last_error=?2,updated_at=datetime('now','localtime') WHERE id=?3",
-                    params![capture_restore_status(&previous_status),format!("会话校验请求失败，无法据此判定会话失效；已保留原状态：{error}"),validation_session_id],
-                ).map_err(|db_error| db_error.to_string())?;
-            }
-        }
-        Ok(())
+        validate_browser_auth_session_on(&connection, &validation_session_id)
     })
     .await
     .map_err(|error| format!("会话校验线程失败：{error}"))?;
@@ -1539,3 +1547,7 @@ mod tests {
         std::fs::remove_dir_all(root).unwrap();
     }
 }
+
+#[cfg(test)]
+#[path = "auth_session_validation_tests.rs"]
+mod validation_tests;

@@ -1,7 +1,9 @@
 //! Event, run, message and artifact persistence (§11, §12).
 //!
-//! Model rounds and tool executions may run concurrently, but they only ever
-//! append here. The terminal state is written by `reducer` alone.
+//! Model rounds and tool executions may run concurrently. Terminal persistence
+//! is owned by the receipt-aware single projection and transactional child
+//! lifecycle/recovery paths; reducers compute outcomes, not a universal DB lock.
+//! Writers must preserve their state, fencing, budget and receipt contracts.
 use super::contract::{
     AgentBackendKind, AgentEventKind, AgentLane, AgentMessageKind, AgentRole, AgentRunStatus,
     MultiAgentPolicy, TerminalState,
