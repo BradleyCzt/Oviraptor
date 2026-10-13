@@ -29,6 +29,12 @@
 次要的结构性问题：`include!` 摧毁了命令层模块系统（§2）、数据层没有 schema
 所有者与迁移账本（§3）、凭据明文存储且一处带凭据的客户端关闭了 TLS 校验（§4）。
 
+**另有一项阻塞级发现**：完整 `cargo test --lib` 实测约 45 分钟后
+**SIGABRT 中止、不产出任何通过/失败汇总**，根因是一个 `Drop` 实现里的
+`.unwrap()`（§5.3）。这意味着 10-12 审计依赖的"3066 passed / 318 failed"
+基线在当前环境下**无法复现**——不是数字不准，而是连统计都产生不出来。
+修复是一行，但它不修，后续每一项修复都无法验证自己有没有引入回归。
+
 最深层的问题不在代码，而在**过程**：306 份文档对应 43 万行代码，其中 255 份
 标注"未完成"，22 个测试文件在断言源码字符串（§6）。
 
@@ -441,6 +447,53 @@ cookie 的 domain 过滤本身是正确的（`target_host == domain || target_ho
 任何非 transport 的 agent 线程 panic 后，
 `agent_assignments.state` 停在 `'running'`，只能靠租约过期 reconciler兜底。
 
+**已实测复现的实例 —— 它已经让整个测试套件无法产出基线。**
+
+本次审计执行了完整 `cargo test --lib`（约 45 分钟），结果不是"部分失败"，
+而是**测试二进制整体 SIGABRT 中止**：
+
+```
+thread 'tool_supply::macos_static_parser::tests::macos_static_parser_deny_default_real_files_network_and_fork'
+  panicked at src/tool_supply/sandbox/macos_static_parser.rs:250:9:
+assertion failed: wait(&mut child, Duration::from_secs(3)).success()
+  panicked at src/tool_supply/sandbox/macos_static_parser.rs:178:44:
+called `Result::unwrap()` on an `Err` value: Os { code: 1, kind: PermissionDenied }
+thread caused non-unwinding panic. aborting.
+error: test failed, to rerun pass `--lib`
+Caused by: process didn't exit successfully: (signal: 6, SIGABRT)
+```
+
+根因是同一个文件里的两个相邻 `Drop` 实现写法不一致：
+
+```rust
+// macos_static_parser.rs:176-180  —— 错误
+impl Drop for Fixture {
+    fn drop(&mut self) {
+        fs::remove_dir_all(&self.root).unwrap();   // ← 会在 unwind 中二次 panic
+    }
+}
+
+// macos_static_parser.rs:182-187  —— 正确写法，就在 6 行之外
+impl Drop for OwnedChild {
+    fn drop(&mut self) {
+        let _ = self.0.kill();
+        let _ = self.0.wait();
+    }
+}
+```
+
+`:250` 的断言先失败 → 开始 unwind → `Fixture::drop` 运行 →
+`remove_dir_all` 因 `PermissionDenied` 返回 `Err` → `.unwrap()` **在 unwind 期间 panic**
+→ 该 panic 不可展开 → `abort()` → SIGABRT。
+
+**后果**：进程被杀死，**不输出任何 passed/failed 汇总**。
+这意味着 10-12 审计所依赖的"3066 passed / 318 failed"基线，
+在当前环境下用 `cargo test --lib` **根本无法复现**——
+不是因为数字不准，而是因为连统计都产生不出来。
+这是本节"panic 无人接管"最直接的可观测后果。
+
+修复是一行：把 `:178` 的 `.unwrap()` 改为 `let _ =`（同文件 `OwnedChild::drop` 已是范例）。
+
 ### 5.4 状态被重复编码
 
 run 状态同时存在于 `agent_runs.status` / `terminal_state` / `finished_at`、
@@ -530,6 +583,7 @@ assert!(body.contains("NATIVE_A03_PRODUCER_BLOCKERS"), "...");
 
 | # | 事项 | 性质 | 成本 |
 |---|---|---|---|
+| 0 | **`macos_static_parser.rs:178` 的 `.unwrap()` 改成 `let _ =`**（§5.3）——不改则整个测试套件 SIGABRT，**回归基线无法产出**，其余所有修复都缺少判断依据 | 可测试性（阻塞项） | 1 行 |
 | 1 | 给 `agent_runs.terminal_state` 加不可变 trigger（§1.5），让 28 处守卫分裂立即暴露 | 正确性 | 极低 |
 | 2 | 移除 `auth_session.rs:1209` 的 `danger_accept_invalid_certs(true)`（§4.2） | 安全 | 极低 |
 | 3 | `schema_migrations` 表 +启用 `PRAGMA user_version`，收编 57 处启动期 `ADD COLUMN`（§3.2） | 数据完整性 | 中 |
@@ -541,9 +595,13 @@ assert!(body.contains("NATIVE_A03_PRODUCER_BLOCKERS"), "...");
 | 9 | 审计日志加哈希链并外部锚定（§4.3） | 完整性 | 中 |
 | 10 | 删除 `*_source_pin` 断言源码字符串的测试，改为行为断言（§6.2） | 测试有效性 | 中 |
 
-**顺序建议**：1 与 2 是"低改动、高收益、立即止血"，应先做。
-1 的效果尤其关键——它会让 §1.2 列出的两处真实缺陷**从静默成功变为可观测失败**，
-后续所有修复才有可靠的判断依据。
+**顺序建议**：0、1、2 是"低改动、高收益、立即止血"，应先做。
+
+- **0 是阻塞项**：它不修，回归基线就产不出来（§5.3），
+  "这次改动有没有引入新失败"这个问题无法回答，后续每一项修复都无法验证。
+- **1** 会让 §1.2 列出的两处真实缺陷**从静默成功变为可观测失败**，
+  后续所有终态相关修复才有可靠依据。
+- **2** 是直接的凭据外泄路径，且是一行改动。
 
 ---
 
@@ -581,6 +639,10 @@ grep -rn "load_or_create" src-tauri/src --include=*.rs | grep -i sealing
 # §5 编排
 grep -rn "catch_unwind" src-tauri/src --include=*.rs | wc -l                    # 0
 
+# §5.3 Drop 中的 unwrap（导致测试套件 SIGABRT 中止）
+sed -n '176,187p' src-tauri/src/tool_supply/sandbox/macos_static_parser.rs
+cd src-tauri && cargo test --lib -- --test-threads=4   # 约 45 分钟后 signal: 6, SIGABRT，无汇总
+
 # §6 过程
 ls docs/*.md | wc -l                                                            # 303
 grep -rlE "未完成|未收口|待办|遗留" docs | wc -l                                 # 255
@@ -593,13 +655,21 @@ cd src-tauri && cargo check --all-targets --message-format short
 
 ---
 
-## 附：未验证项
+## 附：验证边界
 
-诚实标注本文的边界：
+已完成的独立验证：
 
-- **全量 `cargo test --lib` 未完成**。本次尝试运行约 15 分钟未结束，
-  因此 10-12 审计引用的"3066 passed / 318 failed"基线**仍未被独立确认**。
-  本文所有关于测试的判断均基于代码结构与文件内容，未依赖该基线数字。
+- **全量 `cargo test --lib` 已运行完毕（约 45 分钟）**，结果为
+  **SIGABRT 中止，无通过/失败汇总**——详见 §5.3。
+  因此 10-12 审计引用的"3066 passed / 318 failed"基线，
+  在当前环境下**不是"尚未复核"，而是"无法复现"**：
+  测试进程在汇总前即被杀死。本文所有代码结论均不依赖该数字。
+- `cargo check --all-targets`：30 秒完成，零错误零警告。
+- §1 / §4 / §5 的每一条断言均在本仓库直接 grep 核对过。
+
+仍未验证（诚实标注边界）：
+
+- 修复 §5.3 那一行之后，测试套件的真实通过/失败分布未知。
 - `Cargo.lock` 的已知漏洞状态未审计。
 - `resources/workers/*.cjs` Node helper 进程的沙箱强度未评估
   （`commands/environment.rs:71-77` 自述为 unsupported）。
