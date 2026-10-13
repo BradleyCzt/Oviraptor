@@ -1,7 +1,8 @@
-//! The single-writer terminal state reducer (§15).
+//! Terminal signal reduction (§15).
 //!
-//! Every backend produces `TerminalSignals`; only this module turns them into
-//! the run's terminal state, and only once per run.
+//! This module computes outcomes from `TerminalSignals`. Production persistence
+//! is enforced by the single-projection and child lifecycle/recovery writers;
+//! the test-only `commit` helper is not their shared production write gate.
 pub(crate) mod backend_exit;
 use super::contract::{terminal_code, TerminalSignals, TerminalState};
 #[cfg(test)]

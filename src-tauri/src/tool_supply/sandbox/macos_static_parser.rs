@@ -29,9 +29,128 @@ impl MacosStaticParserReadiness {
     }
 }
 
+// Keep the fixture's destructor portable so its failure path can be tested even
+// when the actual Seatbelt probes cannot run on this platform.
+#[cfg(test)]
+struct Fixture {
+    root: std::path::PathBuf,
+}
+#[cfg(test)]
+impl Fixture {
+    fn cleanup(&self, diagnostics: &mut impl std::io::Write) {
+        if let Err(error) = std::fs::remove_dir_all(&self.root) {
+            // Drop may run during a failed assertion's unwind. Preserve that
+            // failure, and report the path left behind without risking another
+            // panic if stderr itself cannot be written.
+            let _ = writeln!(
+                diagnostics,
+                "fixed probe fixture cleanup failed for {}: {error}",
+                self.root.display()
+            );
+        }
+    }
+}
+#[cfg(test)]
+impl Drop for Fixture {
+    fn drop(&mut self) {
+        self.cleanup(&mut std::io::stderr().lock());
+    }
+}
+
+#[cfg(test)]
+mod cleanup_tests {
+    use super::Fixture;
+    use std::{
+        fs, io,
+        sync::atomic::{AtomicU64, Ordering},
+    };
+
+    static NEXT: AtomicU64 = AtomicU64::new(0);
+
+    fn temporary_fixture() -> Fixture {
+        loop {
+            let root = std::env::temp_dir().join(format!(
+                "oviraptor-fixture-cleanup-{}-{}",
+                std::process::id(),
+                NEXT.fetch_add(1, Ordering::Relaxed)
+            ));
+            match fs::create_dir(&root) {
+                Ok(()) => return Fixture { root },
+                Err(error) if error.kind() == io::ErrorKind::AlreadyExists => continue,
+                Err(error) => panic!("could not create cleanup test fixture: {error}"),
+            }
+        }
+    }
+
+    #[test]
+    fn fixture_drop_removes_owned_directory() {
+        let fixture = temporary_fixture();
+        let path = fixture.root.clone();
+        fs::create_dir(path.join("nested")).unwrap();
+        fs::write(path.join("nested/evidence"), b"owned fixture data").unwrap();
+        drop(fixture);
+        assert!(!path.exists());
+    }
+
+    #[test]
+    fn cleanup_failure_is_reported_and_diagnostic_write_failure_is_safe() {
+        struct BrokenWriter;
+        impl io::Write for BrokenWriter {
+            fn write(&mut self, _: &[u8]) -> io::Result<usize> {
+                Err(io::Error::new(
+                    io::ErrorKind::BrokenPipe,
+                    "closed test sink",
+                ))
+            }
+            fn flush(&mut self) -> io::Result<()> {
+                Ok(())
+            }
+        }
+
+        let parent = temporary_fixture();
+        let blocker = parent.root.join("owned-file");
+        fs::write(&blocker, b"leave this owned file intact").unwrap();
+        // A file in the middle of the path forces failure regardless of user
+        // privileges, unlike tests relying on read-only directory permissions.
+        let fixture = Fixture {
+            root: blocker.join("cannot-be-a-directory"),
+        };
+        let mut diagnostics = Vec::new();
+        fixture.cleanup(&mut diagnostics);
+        let diagnostics = String::from_utf8(diagnostics).unwrap();
+        let prefix = format!(
+            "fixed probe fixture cleanup failed for {}: ",
+            fixture.root.display()
+        );
+        assert!(diagnostics.starts_with(&prefix));
+        assert!(diagnostics.trim_end().len() > prefix.len());
+        fixture.cleanup(&mut BrokenWriter);
+        assert_eq!(fs::read(&blocker).unwrap(), b"leave this owned file intact");
+    }
+
+    #[test]
+    fn fixture_cleanup_failure_during_unwind_preserves_original_panic() {
+        let parent = temporary_fixture();
+        let blocker = parent.root.join("owned-file");
+        fs::write(&blocker, b"leave this owned file intact").unwrap();
+        let result = std::panic::catch_unwind(|| {
+            let _fixture = Fixture {
+                root: blocker.join("cannot-be-a-directory"),
+            };
+            panic!("original fixture assertion failure");
+        });
+        let panic = result.expect_err("the original assertion must still fail");
+        assert_eq!(
+            panic.downcast_ref::<&str>(),
+            Some(&"original fixture assertion failure")
+        );
+        assert_eq!(fs::read(&blocker).unwrap(), b"leave this owned file intact");
+    }
+}
+
 #[cfg(all(test, target_os = "macos"))]
 mod tests {
-    use super::MacosStaticParserReadiness;
+    use super::{Fixture, MacosStaticParserReadiness};
     use std::{
         fs,
         io::Read,
@@ -85,9 +204,6 @@ int main(int argc,char **argv){
                 Self::Cancel => "cancel",
             }
         }
-    }
-    struct Fixture {
-        root: PathBuf,
     }
     impl Fixture {
         fn new() -> Self {
@@ -171,11 +287,6 @@ int main(int argc,char **argv){
                 }
             }
             OwnedChild(cmd.spawn().unwrap())
-        }
-    }
-    impl Drop for Fixture {
-        fn drop(&mut self) {
-            fs::remove_dir_all(&self.root).unwrap();
         }
     }
     struct OwnedChild(Child);
