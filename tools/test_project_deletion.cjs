@@ -6,6 +6,7 @@ const path = require('node:path');
 const test = require('node:test');
 const ts = require('typescript');
 const vue = require('vue');
+const { catalog, navigation } = require('./shell_module_harness.cjs');
 const { parse, compileScript, compileTemplate } = require('@vue/compiler-sfc');
 const { renderToString } = require('@vue/server-renderer');
 const transpile = (content) => ts.transpileModule(content, {
@@ -61,6 +62,8 @@ function mount(overrides = {}) {
   new Function('require', 'exports', 'localStorage', 'setTimeout', appSource.script)((name) => {
     if (name === 'vue') return { ...vue, onMounted() {} };
     if (name === './api') return { api };
+    if (name === './shell/moduleCatalog') return catalog;
+    if (name === './shell/navigation') return navigation;
     if (name === './i18n') return i18n;
     if (name === '@lucide/vue') return new Proxy({}, { get: () => () => null });
     if (name === '@tauri-apps/api/event') return { listen: async () => () => {} };
@@ -180,4 +183,49 @@ test('failed impact lookup clears stale confirmation and permits a fresh lookup'
     m.b.cancelProjectAction();
     assert.equal(m.b.pendingProjectAction.value, undefined);
   } finally { m.unmount(); }
+});
+
+// Shell extraction regressions execute the real App setup as well as the pure
+// route tests; business views, tray targets and project refreshes stay wired.
+const flushShell = async () => { for (let i=0;i<30;i++) await vue.nextTick(); };
+const shellDeferred = () => { let resolve; const promise = new Promise(done => { resolve=done; }); return {promise,resolve}; };
+test('actual shell routes asset actions from Chat and preserves scanning tray targets', async () => {
+  const m=mount();
+  try {
+    m.b.activeModule.value='chat';m.b.activeView.value='chat';
+    m.b.navigate('tasks');await flushShell();
+    assert.equal(m.b.activeModule.value,'asset');assert.equal(m.b.activeView.value,'tasks');
+    m.b.navigateFromTray('agent-tasks');
+    assert.equal(m.b.activeModule.value,'sentinel');assert.equal(m.b.activeView.value,'sentinel');assert.equal(m.b.sentinelSection.value,'queue');
+    m.b.navigate('settings');assert.equal(m.b.activeModule.value,'sentinel');
+    m.b.switchModule('chat');assert.equal(m.b.activeView.value,'chat');
+    m.b.navigateFromTray('assets');await flushShell();assert.equal(m.b.activeModule.value,'asset');assert.equal(m.b.activeView.value,'assets');
+  } finally { m.unmount(); }
+});
+test('actual shell cannot replace current project statistics with an old async response', async () => {
+  const older=shellDeferred(),newer=shellDeferred();
+  const m=mount({dashboardStats:id=>id===91?older.promise:id===92?newer.promise:Promise.resolve({assetCount:0})});
+  try {
+    m.b.selectProject(91);m.b.selectProject(92);
+    newer.resolve({assetCount:92});await flushShell();older.resolve({assetCount:91});await flushShell();
+    assert.equal(m.b.selectedProjectId.value,92);assert.equal(m.b.stats.value.assetCount,92);
+    m.b.selectProject(999);await flushShell();assert.equal(m.b.selectedProjectId.value,undefined);
+  } finally {older.resolve({});newer.resolve({});m.unmount();}
+});
+test('actual shell refuses stale secondary data after switching project and module', async () => {
+  const old=shellDeferred();
+  const m=mount({listRuns:()=>old.promise});
+  try {
+    m.b.navigate('tasks');m.b.switchModule('chat');old.resolve([{id:777,projectId:91}]);await flushShell();
+    assert.deepEqual(m.b.runs.value,[]);assert.equal(m.b.activeView.value,'chat');
+  } finally {old.resolve([]);m.unmount();}
+});
+test('actual shell preserves HackerOne gating and configured entry', async () => {
+  const m=mount();
+  try {
+    m.b.switchModule('hackerone');assert.notEqual(m.b.activeModule.value,'hackerone');
+    m.b.profiles.value=[{id:1,isDefault:true,settings:{hackerOneUsername:'user',hackerOneToken:'fixture'}}];
+    m.b.switchModule('hackerone');assert.equal(m.b.activeModule.value,'hackerone');assert.equal(m.b.activeView.value,'hackerone');
+    m.b.navigate('exposure');assert.equal(m.b.activeModule.value,'asset');assert.equal(m.b.activeView.value,'exposure');
+  } finally {m.unmount();}
 });

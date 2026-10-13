@@ -256,6 +256,8 @@ fn handle_https_request(
         // now drops the request instead of only stopping the waiting.
         total_timeout: Some(Duration::from_secs(14_400)),
         proxy: upstream.proxy.clone(),
+        reject_redirects: false,
+        max_response_bytes: None,
     };
     for (key, value) in &request.headers {
         if key.eq_ignore_ascii_case("host")

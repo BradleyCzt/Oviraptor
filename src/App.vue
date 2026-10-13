@@ -2,11 +2,15 @@
 import { computed, defineAsyncComponent, nextTick, onMounted, onUnmounted, ref, watch } from "vue";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import {
-  Activity, Bell, BrainCircuit, Braces, CheckCircle2, ChevronDown, CircleAlert, ClipboardCheck, Clock3, Copy, Database,
-  AppWindow, FileClock, FolderKanban, Globe2, Languages, LayoutDashboard, ListFilter, Menu, Palette, PlayCircle, Plus, RefreshCw, Search,
-  Settings2, ShieldAlert, ShieldCheck, Server, SlidersHorizontal, TerminalSquare, Trash2, X,
+  Activity, Bell, CheckCircle2, ChevronDown, CircleAlert, Clock3, Copy, Database,
+  AppWindow, FolderKanban, Languages, ListFilter, Menu, MessageSquare, Palette, PlayCircle, Plus, RefreshCw, Search,
+  Settings2, ShieldCheck, Server, SlidersHorizontal, TerminalSquare, Trash2, X,
 } from "@lucide/vue";
 import { api } from "./api";
+import WorkspaceNavigation from "./shell/WorkspaceNavigation.vue";
+import { moduleDefinition, type ModuleKey, type WorkspaceNavItem } from "./shell/moduleCatalog";
+import { normalizeRoute, parseProjectId, persistRoute, restoreRoute, trayRoute } from "./shell/navigation";
+const ConversationWorkspace = defineAsyncComponent(() => import("./features/conversations/ConversationWorkspace.vue"));
 import packageInfo from "../package.json";
 import { useI18n } from "./i18n";
 import { humanizeScanCheckpoint } from "./features/sentinel/presentation";
@@ -33,20 +37,15 @@ import "./probe-status.css";
 import "./theme-enhancements.css";
 
 const { locale, t, tr, setLocale } = useI18n();
-type ModuleKey = "hackerone" | "asset" | "sentinel";
-for(const suffix of ["view","module","project","theme","accent"]){
-  const current=`oviraptor-${suffix}`;const legacy=`asset-atlas-${suffix}`;
-  if(localStorage.getItem(current)===null&&localStorage.getItem(legacy)!==null)localStorage.setItem(current,localStorage.getItem(legacy)!);
-  localStorage.removeItem(legacy);
-}
-const activeView = ref<ViewKey>((localStorage.getItem("oviraptor-view") as ViewKey) || "dashboard");
-const activeModule = ref<ModuleKey>((localStorage.getItem("oviraptor-module") as ModuleKey) || (activeView.value === "hackerone" ? "hackerone" : activeView.value === "sentinel" ? "sentinel" : "asset"));
+const initialRoute = restoreRoute(localStorage);
+const activeView = ref<ViewKey>(initialRoute.view);
+const activeModule = ref<ModuleKey>(initialRoute.module);
 const projects = ref<Project[]>([]); const profiles = ref<ConfigProfile[]>([]); const runs = ref<JobRun[]>([]);
 const events = ref<AssetEvent[]>([]); const stats = ref<DashboardStats>();
 const runLiveMessages = ref<Record<number,string>>({});
 const appSettings = ref<AppSettings>({ reminderDays: 7, customIcon: false, deduplicatedAssets: 0 });
 const startup = ref<StartupStatus>({ reminderDays: 7, staleProjects: [], interruptedJobs: [] });
-const selectedProjectId = ref<number | undefined>(Number(localStorage.getItem("oviraptor-project")) || undefined);
+const selectedProjectId = ref<number | undefined>(parseProjectId(localStorage.getItem("oviraptor-project")));
 const { logs, loading: assetLogsLoading, readFailed: assetLogsFailed,
   connectionUnavailable: assetLogConnectionUnavailable, refresh: refreshAssetLogs } = useAssetLogPanel(
   () => selectedProjectId.value, () => activeModule.value === "asset" && activeView.value === "logs",
@@ -128,42 +127,50 @@ const viewTitle = computed(() => {
     return titles[sentinelMenu.value] || titles.overview;
   }
   return ({
-    dashboard:t.value.dashboard, projects:t.value.projects, query:t.value.query, assets:t.value.assets, ownership:tr("归属门禁","Ownership gate"), exposure:tr("公开暴露面","Public exposure"),
+    chat:tr("对话", "Chat"), dashboard:t.value.dashboard, projects:t.value.projects, query:t.value.query, assets:t.value.assets, ownership:tr("归属门禁","Ownership gate"), exposure:tr("公开暴露面","Public exposure"),
     quarantine:t.value.quarantine, hackerone:"HackerOne SRC", sentinel:"安全总览", changes:t.value.changes, tasks:t.value.tasks, logs:t.value.logs, settings:t.value.settings,
   })[activeView.value];
 });
-const nav = computed(() => [
-  { key:"dashboard" as ViewKey,label:t.value.dashboard,icon:LayoutDashboard },
-  { key:"tasks" as ViewKey,label:t.value.tasks,icon:Activity,badge:stats.value?.runningJobs },
-  { key:"assets" as ViewKey,label:t.value.assets,icon:Database },
-  { key:"ownership" as ViewKey,label:tr("归属门禁","Ownership gate"),icon:ShieldCheck },
-  { key:"exposure" as ViewKey,label:tr("公开暴露面","Public exposure"),icon:Globe2 },
-  { key:"changes" as ViewKey,label:t.value.changes,icon:FileClock },
-  { key:"quarantine" as ViewKey,label:t.value.quarantine,icon:ShieldAlert,badge:stats.value?.blockedCount },
-  { key:"query" as ViewKey,label:t.value.query,icon:Plus,cta:true },
-].filter(() => activeModule.value === "asset"));
-const sentinelNav = computed(()=>[
-  {key:"dialog",section:"dialog" as const,label:tr("调查对话","Investigation dialog"),icon:BrainCircuit},
-  {key:"urls",section:"results" as const,result:"summary" as const,label:tr("这次结果","This investigation"),icon:Globe2},
-  {key:"queue",section:"queue" as const,label:tr("任务与成本","Tasks & cost"),icon:ClipboardCheck,badge:sentinelAlerts.value.fuse},
-  {key:"skills",section:"workbench" as const,workbench:"skills" as const,label:tr("知识与策略","Knowledge & policy"),icon:Braces},
-]);
-
-function navigate(view: ViewKey) { activeView.value=view; if(view==='hackerone') activeModule.value='hackerone'; if(view==='sentinel')activeModule.value='sentinel'; localStorage.setItem("oviraptor-view",view); localStorage.setItem("oviraptor-module",activeModule.value); window.setTimeout(()=>void refreshSecondary(),0); }
-function navigateFromTray(destination: string) {
-  if (destination === "assets") {
-    switchModule("asset");
-    navigate("assets");
-  } else if (destination === "agent-tasks") {
-    switchModule("sentinel");
-    sentinelMenu.value = "queue";
-    sentinelSection.value = "queue";
-    navigate("sentinel");
+function navigate(view: ViewKey) {
+  const route = normalizeRoute(activeModule.value, view);
+  if (route.module === "hackerone" && !hackerOneEnabled.value) {
+    notify("info", tr("请先在配置中心填写 HackerOne API identifier 和 token", "Configure HackerOne API credentials first"));
+    return;
   }
+  activeModule.value = route.module;
+  activeView.value = route.view;
+  persistRoute(localStorage, route);
+  void refreshSecondary();
 }
-function switchModule(module: ModuleKey) { if(module==="hackerone"&&!hackerOneEnabled.value){notify("info",tr("请先在配置中心填写 HackerOne API identifier 和 token","Configure HackerOne API credentials first"));return} activeModule.value=module; localStorage.setItem("oviraptor-module",module); navigate(module === "hackerone" ? "hackerone" : module === "sentinel" ? "sentinel" : "dashboard"); }
-function openSentinelSection(item:(typeof sentinelNav.value)[number]){sentinelMenu.value=item.key;sentinelSection.value=item.section;if("result" in item&&item.result)sentinelResultView.value=item.result;if("workbench" in item&&item.workbench)sentinelWorkbenchMode.value=item.workbench;navigate("sentinel")}
-function selectProject(id?: number) { selectedProjectId.value=id; id ? localStorage.setItem("oviraptor-project",String(id)) : localStorage.removeItem("oviraptor-project"); void refreshProjectData(); }
+function navigateFromTray(destination: string) {
+  const route = trayRoute(destination);
+  if (!route) return;
+  activeModule.value = route.module;
+  if (route.section) { sentinelMenu.value = route.section; sentinelSection.value = route.section; }
+  navigate(route.view);
+}
+function switchModule(module: ModuleKey) {
+  if (module === "hackerone" && !hackerOneEnabled.value) {
+    notify("info", tr("请先在配置中心填写 HackerOne API identifier 和 token", "Configure HackerOne API credentials first"));
+    return;
+  }
+  activeModule.value = module;
+  navigate(moduleDefinition(module).defaultView);
+}
+function openWorkspaceSection(item: WorkspaceNavItem) {
+  if (item.section) { sentinelMenu.value = item.key; sentinelSection.value = item.section; }
+  if (item.result) sentinelResultView.value = item.result;
+  if (item.workbench) sentinelWorkbenchMode.value = item.workbench;
+  navigate(item.view);
+}
+function selectProject(id?: number) {
+  const candidate = parseProjectId(id);
+  selectedProjectId.value = candidate && projects.value.some(project => project.id === candidate) ? candidate : undefined;
+  selectedProjectId.value ? localStorage.setItem("oviraptor-project", String(selectedProjectId.value)) : localStorage.removeItem("oviraptor-project");
+  stats.value = undefined; runs.value = []; events.value = []; sentinelLogScans.value = [];
+  sentinelLogScanId.value = ""; sentinelLogAttempts.value = []; sentinelRunnerLog.value = undefined;
+  void refreshProjectData();
+}
 function notify(type: "success"|"error"|"info", text: string) { const item={id:Date.now()+Math.random(),type,text}; toasts.value.push(item); setTimeout(()=>toasts.value=toasts.value.filter(t=>t.id!==item.id),5000); }
 function sentinelErrorDetail(scan: SentinelScan) {
   const checkpoint = scan.currentCheckpoint || "";
@@ -252,51 +259,66 @@ async function copySentinelRunnerLog(){
 }
 function setTheme(preset:string){themePreset.value=preset;localStorage.setItem("oviraptor-theme",preset);showTheme.value=false}
 function saveAccent(){localStorage.setItem("oviraptor-accent",accentColor.value)}
-let refreshGeneration=0;
-async function refreshSecondary(generation=refreshGeneration) {
-  const view=activeView.value;
-  const module=activeModule.value;
-  const projectId=selectedProjectId.value;
-  const requests:Promise<void>[]=[];
-  if(module==="asset"&&["dashboard","tasks"].includes(view)) requests.push(api.listRuns(projectId,100).then(value=>{if(generation===refreshGeneration)runs.value=value;}));
-  if(module==="asset"&&["dashboard","changes"].includes(view)) requests.push(api.listEvents(projectId,undefined,200).then(value=>{if(generation===refreshGeneration)events.value=value;}));
-  if(view==="logs"&&module==="asset") requests.push(refreshAssetLogs());
-  if(view==="logs"&&module==="sentinel") requests.push(api.listSentinelScans(projectId,300).then(value=>{if(generation===refreshGeneration){sentinelLogScans.value=value;syncSentinelLogSelection();void refreshSentinelRunnerLog();}}));
-  if(view==="logs"&&module==="hackerone"&&hackerOneEnabled.value) requests.push(api.listHackerOneEvents(300).then(value=>{if(generation===refreshGeneration)hackerOneLogEvents.value=value;}));
+let refreshGeneration = 0;
+let secondaryGeneration = 0;
+let workspaceRefreshGeneration = 0;
+async function refreshSecondary(generation = refreshGeneration) {
+  const request = ++secondaryGeneration;
+  const view = activeView.value;
+  const module = activeModule.value;
+  const projectId = selectedProjectId.value;
+  const current = () => request === secondaryGeneration && generation === refreshGeneration && projectId === selectedProjectId.value && view === activeView.value && module === activeModule.value;
+  const requests: Promise<void>[] = [];
+  if(module === "asset" && ["dashboard", "tasks"].includes(view)) requests.push(api.listRuns(projectId,100).then(value => { if(current()) runs.value=value; }));
+  if(module === "asset" && ["dashboard", "changes"].includes(view)) requests.push(api.listEvents(projectId,undefined,200).then(value => { if(current()) events.value=value; }));
+  if(view === "logs" && module === "asset") requests.push(refreshAssetLogs());
+  if(view === "logs" && module === "sentinel") requests.push(api.listSentinelScans(projectId,300).then(value => { if(current()) { sentinelLogScans.value=value; syncSentinelLogSelection(); void refreshSentinelRunnerLog(); } }));
+  if(view === "logs" && module === "hackerone" && hackerOneEnabled.value) requests.push(api.listHackerOneEvents(300).then(value => { if(current()) hackerOneLogEvents.value=value; }));
   await Promise.allSettled(requests);
 }
-async function refreshProjectData(){
-  const generation=++refreshGeneration;
-  try{stats.value=await api.dashboardStats(selectedProjectId.value);await refreshSecondary(generation);}
-  catch(error){notify("error",String(error));}
-}
-async function refresh(waitForSecondary: boolean | Event=false) {
-  const shouldWait=waitForSecondary===true;
-  const generation=++refreshGeneration;
+async function refreshProjectData(waitForSecondary = false) {
+  const generation = ++refreshGeneration;
+  const projectId = selectedProjectId.value;
   try {
-    [projects.value,profiles.value,stats.value,appSettings.value] = await Promise.all([
-      api.listProjects(),api.listProfiles(),api.dashboardStats(selectedProjectId.value),api.getAppSettings(),
-    ]);
-    const secondary=refreshSecondary(generation);
-    if(shouldWait)await secondary;
-    else void secondary;
-    if(hackerOneEnabled.value)void api.listHackerOneEvents(1).then(value=>h1HasChanges.value=value.length>0);
-    if(activeModule.value==="hackerone"&&!hackerOneEnabled.value){activeModule.value="asset";activeView.value="dashboard";localStorage.setItem("oviraptor-module","asset");localStorage.setItem("oviraptor-view","dashboard")}
-    if (selectedProjectId.value && !projects.value.some(p=>p.id===selectedProjectId.value)){selectedProjectId.value=undefined;localStorage.removeItem("oviraptor-project");}
-  } catch(error){ notify("error",String(error)); }
-  finally { loading.value=false; }
+    const value = await api.dashboardStats(projectId);
+    if (generation !== refreshGeneration || projectId !== selectedProjectId.value) return;
+    stats.value = value;
+    const secondary = refreshSecondary(generation);
+    if (waitForSecondary) await secondary; else void secondary;
+  } catch(error) { if (generation === refreshGeneration && projectId === selectedProjectId.value) notify("error", String(error)); }
+}
+async function refresh(waitForSecondary: boolean | Event = false) {
+  const request = ++workspaceRefreshGeneration;
+  try {
+    const [nextProjects, nextProfiles, nextSettings] = await Promise.all([api.listProjects(), api.listProfiles(), api.getAppSettings()]);
+    if (request !== workspaceRefreshGeneration) return;
+    projects.value = nextProjects; profiles.value = nextProfiles; appSettings.value = nextSettings;
+    if (selectedProjectId.value && !projects.value.some(project => project.id === selectedProjectId.value)) {
+      selectedProjectId.value = undefined;
+      localStorage.removeItem("oviraptor-project");
+      stats.value = undefined; runs.value = []; events.value = [];
+    }
+    if (activeModule.value === "hackerone" && !hackerOneEnabled.value) {
+      const route = normalizeRoute("chat", ["settings", "projects"].includes(activeView.value) ? activeView.value : "chat");
+      activeModule.value = route.module; activeView.value = route.view; persistRoute(localStorage, route);
+    }
+    await refreshProjectData(waitForSecondary === true);
+    if (hackerOneEnabled.value) void api.listHackerOneEvents(1).then(value => { if (request === workspaceRefreshGeneration) h1HasChanges.value = value.length > 0; }).catch(() => {});
+    else h1HasChanges.value = false;
+  } catch(error) { if (request === workspaceRefreshGeneration) notify("error", String(error)); }
+  finally { if (request === workspaceRefreshGeneration) loading.value = false; }
 }
 async function projectSaved(id:number){ projectDialog.value=false;editProject.value=undefined;await refresh();selectProject(id); }
 async function profileSaved(){ configDialog.value=false;editProfile.value=undefined;await refresh(); }
 function openProject(project?:Project){ editProject.value=project;projectDialog.value=true; }
-function openProjectWorkspace(project: Project, module: "asset" | "sentinel") {
+function openProjectWorkspace(project: Project, module: ModuleKey) {
   selectProject(project.id);
   if (module === "sentinel") {
     switchModule("sentinel");
     sentinelMenu.value = "dialog";
     sentinelSection.value = "dialog";
   } else {
-    switchModule("asset");
+    switchModule(module);
   }
 }
 function projectActivity(project: Project) {
@@ -488,22 +510,10 @@ onUnmounted(()=>{unlisten?.();unlistenTray?.();if(workerSyncTimer)clearInterval(
   <div class="app-shell" :class="[{ 'sidebar-collapsed': sidebarCollapsed },`theme-${themePreset}`]" :style="{'--blue':accentColor}">
     <aside class="sidebar">
       <div class="brand"><div class="brand-mark"><img v-if="brandIconUrl" :src="brandIconUrl" alt="Oviraptor" /></div><div class="brand-copy"><strong>{{t.appName}}</strong><span>Eating • Taking</span></div></div>
-      <div class="module-switcher" aria-label="Product modules">
-        <button v-if="hackerOneEnabled" :class="{active:activeModule==='hackerone'}" @click="switchModule('hackerone')"><span>H1</span><b>HackerOne</b></button>
-        <button :class="{active:activeModule==='asset'}" @click="switchModule('asset')"><span>◈</span><b>Asset</b></button>
-        <button :class="{active:activeModule==='sentinel'}" @click="switchModule('sentinel')"><span>◈</span><b>Nest</b></button>
-      </div>
       <button class="sidebar-toggle" @click="sidebarCollapsed=!sidebarCollapsed"><Menu :size="17" /></button>
-      <nav class="nav-list">
-        <button v-for="item in nav" :key="item.key" :class="{active:activeView===item.key,accent:'cta' in item&&item.cta}" @click="navigate(item.key)">
-          <component :is="item.icon" :size="18" /><span>{{item.label}}</span><em v-if="item.badge">{{item.badge}}</em>
-        </button>
-        <template v-if="activeModule==='sentinel'">
-          <button v-for="item in sentinelNav" :key="item.key" :class="{active:sentinelMenu===item.key,accent:'cta' in item&&item.cta}" @click="openSentinelSection(item)"><component :is="item.icon" :size="18"/><span>{{item.label}}</span><em v-if="'badge' in item&&item.badge">{{item.badge}}</em></button>
-        </template>
-      </nav>
+      <WorkspaceNavigation :module="activeModule" :view="activeView" :sentinel-menu="sentinelMenu" :hacker-one-enabled="hackerOneEnabled" :running-jobs="stats?.runningJobs" :blocked-count="stats?.blockedCount" :fuse="sentinelAlerts.fuse" @module-change="switchModule" @navigate="openWorkspaceSection" />
       <div class="sidebar-fixed-links">
-        <button :class="{active:activeView==='logs'}" @click="navigate('logs')"><TerminalSquare :size="17" /><span>{{t.logs}}</span></button>
+        <button v-if="moduleDefinition(activeModule).hasLogs" :class="{active:activeView==='logs'}" @click="navigate('logs')"><TerminalSquare :size="17" /><span>{{t.logs}}</span></button>
         <button :class="{active:activeView==='settings'}" @click="navigate('settings')"><Settings2 :size="17" /><span>{{t.settings}}</span></button>
       </div>
       <div class="sidebar-project">
@@ -540,6 +550,8 @@ onUnmounted(()=>{unlisten?.();unlistenTray?.();if(workerSyncTimer)clearInterval(
         </section>
         <div v-if="loading" class="app-loading"><div class="loader-ring"></div><span>{{tr('正在初始化本地资产数据库…','Initializing local asset database…')}}</span></div>
 
+        <ConversationWorkspace v-else-if="activeView==='chat'" :projects="projects" :project-id="selectedProjectId" @select-project="selectProject" @create-project="openProject()" />
+
         <template v-else-if="activeView==='dashboard'">
           <div class="hero-row">
             <div><span class="eyebrow">OVERVIEW</span><h2>{{selectedProject?tr(`${selectedProject.name} 概览`,`${selectedProject.name} overview`):tr('所有项目资产概览','All-project asset overview')}}</h2><p>{{tr('数据保存在本地 SQLite；仅变化事件进入历史，不重复保存完整镜像。','Data stays in local SQLite; history stores changes instead of duplicate full snapshots.')}}</p></div>
@@ -562,13 +574,13 @@ onUnmounted(()=>{unlisten?.();unlistenTray?.();if(workerSyncTimer)clearInterval(
         </template>
 
         <template v-else-if="activeView==='projects'">
-          <div class="section-toolbar"><div><span class="eyebrow">SHARED WORKSPACES</span><h2>{{tr('项目与范围','Projects and scope')}}</h2><p>{{tr('一个工作空间统一承载 Asset 范围、Nest 扫描、证据、漏洞结论和知识沉淀。','One workspace owns Asset scope, Nest scans, evidence, conclusions, and learned knowledge.')}}</p></div><button class="button primary" @click="openProject()"><Plus :size="16" /> {{tr('新建工作空间','New workspace')}}</button></div>
+          <div class="section-toolbar"><div><span class="eyebrow">SHARED WORKSPACES</span><h2>{{tr('项目与范围','Projects and scope')}}</h2><p>{{tr('一个工作空间共享对话、资产范围、扫描、证据、漏洞结论和知识沉淀。','One workspace holds conversations, asset scope, scans, evidence, conclusions, and learned knowledge.')}}</p></div><button class="button primary" @click="openProject()"><Plus :size="16" /> {{tr('新建工作空间','New workspace')}}</button></div>
           <div v-if="projects.length" class="project-grid shared-project-grid">
             <article v-for="project in projects" :key="project.id" class="project-card shared-project-card" :class="{selected:selectedProjectId===project.id,archived:project.status==='archived'}">
               <header><div class="project-icon"><FolderKanban :size="20" /></div><span class="state-pill">{{project.status==='active'?tr('活跃','Active'):tr('已归档','Archived')}}</span></header>
               <h3>{{project.name}}</h3><p>{{project.description||tr('暂无范围与授权说明','No scope or authorization note')}}</p>
               <div class="project-metrics shared-project-metrics"><span><strong>{{project.assetCount.toLocaleString()}}</strong>{{tr('资产','Assets')}}</span><span><strong>{{project.scanCount.toLocaleString()}}</strong>Nest</span><span><strong>{{project.vulnerabilityCount.toLocaleString()}}</strong>{{tr('漏洞记录（含历史）','Finding records (incl. history)')}}</span><span><strong>{{project.activeFuseCount.toLocaleString()}}</strong>{{tr('待处置','Stopped')}}</span></div>
-              <div class="project-entry-actions"><button class="button ghost compact" @click="openProjectWorkspace(project,'asset')"><Database :size="14" />Asset</button><button class="button secondary compact" @click="openProjectWorkspace(project,'sentinel')"><ShieldCheck :size="14" />Nest</button></div>
+              <div class="project-entry-actions"><button class="button ghost compact" @click="openProjectWorkspace(project,'chat')"><MessageSquare :size="14" />{{tr('对话','Chat')}}</button><button class="button ghost compact" @click="openProjectWorkspace(project,'asset')"><Database :size="14" />Asset</button><button class="button secondary compact" @click="openProjectWorkspace(project,'sentinel')"><ShieldCheck :size="14" />Nest</button></div>
               <footer><span>{{tr('最近活动','Last activity')}} {{projectActivity(project)}}</span><div><button class="text-button" @click="openProject(project)">{{tr('编辑','Edit')}}</button><button class="text-button" @click="toggleArchive(project)">{{project.status==='active'?tr('归档','Archive'):tr('恢复','Restore')}}</button><button class="text-button danger-text" :disabled="deletingProjectId!==undefined||projectImpactLoadingId!==undefined" :aria-busy="projectImpactLoadingId===project.id" @click="removeProject(project)">{{projectImpactLoadingId===project.id?tr('检查中…','Checking…'):tr('删除','Delete')}}</button></div></footer>
               <InlineConfirm v-if="pendingProjectAction?.project.id===project.id" :title="pendingProjectAction.mode==='archive'?tr('该工作空间有关联数据，改为归档？','This workspace has linked data. Archive it?'):tr('删除这个空工作空间？','Delete this empty workspace?')" :detail="pendingProjectAction.mode==='archive'?`${projectImpactText(pendingProjectAction.impact)}。归档后禁止创建新任务，但历史和结论继续可查。`:tr('它没有资产、扫描、证据或知识记录，删除后无法恢复。','It has no assets, scans, evidence, or knowledge and cannot be recovered.')" :confirm-text="pendingProjectAction.mode==='archive'?tr('归档并保留历史','Archive and preserve history'):tr('确认删除','Delete')" :busy-text="pendingProjectAction.mode==='archive'?tr('归档中…','Archiving…'):tr('删除中…','Deleting…')" :tone="pendingProjectAction.mode==='archive'?'warning':'danger'" :busy="deletingProjectId===project.id" @cancel="cancelProjectAction" @confirm="confirmProjectAction" />
             </article>
@@ -703,3 +715,7 @@ onUnmounted(()=>{unlisten?.();unlistenTray?.();if(workerSyncTimer)clearInterval(
     <div class="toast-stack"><div v-for="toast in toasts" :key="toast.id" class="toast" :class="toast.type"><CheckCircle2 v-if="toast.type==='success'" :size="18" /><CircleAlert v-else-if="toast.type==='error'" :size="18" /><Bell v-else :size="18" /><span>{{toast.text}}</span><button @click="toasts=toasts.filter(t=>t.id!==toast.id)"><X :size="14" /></button></div></div>
   </div>
 </template>
+
+<style scoped>
+.project-entry-actions { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+</style>

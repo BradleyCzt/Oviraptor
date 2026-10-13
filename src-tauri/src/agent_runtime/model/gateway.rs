@@ -15,6 +15,9 @@ pub struct ModelRequest {
     pub tools: Vec<ToolSchema>,
     pub temperature: f64,
     pub request_timeout: Option<Duration>,
+    /// Opt-in transport policy for bounded, standalone text replies.
+    pub reject_redirects: bool,
+    pub max_response_bytes: Option<usize>,
 }
 
 impl Default for ModelRequest {
@@ -24,6 +27,8 @@ impl Default for ModelRequest {
             tools: Vec::new(),
             temperature: 0.0,
             request_timeout: None,
+            reject_redirects: false,
+            max_response_bytes: None,
         }
     }
 }

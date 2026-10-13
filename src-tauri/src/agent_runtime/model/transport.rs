@@ -79,6 +79,8 @@ pub struct TransportRequest {
     /// needs; cancellation is what bounds it instead.
     pub total_timeout: Option<Duration>,
     pub proxy: Option<String>,
+    pub reject_redirects: bool,
+    pub max_response_bytes: Option<usize>,
 }
 
 impl TransportRequest {
@@ -91,6 +93,8 @@ impl TransportRequest {
             connect_timeout: Duration::from_secs(15),
             total_timeout: None,
             proxy: None,
+            reject_redirects: false,
+            max_response_bytes: None,
         }
     }
 
@@ -163,6 +167,9 @@ async fn drive(
     observe_started: Box<dyn FnOnce() + Send>,
 ) -> Result<TransportReply, TransportError> {
     let mut builder = reqwest::Client::builder().connect_timeout(request.connect_timeout);
+    if request.reject_redirects {
+        builder = builder.redirect(reqwest::redirect::Policy::none());
+    }
     if let Some(timeout) = request.total_timeout {
         builder = builder.timeout(timeout);
     }
@@ -209,6 +216,9 @@ async fn drive(
             let Some(chunk) = response.chunk().await.map_err(describe_failure)? else {
                 break;
             };
+            if request.max_response_bytes.is_some_and(|limit| body.len().saturating_add(chunk.len()) > limit) {
+                return Err(TransportError::Interrupted("model_response_size_limit".into()));
+            }
             if !sink(TransportEvent::Body(&chunk)) {
                 return Err(cancelled(CancelInitiator::Peer));
             }

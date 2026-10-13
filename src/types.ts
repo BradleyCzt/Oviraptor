@@ -78,6 +78,7 @@ export interface NativeSourceFindingsPage {
 }
 
 export type ViewKey =
+  | "chat"
   | "dashboard"
   | "projects"
   | "query"

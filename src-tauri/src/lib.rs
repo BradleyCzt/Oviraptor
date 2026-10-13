@@ -7,7 +7,9 @@ mod asset_logs;
 mod auth_session;
 mod collaboration_events;
 mod commands;
+mod conversations;
 mod db;
+mod execution_service;
 mod installation_logs;
 mod jobs;
 mod llm_hook;
@@ -328,6 +330,14 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             commands::dashboard_stats,
             commands::list_projects,
+            conversations::list_conversations,
+            conversations::create_conversation,
+            conversations::read_conversation,
+            conversations::update_conversation,
+            conversations::set_conversation_links,
+            conversations::send_conversation_message,
+            conversations::cancel_conversation_reply,
+            conversations::delete_conversation,
             commands::save_project,
             commands::project_impact,
             commands::archive_project,

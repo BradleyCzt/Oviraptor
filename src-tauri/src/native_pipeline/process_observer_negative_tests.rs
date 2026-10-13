@@ -240,7 +240,7 @@ fn native_process_capture_pipe_is_never_inherited_by_a_spawn_at_its_birth() {
     }
     assert_eq!(eof.ok(), Some(0), "a stranger still holds the capture write end");
     // The production entry points use only these pipes for captured streams.
-    let process = include_str!("process.rs");
+    let process = include_str!("../execution_service/host_process.rs");
     assert!(process.contains("let (out_read, out_write) = capture_pipe().map_err(pipe_setup)?;"));
     assert!(process.contains("let (err_read, err_write) = capture_pipe().map_err(pipe_setup)?;"));
     assert!(process.contains("Some(pipe2) => unsafe { pipe2(fds.as_mut_ptr(), libc::O_CLOEXEC) },"));

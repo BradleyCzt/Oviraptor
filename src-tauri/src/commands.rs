@@ -211,3 +211,14 @@ include!("commands/agent_entries.rs");
 
 #[path="commands/agent_homogeneous_execution.rs"]
 pub(crate) mod homogeneous_execution;
+
+// Narrow credential-owning bridge for standalone, tool-free conversations.
+// Callers receive the existing strict gateway profile, never another resolver.
+pub(crate) fn conversation_model_profile(
+    connection: &rusqlite::Connection,
+) -> Result<crate::agent_runtime::model::GatewayProfile, String> {
+    let environment = model_runtime_env(&sentinel_settings(connection))
+        .map_err(|_| "conversation_model_unavailable".to_string())?;
+    agent_model_profile(&environment, None)
+        .map_err(|_| "conversation_model_unavailable".to_string())
+}

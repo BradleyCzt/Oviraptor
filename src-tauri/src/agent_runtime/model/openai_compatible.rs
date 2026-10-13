@@ -145,6 +145,8 @@ impl OpenAiCompatibleGateway {
         body: &JsonValue,
         cancel: &CancelToken,
         timeout: Option<Duration>,
+        reject_redirects: bool,
+        max_response_bytes: Option<usize>,
         observer: Option<StageObserver>,
     ) -> Result<(u16, String, usize), ModelError> {
         let request_text = body.to_string();
@@ -164,6 +166,8 @@ impl OpenAiCompatibleGateway {
             Some(timeout.unwrap_or(CLOUD_REQUEST_TIMEOUT))
         };
         request.proxy = self.profile.proxy.clone();
+        request.reject_redirects = reject_redirects;
+        request.max_response_bytes = max_response_bytes;
         let token = cancel.clone();
         let sent = observer.clone();
         let outcome = transport::send_observed(
@@ -293,7 +297,7 @@ impl OpenAiCompatibleGateway {
         cancel: &CancelToken,
         observer: Option<StageObserver>,
     ) -> Result<ModelResponse, ModelError> {
-        let (status, text, request_bytes) = self.exchange(body, cancel, request.request_timeout, observer)?;
+        let (status, text, request_bytes) = self.exchange(body, cancel, request.request_timeout, request.reject_redirects, request.max_response_bytes, observer)?;
         if !(200..300).contains(&status) {
             return Err(classify_status(status, &text));
         }
