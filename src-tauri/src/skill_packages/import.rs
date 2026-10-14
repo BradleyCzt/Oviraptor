@@ -173,7 +173,9 @@ pub(super) fn local(path:&Path)->Result<Package,String> {
                 let entry=entry.map_err(|_|"skill_package_read_failed")?; collect(root,&entry.path(),depth+1,paths)?;
             }
         }else if meta.is_file(){
-            let relative=path.strip_prefix(root).map_err(|_|"skill_package_unsafe_path")?.to_str().ok_or("skill_package_non_utf8_path")?.replace('\\',"/");
+            let relative=path.strip_prefix(root).map_err(|_|"skill_package_unsafe_path")?.to_str().ok_or("skill_package_non_utf8_path")?.to_string();
+            #[cfg(windows)]
+            let relative=relative.replace('\\',"/");
             checked_path(&relative)?;
             if meta.len()>MAX_FILE_BYTES as u64{return Err("skill_package_file_too_large".into());}
             paths.insert(relative,path.to_path_buf());
@@ -184,7 +186,6 @@ pub(super) fn local(path:&Path)->Result<Package,String> {
     if skill_file.exists(){collect(&root_path,&root_path,0,&mut paths)?;}
     else if skills_dir.exists(){
         collect(&root_path,&skills_dir,0,&mut paths)?;
-        for name in ["LICENSE","LICENSE.md","LICENSE.txt","NOTICE"]{let p=root_path.join(name);if p.exists(){collect(&root_path,&p,0,&mut paths)?;}}
     }else{
         for entry in fs::read_dir(&root_path).map_err(|_|"skill_package_read_failed")?{
             let p=entry.map_err(|_|"skill_package_read_failed")?.path();
@@ -192,6 +193,9 @@ pub(super) fn local(path:&Path)->Result<Package,String> {
             if meta.is_dir() && p.join("SKILL.md").exists(){collect(&root_path,&p,0,&mut paths)?;}
         }
     }
+    // Root-level legal notices belong to every supported folder layout.
+    // In particular, sibling skill directories must not silently lose licensing.
+    for name in ["LICENSE","LICENSE.md","LICENSE.txt","NOTICE"]{let p=root_path.join(name);if p.exists(){collect(&root_path,&p,0,&mut paths)?;}}
     let mut files=Vec::new();let mut total=0;
     for (relative,_) in paths {let bytes=read_file(&root,&root_path,&relative)?;total+=bytes.len();if total>MAX_TOTAL_BYTES{return Err("skill_package_byte_limit".into());}files.push(PackageFile{path:relative,sha256:hash(&bytes),bytes});}
     let name=root_path.file_name().and_then(|v|v.to_str()).unwrap_or("Custom skills").to_string();

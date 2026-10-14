@@ -26,17 +26,32 @@ pub(super) fn installed(db:&Connection)->Result<bool,String>{
     db.query_row("SELECT EXISTS(SELECT 1 FROM skill_packages WHERE id='every-compound-engineering')",[],|r|r.get(0)).map_err(err)
 }
 
-pub(super) fn install(db:&mut Connection,package:Package)->Result<PackageInfo,String>{
+pub(super) fn install(db:&mut Connection,mut package:Package)->Result<PackageInfo,String>{
     let tx=db.transaction_with_behavior(TransactionBehavior::Immediate).map_err(err)?;
     let previous:Option<String>=tx.query_row("SELECT digest FROM skill_packages WHERE id=?1",[&package.id],|r|r.get(0)).optional().map_err(err)?;
     if let Some(previous)=previous{
         if previous!=package.digest{return Err("skill_package_version_conflict".into());}
         return info(&tx,&package.id);
     }
-    // Reject the whole package before writing anything; never merge by name.
-    for skill in &package.skills{
-        let exists:bool=tx.query_row("SELECT EXISTS(SELECT 1 FROM agent_skills WHERE name=?1 COLLATE NOCASE)",[&skill.name],|r|r.get(0)).map_err(err)?;
-        if exists{return Err(format!("skill_package_name_conflict:{}",skill.name));}
+    // Custom imports remain all-or-nothing. The lazy built-in registration must
+    // also remain usable when a user already owns one of the upstream names.
+    // Namespace only its display name; retain the original source instructions,
+    // entry path and package digest as the reviewed upstream unit.
+    for index in 0..package.skills.len(){
+        let original=package.skills[index].name.clone();
+        let mut candidate=original.clone();
+        let mut ordinal=0usize;
+        loop {
+            let exists:bool=tx.query_row("SELECT EXISTS(SELECT 1 FROM agent_skills WHERE name=?1 COLLATE NOCASE)",[&candidate],|r|r.get(0)).map_err(err)?;
+            let reserved=package.skills.iter().enumerate().any(|(other_index,other)|other_index!=index&&other.name.eq_ignore_ascii_case(&candidate));
+            if !exists && !reserved {break;}
+            if !package.builtin{return Err(format!("skill_package_name_conflict:{}",original));}
+            ordinal+=1;
+            let suffix=if ordinal==1{" (Every Compound)".to_string()}else{format!(" (Every Compound {ordinal})")};
+            let prefix:String=original.chars().take(80-suffix.chars().count()).collect();
+            candidate=format!("{prefix}{suffix}");
+        }
+        package.skills[index].name=candidate;
     }
     let changed=tx.execute("INSERT INTO skill_packages(id,package_key,name,source,version,license,builtin,digest,file_count,total_bytes,created_at) VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11)",params![package.id,package.package_key,package.name,package.source,package.version,package.license,package.builtin,package.digest,package.files.len()as i64,package.total_bytes as i64,stamp()]).map_err(err)?;
     if changed!=1{return Err("skill_package_write_not_persisted".into());}
@@ -123,6 +138,38 @@ pub(super) fn read_resource(db:&Connection,skill_id:i64,path:&str,offset:usize,l
 }
 
 pub(super) fn package_fingerprint(db:&Connection,skill_id:i64)->Result<Option<String>,String>{
-    let value:Option<(String,String)>=db.query_row("SELECT p.digest,p.version FROM skill_package_entries e JOIN skill_packages p ON p.id=e.package_id WHERE e.skill_id=?1",[skill_id],|r|Ok((r.get(0)?,r.get(1)?))).optional().map_err(err)?;
-    Ok(value.map(|(digest,version)|import::hash(format!("{digest}\0{version}").as_bytes())))
+    // A stored package digest describes the imported snapshot, but is not proof
+    // that the rows are still that snapshot. Bind consent to current provenance,
+    // the selected entry and the actual bounded bytes of its accessible files.
+    let package:Option<(String,String,Value)>=db.query_row(
+        "SELECT p.id,e.entry_path,p.package_key,p.name,p.source,p.version,p.license,p.builtin,p.digest,p.file_count,p.total_bytes FROM skill_package_entries e JOIN skill_packages p ON p.id=e.package_id WHERE e.skill_id=?1",
+        [skill_id],|r|Ok((r.get(0)?,r.get(1)?,json!({
+            "packageKey":r.get::<_,String>(2)?,"name":r.get::<_,String>(3)?,
+            "source":r.get::<_,String>(4)?,"version":r.get::<_,String>(5)?,
+            "license":r.get::<_,String>(6)?,"builtin":r.get::<_,bool>(7)?,
+            "digest":r.get::<_,String>(8)?,"fileCount":r.get::<_,i64>(9)?,
+            "totalBytes":r.get::<_,i64>(10)?,
+        }))),
+    ).optional().map_err(err)?;
+    let Some((package_id,entry,metadata))=package else{return Ok(None);};
+    import::checked_path(&entry)?;
+    let mut statement=db.prepare("SELECT path,size_bytes,sha256,text,kind FROM skill_package_files WHERE package_id=?1 ORDER BY path LIMIT 513").map_err(err)?;
+    let rows=statement.query_map([&package_id],|r|Ok((r.get::<_,String>(0)?,r.get::<_,i64>(1)?,r.get::<_,String>(2)?,r.get::<_,bool>(3)?,r.get::<_,String>(4)?))).map_err(err)?.collect::<Result<Vec<_>,_>>().map_err(err)?;
+    if rows.len()>import::MAX_FILES{return Err("skill_package_file_limit".into());}
+    let mut files=Vec::new();let mut total=0usize;let mut found_entry=false;
+    for (path,size,expected,text,kind) in rows {
+        import::checked_path(&path)?;
+        if !allowed_resource(&entry,&path){continue;}
+        if size<0||size as usize>import::MAX_FILE_BYTES{return Err("skill_package_resource_integrity_failed".into());}
+        let bytes:Option<Vec<u8>>=db.query_row("SELECT content FROM skill_package_files WHERE package_id=?1 AND path=?2 AND length(content)<=1048576",params![package_id,path],|r|r.get(0)).optional().map_err(err)?;
+        let bytes=bytes.ok_or("skill_package_resource_integrity_failed")?;
+        let actual=import::hash(&bytes);
+        if bytes.len()!=size as usize||actual!=expected{return Err("skill_package_resource_integrity_failed".into());}
+        total=total.checked_add(bytes.len()).ok_or("skill_package_byte_limit")?;
+        if total>import::MAX_TOTAL_BYTES{return Err("skill_package_byte_limit".into());}
+        found_entry|=path==entry;
+        files.push(json!({"path":path,"size":size,"sha256":actual,"text":text,"kind":kind}));
+    }
+    if !found_entry{return Err("skill_package_resource_integrity_failed".into());}
+    Ok(Some(import::hash(json!({"packageId":package_id,"entry":entry,"metadata":metadata,"files":files}).to_string().as_bytes())))
 }
