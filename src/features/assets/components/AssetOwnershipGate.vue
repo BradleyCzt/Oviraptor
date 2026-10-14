@@ -13,18 +13,18 @@ interface OwnershipProfileForm {
   excludedNamesText: string;
   excludedDomainsText: string;
 }
-const ownershipProfileDrafts = new Map<number, { form: OwnershipProfileForm; base: import("../types").AssetOwnershipProfile }>();
+const ownershipProfileDrafts = new Map<number, { form: OwnershipProfileForm; base: import("../../../types").AssetOwnershipProfile }>();
 </script>
 
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, shallowRef, watch } from "vue";
 import { Check, ChevronLeft, ChevronRight, Link2, RefreshCw, Save, ShieldCheck, ShieldQuestion, X } from "@lucide/vue";
-import { api } from "../api";
-import type { AssetOwnershipDecisionExpectation } from "../features/assets/api";
-import type { Asset, AssetOwnershipProfile, AssetOwnershipSummary, AssetQuery } from "../features/assets/types";
-import type { Project } from "../features/workspaces/types";
-import "../asset-ownership.css";
-import "../asset-ownership-fixes.css";
+import { api } from "../../../api";
+import type { AssetOwnershipDecisionExpectation } from "../api";
+import type { Asset, AssetOwnershipProfile, AssetOwnershipSummary, AssetQuery } from "../types";
+import type { Project } from "../../workspaces/types";
+import "../../../asset-ownership.css";
+import "../../../asset-ownership-fixes.css";
 import OwnershipProjectSetup from "./OwnershipProjectSetup.vue";
 import OwnershipReviewGroups from "./OwnershipReviewGroups.vue";
 

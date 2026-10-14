@@ -24,7 +24,7 @@ function compile(relative, id) {
   return { script: transpile(script.content), render: exports.render };
 }
 const appSource = compile('../src/App.vue', 'project-delete-app');
-const inlineSource = compile('../src/components/InlineConfirm.vue', 'project-delete-confirm');
+const inlineSource = compile('../src/shared/components/InlineConfirm.vue', 'project-delete-confirm');
 const inlineExports = {};
 new Function('require', 'exports', inlineSource.script)(
   (name) => name === 'vue' ? vue : { AlertTriangle: () => null }, inlineExports,
@@ -84,7 +84,7 @@ function mount(overrides = {}, storageSeed = {}) {
       logs: vue.ref([]), evicted: vue.ref(0), connectionUnavailable: vue.ref(false),
       gapPossible: vue.ref(false), clear() {}, append() {},
     }) };
-    if (name === './components/InlineConfirm.vue') return { default: InlineConfirm };
+    if (name === './shared/components/InlineConfirm.vue') return { default: InlineConfirm };
     if (name.endsWith('.vue')) return { default: () => null };
     if (name.endsWith('.css')) return {};
     if (name.endsWith('.png')) return { default: '' };

@@ -1,11 +1,11 @@
 import { computed, onMounted, reactive, ref } from "vue";
 import { open } from "@tauri-apps/plugin-dialog";
-import { api } from "../../../api";
-import type { AgentSkill } from "../../skills/catalogTypes";
+import { skillCatalogApi as api } from "./catalogApi";
+import type { AgentSkill } from "./catalogTypes";
 
 type Notice = (type: "success" | "error" | "info", text: string) => void;
 
-export function useWorkbenchSkills(options: {
+export function useSkillsCatalog(options: {
   tr: (zh: string, en: string) => string;
   notify: Notice;
   clearSelection: () => void;

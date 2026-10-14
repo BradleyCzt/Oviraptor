@@ -2,11 +2,11 @@
 import { onMounted, ref } from "vue";
 import { ExternalLink, RefreshCw, Search, Star, UploadCloud, X } from "@lucide/vue";
 import { openUrl } from "@tauri-apps/plugin-opener";
-import { api } from "../api";
-import type { ConfigProfile } from "../features/configuration/types";
-import type { HackerOneDetail, HackerOneEvent, HackerOneProgram } from "../features/hackerone/types";
-import type { Project } from "../features/workspaces/types";
-import { useI18n } from "../i18n";
+import { api } from "../../../api";
+import type { ConfigProfile } from "../../configuration/types";
+import type { HackerOneDetail, HackerOneEvent, HackerOneProgram } from "../types";
+import type { Project } from "../../workspaces/types";
+import { useI18n } from "../../../i18n";
 
 const props=defineProps<{projects:Project[];profiles:ConfigProfile[]}>();
 const emit=defineEmits<{notify:[type:"success"|"error"|"info",text:string]}>();

@@ -33,7 +33,8 @@
     "test:application-shell": "node --test --test-concurrency=1 tools/test_module_navigation.cjs tools/test_conversation_workspace.cjs tools/test_conversation_markdown.cjs tools/test_conversation_steering.cjs",
     "test:plugins": "node --test --test-concurrency=1 tools/test_builtin_plugins.cjs tools/test_conversation_plugins.cjs tools/test_plugin_workspaces.cjs",
     "test:conversation-markdown": "node --test tools/test_conversation_markdown.cjs",
-    "test:conversation-steering": "node --test tools/test_conversation_steering.cjs"
+    "test:conversation-steering": "node --test tools/test_conversation_steering.cjs",
+    "test:module-boundaries": "node --test tools/test_module_boundaries.cjs"
   },
   "dependencies": {
     "@lucide/vue": "^1.24.0",

@@ -1,25 +1,25 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, reactive, ref, watch } from "vue";
 import { Check, FolderOpen, Plus, Save, Zap } from "@lucide/vue";
-import { useI18n } from "../i18n";
-import type { GapFollowupPreview, ClosureHandoffPreview, SentinelScan } from "../features/sentinel/types";
-import type { Project } from "../features/workspaces/types";
-import { useClosureHandoff } from "../features/sentinel/workbench/useClosureHandoff";
-import { useBrowserAuthSessions } from "../features/sentinel/workbench/useBrowserAuthSessions";
-import { useWorkbenchSkills } from "../features/sentinel/workbench/useWorkbenchSkills";
-import { useFollowupRecovery } from "../features/sentinel/workbench/useFollowupRecovery";
-import { useWorkbenchTaskCreation, type WorkbenchMode } from "../features/sentinel/workbench/useWorkbenchTaskCreation";
-import WorkbenchGreyboxSettings from "../features/sentinel/workbench/WorkbenchGreyboxSettings.vue";
-import WorkbenchCicdSettings from "../features/sentinel/workbench/WorkbenchCicdSettings.vue";
-import WorkbenchSkillsCatalog from "../features/sentinel/workbench/WorkbenchSkillsCatalog.vue";
-import WorkbenchOverview from "../features/sentinel/workbench/WorkbenchOverview.vue";
-import WorkbenchSkillSelection from "../features/sentinel/workbench/WorkbenchSkillSelection.vue";
-import WorkbenchBrowserAuth from "../features/sentinel/workbench/WorkbenchBrowserAuth.vue";
-import WorkbenchTaskNotices from "../features/sentinel/workbench/WorkbenchTaskNotices.vue";
-import WorkbenchWebPolicy from "../features/sentinel/workbench/WorkbenchWebPolicy.vue";
-import WorkbenchToolSelection from "../features/sentinel/workbench/WorkbenchToolSelection.vue";
-import WorkbenchBudgetField from "../features/sentinel/workbench/WorkbenchBudgetField.vue";
-import { useWorkbenchPresentation } from "../features/sentinel/workbench/useWorkbenchPresentation";
+import { useI18n } from "../../../i18n";
+import type { GapFollowupPreview, ClosureHandoffPreview, SentinelScan } from "../types";
+import type { Project } from "../../workspaces/types";
+import { useClosureHandoff } from "../workbench/useClosureHandoff";
+import { useBrowserAuthSessions } from "../workbench/useBrowserAuthSessions";
+import { useSkillsCatalog } from "../../skills/useSkillsCatalog";
+import { useFollowupRecovery } from "../workbench/useFollowupRecovery";
+import { useWorkbenchTaskCreation, type WorkbenchMode } from "../workbench/useWorkbenchTaskCreation";
+import WorkbenchGreyboxSettings from "../workbench/WorkbenchGreyboxSettings.vue";
+import WorkbenchCicdSettings from "../workbench/WorkbenchCicdSettings.vue";
+import SkillInstructionsCatalog from "../../skills/SkillInstructionsCatalog.vue";
+import WorkbenchOverview from "../workbench/WorkbenchOverview.vue";
+import WorkbenchSkillSelection from "../workbench/WorkbenchSkillSelection.vue";
+import WorkbenchBrowserAuth from "../workbench/WorkbenchBrowserAuth.vue";
+import WorkbenchTaskNotices from "../workbench/WorkbenchTaskNotices.vue";
+import WorkbenchWebPolicy from "../workbench/WorkbenchWebPolicy.vue";
+import WorkbenchToolSelection from "../workbench/WorkbenchToolSelection.vue";
+import WorkbenchBudgetField from "../workbench/WorkbenchBudgetField.vue";
+import { useWorkbenchPresentation } from "../workbench/useWorkbenchPresentation";
 
 const props = defineProps<{
   projects: Project[];
@@ -86,7 +86,7 @@ const form = reactive({
   maxHigh: 5,
   blockRelease: true,
 });
-const skillCatalog = useWorkbenchSkills({
+const skillCatalog = useSkillsCatalog({
   tr, notify: (type, text) => emit("notify", type, text),
   clearSelection: () => { form.skillIds = []; },
 });
@@ -398,8 +398,8 @@ onBeforeUnmount(() => {
       </div>
     </template>
 
-    <WorkbenchSkillsCatalog v-else :catalog="skillCatalog" />
+    <SkillInstructionsCatalog v-else :catalog="skillCatalog" />
   </section>
 </template>
 
-<style scoped src="../features/sentinel/components/workbenchPresentation.css"></style>
+<style scoped src="./workbenchPresentation.css"></style>

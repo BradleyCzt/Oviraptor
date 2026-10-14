@@ -229,7 +229,7 @@ test('g1-3 the surface sends the disposition filter and keeps the side map acros
   assert.equal(state.badgeFor(5).tone, 'excluded', '翻页不能丢掉已读到的处置');
   assert.equal(state.badgeFor(6).tone, 'risk');
   assert.match(state.classificationNotice.value, /自动排除 1/);
-  const source = readSource('src/components/ExposureSurface.vue');
+  const source = readSource('src/features/assets/exposure/ExposureSurface.vue');
   assert.match(source, /v-model="dispositionFilter"/);
   assert.match(source, /badgeFor\(item\.id\)\.label/);
   assert.match(source, /classificationNotice/);

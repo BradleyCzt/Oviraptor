@@ -46,7 +46,7 @@ function mountSurface(t, api) {
   const composable = loadModule('src/features/assets/exposure/useExposureSurface.ts', name => {
     if (name === 'vue') return vue;
     // G2 the page itself now reads source labels from the real contracts module.
-    if (name === './contracts' || name === '../features/assets/exposure/contracts') return contracts;
+    if (name === './contracts' || name === './contracts') return contracts;
     throw Error(`Unexpected import ${name}`);
   });
   const selection = vue.reactive({ project: 10, active: true });
@@ -74,8 +74,8 @@ async function renderPage(api) {
   const contracts = loadContracts();
   const surface = loadModule('src/features/assets/exposure/useExposureSurface.ts', name => name === 'vue' ? vue : name === './contracts' ? contracts : (() => { throw Error(name); })());
   const evidence = loadModule('src/features/assets/exposure/useExposureEvidence.ts', name => name === 'vue' ? vue : name === './contracts' ? contracts : (() => { throw Error(name); })());
-  const filename = path.join(__dirname, '..', 'src/components/ExposureSurface.vue');
-  const { descriptor } = parse(readSource('src/components/ExposureSurface.vue'), { filename });
+  const filename = path.join(__dirname, '..', 'src/features/assets/exposure/ExposureSurface.vue');
+  const { descriptor } = parse(readSource('src/features/assets/exposure/ExposureSurface.vue'), { filename });
   const script = compileScript(descriptor, { id: 'ExposureSurface.vue' });
   const template = compileTemplate({ source: descriptor.template.content, filename, id: 'ExposureSurface.vue', compilerOptions: { bindingMetadata: script.bindings } });
   assert.deepEqual(template.errors, [], '模板必须能编译');
@@ -92,27 +92,27 @@ async function renderPage(api) {
   let coverageDrill;
   const imports = name => {
     if (name === 'vue') return vue;
-    if (name === '../api') return { api: { listAssets: async () => ({ items: [], total: 0, page: 1, pageSize: 100, summary: {} }) } };
-    if (name === '../features/assets/exposure/api' || name === './api') return { exposureApi: api };
-    if (name === '../features/assets/exposure/useExposureSurface') return surface;
-    if (name === '../features/assets/exposure/useExposureEvidence') return evidence;
+    if (name === '../../../api') return { api: { listAssets: async () => ({ items: [], total: 0, page: 1, pageSize: 100, summary: {} }) } };
+    if (name === './api' || name === './api') return { exposureApi: api };
+    if (name === './useExposureSurface') return surface;
+    if (name === './useExposureEvidence') return evidence;
     if (name === '../features/assets/exposure/useExposureSettings' || name === './useExposureSettings') return settingsModule;
     // G2 the page itself now reads source labels from the real contracts module.
-    if (name === './contracts' || name === '../features/assets/exposure/contracts') return contracts;
+    if (name === './contracts' || name === './contracts') return contracts;
     if (name === '@lucide/vue') return new Proxy({}, { get: () => () => null });
     if (name.endsWith('.css')) return {};
     // §E2 the page mounts its own settings panel: it is compiled for real below, so a panel
     // that cannot build breaks this gate instead of being stubbed away.
-    if (name === '../features/assets/exposure/ExposureSettingsPanel.vue') return panel;
+    if (name === './ExposureSettingsPanel.vue') return panel;
     if (name === '../features/assets/exposure/useExposureClusters' || name === './useExposureClusters') return clusterModule;
-    if (name === '../features/assets/exposure/ExposureClustersPanel.vue') return clusterPanel;
+    if (name === './ExposureClustersPanel.vue') return clusterPanel;
     if (name === '../features/assets/exposure/useExposureReview' || name === './useExposureReview') return reviewModule;
-    if (name === '../features/assets/exposure/ExposureReviewPanel.vue') return reviewPanel;
-    if (name === '../features/assets/exposure/incidents' || name === './incidents') return incidentsModule;
+    if (name === './ExposureReviewPanel.vue') return reviewPanel;
+    if (name === './incidents' || name === './incidents') return incidentsModule;
     if (name === './useExposureIncidents') return incidentsComposable;
-    if (name === '../features/assets/exposure/ExposureIncidentsPanel.vue') return incidentsPanel;
+    if (name === './ExposureIncidentsPanel.vue') return incidentsPanel;
     if (name === './useExposureCoverage') return coverageComposable;
-    if (name === '../features/assets/exposure/ExposureCoverageDrill.vue') return coverageDrill;
+    if (name === './ExposureCoverageDrill.vue') return coverageDrill;
     throw Error(`Unexpected page import: ${name}`);
   };
   const panelFile = path.join(__dirname, '..', 'src/features/assets/exposure/ExposureSettingsPanel.vue');
@@ -207,7 +207,7 @@ test('a first read that fails is an error state, not an empty list', async (t) =
   assert.equal(h.state.findings.value.length, 0);
   // The page's empty branch is gated on exactly that pair, so the state above is what
   // decides between “读失败” and “这个筛选真的没有线索”.
-  const source = readSource('src/components/ExposureSurface.vue');
+  const source = readSource('src/features/assets/exposure/ExposureSurface.vue');
   assert.match(source, /v-else-if="readError && !hasSnapshot"/, '错误分支必须先于空列表判断');
   assert.match(source, /不能显示为“没有线索”/);
   assert.ok(

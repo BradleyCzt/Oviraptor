@@ -8,7 +8,7 @@ import { useRunnerLogPanel } from "../execution/useRunnerLogPanel";
 import { useI18n } from "../../../i18n";
 import type { SentinelScan, SentinelScanAttempt } from "../types";
 import type { PluginWorkspaceProps, PluginWorkspaceEmits } from "../../../shell/workspaceContract";
-const SentinelBoard = defineAsyncComponent(() => import("../../../components/SentinelBoard.vue"));
+const SentinelBoard = defineAsyncComponent(() => import("../components/SentinelBoard.vue"));
 const props = defineProps<PluginWorkspaceProps>();
 const emit = defineEmits<PluginWorkspaceEmits>();
 const { t, tr } = useI18n();

@@ -18,51 +18,51 @@ import {
   Shield,
   ShieldCheck,
 } from "@lucide/vue";
-import { api } from "../api";
-import { useI18n } from "../i18n";
+import { api } from "../../../api";
+import { useI18n } from "../../../i18n";
 import { openUrl } from "@tauri-apps/plugin-opener";
-import InlineConfirm from "./InlineConfirm.vue";
-import { useBoardLifecycle } from "../features/sentinel/results/useBoardLifecycle";
-import { useTaskSearch } from "../features/sentinel/results/useTaskSearch";
-import { useScanPages } from "../features/sentinel/results/useScanPages";
-import { useTaskTrace } from "../features/sentinel/traces/useTaskTrace";
-import { useTokenUsage } from "../features/sentinel/overview/useTokenUsage";
-import { useInvestigationSummary } from "../features/sentinel/overview/useInvestigationSummary";
-import SentinelTokenOverview from "../features/sentinel/components/overview/SentinelTokenOverview.vue";
-import SentinelOverviewSummary from "../features/sentinel/components/overview/SentinelOverviewSummary.vue";
-import SentinelOverviewSidebar from "../features/sentinel/components/overview/SentinelOverviewSidebar.vue";
-import SentinelTaskOverview from "../features/sentinel/components/overview/SentinelTaskOverview.vue";
-import SentinelValidationWorkbench from "../features/sentinel/components/SentinelValidationWorkbench.vue";
-import SentinelFingerprintPane from "../features/sentinel/components/results/SentinelFingerprintPane.vue";
-import SentinelTraceTimeline from "../features/sentinel/components/results/SentinelTraceTimeline.vue";
-import SentinelEndpointsPane from "../features/sentinel/components/results/SentinelEndpointsPane.vue";
-import SentinelOpportunitiesPane from "../features/sentinel/components/results/SentinelOpportunitiesPane.vue";
-import SentinelVulnerabilitiesPane from "../features/sentinel/components/results/SentinelVulnerabilitiesPane.vue";
-import SentinelApiPane from "../features/sentinel/components/results/SentinelApiPane.vue";
-import SentinelFuseZone from "../features/sentinel/components/SentinelFuseZone.vue";
+import InlineConfirm from "../../../shared/components/InlineConfirm.vue";
+import { useBoardLifecycle } from "../results/useBoardLifecycle";
+import { useTaskSearch } from "../results/useTaskSearch";
+import { useScanPages } from "../results/useScanPages";
+import { useTaskTrace } from "../traces/useTaskTrace";
+import { useTokenUsage } from "../overview/useTokenUsage";
+import { useInvestigationSummary } from "../overview/useInvestigationSummary";
+import SentinelTokenOverview from "./overview/SentinelTokenOverview.vue";
+import SentinelOverviewSummary from "./overview/SentinelOverviewSummary.vue";
+import SentinelOverviewSidebar from "./overview/SentinelOverviewSidebar.vue";
+import SentinelTaskOverview from "./overview/SentinelTaskOverview.vue";
+import SentinelValidationWorkbench from "./SentinelValidationWorkbench.vue";
+import SentinelFingerprintPane from "./results/SentinelFingerprintPane.vue";
+import SentinelTraceTimeline from "./results/SentinelTraceTimeline.vue";
+import SentinelEndpointsPane from "./results/SentinelEndpointsPane.vue";
+import SentinelOpportunitiesPane from "./results/SentinelOpportunitiesPane.vue";
+import SentinelVulnerabilitiesPane from "./results/SentinelVulnerabilitiesPane.vue";
+import SentinelApiPane from "./results/SentinelApiPane.vue";
+import SentinelFuseZone from "./SentinelFuseZone.vue";
 import {
   fuseCategoryLabel,
   fuseReasonCategory as classifyFuseReason,
   fuseReasonParts as describeFuseReason,
   fuseRecommendedAction as recommendFuseAction,
-} from "../features/sentinel/fuse/presentation";
+} from "../fuse/presentation";
 import {
   fuseDetailTabs, sameTargetUrl, useFuseDetails,
-} from "../features/sentinel/fuse/useFuseDetails";
-import { useFuseDisposition } from "../features/sentinel/fuse/useFuseDisposition";
-import { useApiResults } from "../features/sentinel/results/useApiResults";
-import SentinelAuthRecoveryPanel from "../features/sentinel/components/SentinelAuthRecoveryPanel.vue";
-import InvestigationGraphPanel from "../features/sentinel/components/InvestigationGraphPanel.vue";
-import NativeRunStatus from "../features/sentinel/components/NativeRunStatus.vue";
-import SentinelExecutionDetails from "../features/sentinel/components/SentinelExecutionDetails.vue";
+} from "../fuse/useFuseDetails";
+import { useFuseDisposition } from "../fuse/useFuseDisposition";
+import { useApiResults } from "../results/useApiResults";
+import SentinelAuthRecoveryPanel from "./SentinelAuthRecoveryPanel.vue";
+import InvestigationGraphPanel from "./InvestigationGraphPanel.vue";
+import NativeRunStatus from "./NativeRunStatus.vue";
+import SentinelExecutionDetails from "./SentinelExecutionDetails.vue";
 import {
   AgentDialog,
   AgentTraceHub,
   AgentWorkbench,
   SentinelSourceResults,
   SentinelTaskCenter,
-} from "../features/sentinel/components/lazyPanels";
-import SentinelRepeater from "../features/sentinel/components/SentinelRepeater.vue";
+} from "./lazyPanels";
+import SentinelRepeater from "./SentinelRepeater.vue";
 import {
   attemptEndReason,
   attemptStageLabel,
@@ -88,9 +88,9 @@ import {
   uncachedInput,
   validRouteRecord,
   validSensitiveRecord,
-} from "../features/sentinel/presentation";
-import type { GapFollowupPreview, ClosureHandoffPreview, AppSecScanResult, AppSecVulnerability, BrowserAuthSession, InvestigationGraph, InvestigationHypothesis, InvestigationValidation, SentinelCheckpoint, SentinelFinding, SentinelFuseEntry, SentinelOverviewStats, SentinelOpportunity, SentinelScan, SentinelScanAttempt, SentinelTarget, SentinelValidation, SentinelValidationWorkItem, AgentTargetExecution } from "../features/sentinel/types";
-import type { Project } from "../features/workspaces/types";
+} from "../presentation";
+import type { GapFollowupPreview, ClosureHandoffPreview, AppSecScanResult, AppSecVulnerability, BrowserAuthSession, InvestigationGraph, InvestigationHypothesis, InvestigationValidation, SentinelCheckpoint, SentinelFinding, SentinelFuseEntry, SentinelOverviewStats, SentinelOpportunity, SentinelScan, SentinelScanAttempt, SentinelTarget, SentinelValidation, SentinelValidationWorkItem, AgentTargetExecution } from "../types";
+import type { Project } from "../../workspaces/types";
 
 const props = withDefaults(
   defineProps<{
@@ -3501,7 +3501,7 @@ onUnmounted(() => {
   </div>
 </template>
 
-<style src="../sentinel.css">
+<style src="../../../sentinel.css">
 .runtime-diagnostics-list { display:grid; gap:10px; }
 .runtime-diagnostics-list>article { padding:12px; border:1px solid var(--border); border-radius:12px; background:var(--surface); }
 .runtime-diagnostics-list>article>header { display:flex; justify-content:space-between; gap:8px; align-items:center; margin-bottom:8px; }

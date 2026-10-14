@@ -48,13 +48,13 @@ function mountWorkspace(t,kind='asset',overrides={},initialProps={}){
 }
 module.exports={assert,vue,flush,deferred,project,mountWorkspace,compile,source};
 function mountLegacyAssets(t,overrides={}){
- const compiled=compile('src/components/AssetWorkspace.vue'),calls=[],events=[];
+ const compiled=compile('src/features/assets/components/AssetWorkspace.vue'),calls=[],events=[];
  const api=new Proxy({}, {get:(_,name)=>(...args)=>{calls.push([name,...args]);if(overrides[name])return overrides[name](...args);if(name==='listAssets')return Promise.resolve({items:[],total:0});if(name==='createSentinelScan')return Promise.resolve('scan');return Promise.resolve(1);}});
  const exports={},storage={getItem:()=>null,setItem(){}};
  new Function('require','exports','localStorage',compiled.script)(name=>{
   if(name==='vue')return{...vue,onMounted(){}};
-  if(name==='../api')return{api};
-  if(name==='../i18n')return{useI18n:()=>({tr:(_zh,en)=>en})};
+  if(name==='../../../api')return{api};
+  if(name==='../../../i18n')return{useI18n:()=>({tr:(_zh,en)=>en})};
   if(name==='@lucide/vue')return new Proxy({}, {get:()=>()=>null});
   if(name==='@tauri-apps/plugin-opener')return{openUrl:async()=>{}};
   if(name.endsWith('.vue'))return{default:()=>null};

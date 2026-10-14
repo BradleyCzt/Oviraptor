@@ -10,14 +10,14 @@ const ts = require('typescript');
 const vue = require('vue');
 const { parse, compileScript, compileTemplate } = require('@vue/compiler-sfc');
 
-const SETUP = 'src/components/OwnershipProjectSetup.vue';
+const SETUP = 'src/features/assets/components/OwnershipProjectSetup.vue';
 const readSource = relative => fs.readFileSync(path.join(__dirname, '..', relative), 'utf8');
 const transpile = source => ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020 } }).outputText;
 
 function compileSetup(api) {
   const requireModule = name => {
     if (name === 'vue') return vue;
-    if (name === '../features/assets/ownershipDirectoryApi') return { ownershipDirectoryApi: api, ORG_ENTITY_KIND_LABELS: { group: '集团', province_company: '省公司', professional_subsidiary: '专业子公司', unknown: '类型未知' }, SUGGESTION_STATE_LABELS: {} };
+    if (name === '../ownershipDirectoryApi') return { ownershipDirectoryApi: api, ORG_ENTITY_KIND_LABELS: { group: '集团', province_company: '省公司', professional_subsidiary: '专业子公司', unknown: '类型未知' }, SUGGESTION_STATE_LABELS: {} };
     throw Error(`Unexpected project setup import: ${name}`);
   };
   const filename = path.join(__dirname, '..', SETUP);

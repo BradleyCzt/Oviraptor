@@ -1,10 +1,10 @@
 <script setup lang="ts">
 import { reactive, ref } from "vue";
 import { FolderPlus } from "@lucide/vue";
-import ModalShell from "./ModalShell.vue";
-import { api } from "../api";
-import type { Project } from "../features/workspaces/types";
-import { useI18n } from "../i18n";
+import ModalShell from "../../../shared/components/ModalShell.vue";
+import { api } from "../../../api";
+import type { Project } from "../types";
+import { useI18n } from "../../../i18n";
 
 const props = defineProps<{ project?: Project }>();
 const emit = defineEmits<{ close: []; saved: [id: number] }>();

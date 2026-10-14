@@ -111,7 +111,7 @@ function loadPage(calls, api = fakeApi(calls)) {
   let panel, clusterPanel, reviewPanel, incidentsPanel, coverageComposable, coverageDrill;
   const requireModule = name => {
     if (name === 'vue') return vue;
-    if (name === '../api') return { api };
+    if (name === '../../../api') return { api };
     if (name === '@lucide/vue') return new Proxy({}, { get: () => () => null });
     if (name.endsWith('.css')) return {};
     const key = asExposureModule(name);
@@ -154,13 +154,13 @@ function loadPage(calls, api = fakeApi(calls)) {
     }
     throw Error(`Unexpected exposure page import: ${name}`);
   };
-  const page = compileSfc('src/components/ExposureSurface.vue', requireModule);
+  const page = compileSfc('src/features/assets/exposure/ExposureSurface.vue', requireModule);
   // Touch both children so a page that imports them is always compiled with them.
-  requireModule('../features/assets/exposure/ExposureSettingsPanel.vue');
-  requireModule('../features/assets/exposure/ExposureClustersPanel.vue');
-  requireModule('../features/assets/exposure/ExposureReviewPanel.vue');
-  requireModule('../features/assets/exposure/ExposureIncidentsPanel.vue');
-  requireModule('../features/assets/exposure/ExposureCoverageDrill.vue');
+  requireModule('./ExposureSettingsPanel.vue');
+  requireModule('./ExposureClustersPanel.vue');
+  requireModule('./ExposureReviewPanel.vue');
+  requireModule('./ExposureIncidentsPanel.vue');
+  requireModule('./ExposureCoverageDrill.vue');
   return { ...page, panel, clusters: clusterPanel, review: reviewPanel, requireModule };
 }
 
@@ -177,7 +177,7 @@ test('the exposure page describes a bounded passive collection and never starts 
   assert.match(html, /0 \/ 0 条当前筛选结果/, '线索数量必须带上筛选总数');
   assert.doesNotMatch(html, /undefined|NaN/);
   // 补充静态检查：数据源区必须按选中的 run 取数，页面不再假定一页 500 就是全量。
-  const source = readSource('src/components/ExposureSurface.vue');
+  const source = readSource('src/features/assets/exposure/ExposureSurface.vue');
   assert.match(source, /selectedRunId[\s\S]*listExposureSourceResultsForProject|showSourcesFor\(run\.id\)/,
     '数据源必须跟随所选任务');
   assert.doesNotMatch(source, /pageSize: *500/, '页面不能再请求一页 500 然后假定拿全了');

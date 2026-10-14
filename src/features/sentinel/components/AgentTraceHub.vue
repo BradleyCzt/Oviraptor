@@ -17,7 +17,7 @@ import { api } from "../../../api";
 import { useI18n } from "../../../i18n";
 import type { AgentLearningCandidate, AgentKnowledgeEntry, AgentSkill } from "../../skills/catalogTypes";
 import type { AgentTraceSummary } from "../types";
-import InlineConfirm from "../../../components/InlineConfirm.vue";
+import InlineConfirm from "../../../shared/components/InlineConfirm.vue";
 import { tracePresentation } from "../traces/presentation";
 import { useLiveTrace } from "../traces/useLiveTrace";
 import { useTraceSelection } from "../traces/useTraceSelection";

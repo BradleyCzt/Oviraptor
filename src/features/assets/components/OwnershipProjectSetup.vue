@@ -15,7 +15,7 @@ import { computed, onBeforeUnmount, ref, watch } from "vue";
 import {
   ORG_ENTITY_KIND_LABELS, SUGGESTION_STATE_LABELS, ownershipDirectoryApi,
   type OrgEntityRef, type OwnershipSuggestion, type OwnershipSuggestionPreview, type ProjectOwnershipBootstrap,
-} from "../features/assets/ownershipDirectoryApi";
+} from "../ownershipDirectoryApi";
 
 // refreshToken：门禁页保存档案或写入归属结论后递增，只刷新本卡片的档案/授权摘要，不动目录草稿。
 const props = defineProps<{ projectId: number; projectName: string; refreshToken?: number }>();

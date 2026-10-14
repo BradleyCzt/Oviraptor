@@ -217,7 +217,7 @@ test('g4 the detail must belong to the selected project and incident', async (t)
 });
 
 test('g4 the surface wires the ledger tab, the two exports, live lines and resume, and never auto-contacts', () => {
-  const surface = readSource('src/components/ExposureSurface.vue');
+  const surface = readSource('src/features/assets/exposure/ExposureSurface.vue');
   assert.match(surface, /事件台账/);
   assert.match(surface, /exportAll\('ledger'\)/);
   assert.match(surface, /exportAll\('findings'\)/);
@@ -466,7 +466,7 @@ test('P1 UI a failed drill-down says so and never reads as "no gaps"; the page m
   await flushMany();
   assert.match(textOf(root), /钻取读取失败.*（不是“没有缺口”）/);
   assert.doesNotMatch(textOf(root), /工作项（已显示/);
-  const page = readSource('src/components/ExposureSurface.vue');
+  const page = readSource('src/features/assets/exposure/ExposureSurface.vue');
   assert.match(page, /<ExposureCoverageDrill/, '覆盖页挂上钻取面板');
   assert.match(page, /:data-drill="row\.sourceKey"/, '每一行都有钻取入口');
   assert.match(readSource(E + 'api.ts'), /exposure_coverage_drilldown/);

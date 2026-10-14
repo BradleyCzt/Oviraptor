@@ -13,7 +13,7 @@ export const SentinelSourceResults = defineAsyncComponent(
   () => import("./results/SentinelSourceResults.vue"),
 );
 export const AgentWorkbench = defineAsyncComponent(
-  () => import("../../../components/AgentWorkbench.vue"),
+  () => import("./AgentWorkbench.vue"),
 );
 export const AgentTraceHub = defineAsyncComponent(
   () => import("./AgentTraceHub.vue"),

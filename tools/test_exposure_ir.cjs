@@ -114,7 +114,7 @@ test('ir15 ir01 ir14 the handler, the shared export, and the exposure api match 
   assert.match(panel, /写入导入/);
   assert.doesNotMatch(panel, /不提供导入按钮/);
   assert.doesNotMatch(panel, /fetch\(|mailto:|smtp/i);
-  const surface = readSource('src/components/ExposureSurface.vue');
+  const surface = readSource('src/features/assets/exposure/ExposureSurface.vue');
   assert.match(surface, /写入等级/);
   assert.match(surface, /gradeExposureIntel/);
   assert.doesNotMatch(surface, /fetch\(|mailto:|smtp/i);

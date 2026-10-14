@@ -6,7 +6,7 @@ import {
   ownershipReviewApi, OWNERSHIP_LANE_LABELS, OWNERSHIP_NAV_LABELS,
   type OwnershipAnalysisOverview, type OwnershipGroupAction, type OwnershipGroupDecisionPreview, type OwnershipGroupDecisionResult,
   type OwnershipGroupMember, type OwnershipReviewGroup, type OwnershipRevertPreview,
-} from "../features/assets/ownershipDirectoryApi";
+} from "../ownershipDirectoryApi";
 
 const props = defineProps<{ projectId: number; refreshToken?: number }>();
 const emit = defineEmits<{ notify: [type: "success" | "error" | "info", text: string]; applied: [projectId: number] }>();

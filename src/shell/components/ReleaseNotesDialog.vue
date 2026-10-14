@@ -1,6 +1,6 @@
 <script setup lang="ts">
-import { useI18n } from "../i18n";
-import ModalShell from "./ModalShell.vue";
+import { useI18n } from "../../i18n";
+import ModalShell from "../../shared/components/ModalShell.vue";
 
 defineProps<{ version: string }>();
 defineEmits<{ close: [] }>();

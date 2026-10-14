@@ -1,22 +1,22 @@
 <script setup lang="ts">
 import { computed, ref, watch } from "vue";
 import { Download, ExternalLink, Plus, Search, ShieldAlert, Square, X } from "@lucide/vue";
-import { api } from "../api";
-import { exposureApi } from "../features/assets/exposure/api";
-import type { Project } from "../features/workspaces/types";
-import type { ExposureFindingDraft } from "../features/assets/exposure/contracts";
-import { buildGradeRequest, intelGradeLine, sourceStatusView } from "../features/assets/exposure/contracts";
-import { useExposureSurface } from "../features/assets/exposure/useExposureSurface";
-import { useExposureEvidence } from "../features/assets/exposure/useExposureEvidence";
-import ExposureSettingsPanel from "../features/assets/exposure/ExposureSettingsPanel.vue";
-import ExposureClustersPanel from "../features/assets/exposure/ExposureClustersPanel.vue";
-import ExposureReviewPanel from "../features/assets/exposure/ExposureReviewPanel.vue";
-import ExposureIncidentsPanel from "../features/assets/exposure/ExposureIncidentsPanel.vue";
-import ExposureCoverageDrill from "../features/assets/exposure/ExposureCoverageDrill.vue";
-import { INFO_CATEGORY_LABELS, coverageNotice, coverageRows, liveRunLines, newOperationId, unitStatisticsLines } from "../features/assets/exposure/incidents";
-import "../exposure-surface.css";
-import "../exposure-runs.css";
-import "../exposure-tabs.css";
+import { api } from "../../../api";
+import { exposureApi } from "./api";
+import type { Project } from "../../workspaces/types";
+import type { ExposureFindingDraft } from "./contracts";
+import { buildGradeRequest, intelGradeLine, sourceStatusView } from "./contracts";
+import { useExposureSurface } from "./useExposureSurface";
+import { useExposureEvidence } from "./useExposureEvidence";
+import ExposureSettingsPanel from "./ExposureSettingsPanel.vue";
+import ExposureClustersPanel from "./ExposureClustersPanel.vue";
+import ExposureReviewPanel from "./ExposureReviewPanel.vue";
+import ExposureIncidentsPanel from "./ExposureIncidentsPanel.vue";
+import ExposureCoverageDrill from "./ExposureCoverageDrill.vue";
+import { INFO_CATEGORY_LABELS, coverageNotice, coverageRows, liveRunLines, newOperationId, unitStatisticsLines } from "./incidents";
+import "../../../exposure-surface.css";
+import "../../../exposure-runs.css";
+import "../../../exposure-tabs.css";
 
 const props = defineProps<{ projects: Project[]; selectedProjectId?: number }>();
 const emit = defineEmits<{ notify: [type: "success" | "error" | "info", text: string] }>();

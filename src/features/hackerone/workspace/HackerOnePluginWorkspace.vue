@@ -5,7 +5,7 @@ import { hackerOneApi } from "../api";
 import { useI18n } from "../../../i18n";
 import type { HackerOneEvent } from "../types";
 import type { PluginWorkspaceProps, PluginWorkspaceEmits } from "../../../shell/workspaceContract";
-const HackerOneBoard=defineAsyncComponent(()=>import("../../../components/HackerOneBoard.vue"));
+const HackerOneBoard=defineAsyncComponent(()=>import("../components/HackerOneBoard.vue"));
 const props=defineProps<PluginWorkspaceProps>();
 const emit=defineEmits<PluginWorkspaceEmits>();
 const {t,tr}=useI18n();

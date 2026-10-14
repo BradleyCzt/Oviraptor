@@ -5,7 +5,7 @@ const test = require('node:test');
 const ts = require('typescript');
 
 const modulePath = path.join(__dirname, '../src/features/sentinel/execution/presentation.ts');
-const boardPath = path.join(__dirname, '../src/components/SentinelBoard.vue');
+const boardPath = path.join(__dirname, '../src/features/sentinel/components/SentinelBoard.vue');
 
 test('historical backend is a display-only label, never a selectable native backend', () => {
   const compiled = ts.transpileModule(fs.readFileSync(modulePath, 'utf8'), {
@@ -46,7 +46,7 @@ test('attempt plan summary identifies only an exact native backend', () => {
 test('page container only consumes isolated presentation, without historical backend literals', () => {
   const board = fs.readFileSync(boardPath, 'utf8');
   const details = fs.readFileSync(path.join(__dirname, '../src/features/sentinel/components/SentinelExecutionDetails.vue'), 'utf8');
-  assert.match(board, /from "\.\.\/features\/sentinel\/components\/SentinelExecutionDetails\.vue"/);
+  assert.match(board, /from "\.\/SentinelExecutionDetails\.vue"/);
   assert.match(board, /:scope="agentExecutionScope"/);
   assert.match(details, /from "\.\.\/execution\/presentation"/);
   assert.match(details, /agentBackendLabel\(String\(execution\.backend\)\)/);

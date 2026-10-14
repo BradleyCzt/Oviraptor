@@ -1,11 +1,11 @@
 <script setup lang="ts">
 import { computed } from "vue";
 import { BookOpen, Braces, Download, Plus, RefreshCw, Save, Sparkles, Trash2, Upload, X } from "@lucide/vue";
-import InlineConfirm from "../../../components/InlineConfirm.vue";
-import { useI18n } from "../../../i18n";
-import type { useWorkbenchSkills } from "./useWorkbenchSkills";
+import InlineConfirm from "../../shared/components/InlineConfirm.vue";
+import { useI18n } from "../../i18n";
+import type { useSkillsCatalog } from "./useSkillsCatalog";
 
-const props = defineProps<{ catalog: ReturnType<typeof useWorkbenchSkills>; standalone?: boolean; excludeSkillIds?: number[] }>();
+const props = defineProps<{ catalog: ReturnType<typeof useSkillsCatalog>; standalone?: boolean; excludeSkillIds?: number[] }>();
 const { tr } = useI18n();
 const { skills, skillBusy, refiningSkillId, deleteSkill, editingSkill, showSkillEditor,
   skillForm, skillPreview, refineSkill, exportSkills, importSkills,

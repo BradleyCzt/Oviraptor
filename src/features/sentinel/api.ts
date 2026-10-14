@@ -4,10 +4,13 @@ import type { NativeSdkLogPage } from "./execution/nativeSdkLogContract";
 import type { NativeProcessLogPage } from "./execution/nativeProcessLogContract";
 import type { HumanDirectiveReviewResult, AgentDialogView, AgentDialogViewInput, AgentDialogSelection, AdministrativeClosureReceipt, AdministrativeClosurePreview, ClosureHandoffPreview, ClosureHandoffInput, ClosureHandoffReceipt, GapFollowupPreview, GapFollowupDraftInput, GapFollowupSubmission, AppSecScanResult, BrowserAuthSession, ScanIdentityMaterial, InvestigationGraph, InvestigationHypothesis, InvestigationValidation, InvestigationOverview, AgentTargetExecution, AgentRequestReview, AgentRequestReviewPage, AgentRequestReviewInput, AgentTimelineItem, AgentTimelinePage, HumanDirectiveDraft, NativeScanStatus, NativeBudgetDiagnostics, NativeSourceFindingsPage, AgentAttemptMailboxPage, AgentAttemptToolPage, PostScanDirectiveResult, SentinelCheckpoint, SentinelFinding, HistoricalImportPreview, HistoricalImportRun, SentinelFuseEntry, SentinelOpportunity, SentinelOverviewStats, SentinelRunnerLogView, SentinelScan, SentinelScanAttempt, SentinelTarget, SentinelValidation, SentinelValidationWorkItem, AgentTraceDetail, AgentTraceSummary, WorkbenchScanInput, CapabilityBundle, RoleConfigDraft } from "./types";
 import type { FofaApiTestResult, ModelProfileTestResult } from "../configuration/types";
-import type { SecurityRulePack, AgentKnowledgeEntry, AgentLearningCandidate, AgentSkill } from "../skills/catalogTypes";
+import type { AgentKnowledgeEntry } from "../skills/catalogTypes";
+import { skillCatalogApi } from "../skills/catalogApi";
 
 export const sentinelApi = {
   ...rootCostReconciliationApi,
+  // Compatibility for existing Scanning consumers; catalog ownership stays in Skills.
+  ...skillCatalogApi,
   recoverNativeSourcePauseResult: (scanId: string, attemptNumber: number) =>
     invoke<{ schemaVersion: 1; scanId: string; attemptNumber: number; rootRunId: string; scanStatus: "paused"; branchStatus: "partial"; changed: boolean; executionReplayed: false }>(
       "recover_native_source_pause_result", { scanId, attemptNumber }),
@@ -156,50 +159,10 @@ export const sentinelApi = {
   }) => invoke<ModelProfileTestResult>("test_model_profile", { input }),
   testFofaApi: (input: { key: string; proxyUrl: string }) =>
     invoke<FofaApiTestResult>("test_fofa_api", { input }),
-  listAgentSkills: () => invoke<AgentSkill[]>("list_agent_instructions"),
-  saveAgentSkill: (input: {
-    id?: number; name: string; description: string; instructions: string; enabled: boolean;
-  }) => invoke<number>("save_agent_instruction", { input }),
-  deleteAgentSkill: (skillId: number) => invoke<void>("delete_agent_instruction", { skillId }),
-  exportAgentSkills: () => invoke<string>("export_agent_instructions"),
-  importAgentSkills: (path: string) => invoke<number>("import_agent_instructions", { path }),
-  importSecSkillKnowledge: (path: string) =>
-    invoke<Record<string, unknown>>("import_sec_skill_knowledge", { path }),
-  ingestAgentKnowledgeSource: (source: string, forceRefresh = false) =>
-    invoke<AgentKnowledgeEntry>("ingest_agent_knowledge_source", { source, forceRefresh }),
   listAgentTraces: () => invoke<AgentTraceSummary[]>("list_agent_traces"),
   getAgentTrace: (scanId: string) => invoke<AgentTraceDetail>("get_agent_trace", { scanId }),
-  listAgentKnowledge: (scanId?: string) => invoke<AgentKnowledgeEntry[]>("list_agent_knowledge", { scanId }),
-  listAgentLearningCandidates: (status?: string, scanId?: string) =>
-    invoke<AgentLearningCandidate[]>("list_agent_learning_candidates", { status, scanId }),
-  generateAgentLearningCandidate: (scanId: string) =>
-    invoke<AgentLearningCandidate>("generate_agent_learning_candidate", { scanId }),
-  reviewAgentLearningCandidate: (candidateId: number, decision: string, targetSkillId?: number) =>
-    invoke<AgentLearningCandidate>("review_agent_learning_candidate", { candidateId, decision, targetSkillId }),
-  applyAgentLearningCandidate: (candidateId: number) =>
-    invoke<number>("apply_agent_learning_candidate", { candidateId }),
-  deleteAgentLearningCandidate: (candidateId: number) =>
-    invoke<void>("delete_agent_learning_candidate", { candidateId }),
   analyzeAgentTrace: (scanId: string) =>
     invoke<AgentKnowledgeEntry>("analyze_agent_trace", { scanId }),
-  aggregateAgentKnowledge: (scanType: string) =>
-    invoke<AgentKnowledgeEntry>("aggregate_agent_knowledge", { scanType }),
-  deleteAgentKnowledge: (knowledgeId: number) =>
-    invoke<void>("delete_agent_knowledge", { knowledgeId }),
-  convertAgentKnowledgeToInstruction: (knowledgeId: number) =>
-    invoke<number>("convert_agent_knowledge_to_instruction", { knowledgeId }),
-  refineAgentSkillWithKnowledge: (skillId: number) =>
-    invoke<number>("refine_agent_instruction_with_knowledge", { skillId }),
-  exportAgentKnowledge: () => invoke<string>("export_agent_knowledge"),
-  importAgentKnowledge: (path: string) => invoke<number>("import_agent_knowledge", { path }),
-  listSecurityRulePacks: () => invoke<SecurityRulePack[]>("list_security_rule_packs"),
-  saveSecurityRulePack: (input: {
-    key: string; name: string; engine: string; repository: string; reference?: string; enabled: boolean;
-  }) => invoke<number>("save_security_rule_pack", { input }),
-  deleteSecurityRulePack: (packId: number) =>
-    invoke<void>("delete_security_rule_pack", { packId }),
-  syncSecurityRulePack: (packId: number) =>
-    invoke<SecurityRulePack>("sync_security_rule_pack", { packId }),
   startWorkbenchScan: (input: WorkbenchScanInput) =>
     invoke<SentinelScan>("start_workbench_scan", { input }),
   rescanWorkbenchScan: (scanId: string) =>

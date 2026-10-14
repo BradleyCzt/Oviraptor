@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { nextTick, onMounted, ref, watch } from "vue";
 import { Plus, X } from "@lucide/vue";
-import { useI18n } from "../i18n";
+import { useI18n } from "../../../i18n";
 
 const props = defineProps<{ text: string; x: number; y: number; busy: boolean }>();
 const emit = defineEmits<{ apply: [keyword: string]; close: [] }>();

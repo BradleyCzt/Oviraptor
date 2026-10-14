@@ -6,7 +6,7 @@ const ts = require('typescript');
 const { parse, compileScript, compileTemplate } = require('@vue/compiler-sfc');
 const vue = require('vue');
 
-const filename = path.join(__dirname, '../src/components/AgentWorkbench.vue');
+const filename = path.join(__dirname, '../src/features/sentinel/components/AgentWorkbench.vue');
 const { descriptor } = parse(fs.readFileSync(filename, 'utf8'), { filename });
 const script = compileScript(descriptor, { id: 'workbench-test' });
 const transpile = (content) => ts.transpileModule(content, {
@@ -17,7 +17,7 @@ const handoffModulePath = path.join(__dirname, '../src/features/sentinel/workben
 const compiledHandoff = transpile(fs.readFileSync(handoffModulePath, 'utf8'));
 const authModulePath = path.join(__dirname, '../src/features/sentinel/workbench/useBrowserAuthSessions.ts');
 const compiledAuth = transpile(fs.readFileSync(authModulePath, 'utf8'));
-const skillsModulePath = path.join(__dirname, '../src/features/sentinel/workbench/useWorkbenchSkills.ts');
+const skillsModulePath = path.join(__dirname, '../src/features/skills/useSkillsCatalog.ts');
 const compiledSkills = transpile(fs.readFileSync(skillsModulePath, 'utf8'));
 const followupModulePath = path.join(__dirname, '../src/features/sentinel/workbench/useFollowupRecovery.ts');
 const compiledFollowup = transpile(fs.readFileSync(followupModulePath, 'utf8'));
@@ -36,7 +36,7 @@ function loadPanel(name) {
   const imports = (name) => {
     if (name === 'vue') return vue;
     if (name === '../../../i18n') return { useI18n: () => ({ tr: (zh) => zh }) };
-    if (name === '../../../components/InlineConfirm.vue') return { default: () => null };
+    if (name === '../../../shared/components/InlineConfirm.vue') return { default: () => null };
     if (name === '@lucide/vue') return new Proxy({}, { get: () => () => null });
     throw new Error(`Unexpected panel import: ${name}`);
   };
@@ -94,7 +94,7 @@ async function mount(overrides = {}, initialProps = {}, host = {}) {
   const skillsExports = {};
   new Function('require', 'exports', compiledSkills)((name) => {
     if (name === 'vue') return vue;
-    if (name === '../../../api') return { api };
+    if (name === './catalogApi') return { skillCatalogApi: api };
     if (name === '@tauri-apps/plugin-dialog') return { open: host.open || (async () => null) };
     throw new Error(`Unexpected skills import: ${name}`);
   }, skillsExports);
@@ -119,27 +119,27 @@ async function mount(overrides = {}, initialProps = {}, host = {}) {
   new Function('require', 'exports', compiled)((name) => {
     if (name === 'vue') return vue;
     if (name === '../api') return { api };
-    if (name === '../i18n') return { useI18n: () => ({ tr: (zh) => zh }) };
+    if (name === '../../../i18n') return { useI18n: () => ({ tr: (zh) => zh }) };
     if (name === '@lucide/vue') return new Proxy({}, { get: () => icon });
     if (name === '@tauri-apps/plugin-dialog') return { open: async () => null };
     if (name === '@tauri-apps/api/event') return { listen: async () => () => {} };
     if (name === './InlineConfirm.vue') return { default: icon };
-    if (name === '../features/sentinel/workbench/WorkbenchGreyboxSettings.vue') return { default: icon };
-    if (name === '../features/sentinel/workbench/WorkbenchCicdSettings.vue') return { default: icon };
-    if (name === '../features/sentinel/workbench/WorkbenchSkillsCatalog.vue') return { default: icon };
-    if (name === '../features/sentinel/workbench/WorkbenchOverview.vue') return { default: icon };
-    if (name === '../features/sentinel/workbench/WorkbenchSkillSelection.vue') return { default: icon };
-    if (name === '../features/sentinel/workbench/WorkbenchToolSelection.vue') return { default: icon };
-    if (name === '../features/sentinel/workbench/WorkbenchBrowserAuth.vue') return { default: browserAuthPanel };
-    if (name === '../features/sentinel/workbench/WorkbenchTaskNotices.vue') return { default: noticesPanel };
-    if (name === '../features/sentinel/workbench/WorkbenchWebPolicy.vue') return { default: webPolicyPanel };
-    if (name === '../features/sentinel/workbench/WorkbenchBudgetField.vue') return { default: budgetPanel };
-    if (name === '../features/sentinel/workbench/useClosureHandoff') return handoffExports;
-    if (name === '../features/sentinel/workbench/useBrowserAuthSessions') return authExports;
-    if (name === '../features/sentinel/workbench/useWorkbenchSkills') return skillsExports;
-    if (name === '../features/sentinel/workbench/useFollowupRecovery') return followupExports;
-    if (name === '../features/sentinel/workbench/useWorkbenchTaskCreation') return creationExports;
-    if (name === '../features/sentinel/workbench/useWorkbenchPresentation') return presentationExports;
+    if (name === '../workbench/WorkbenchGreyboxSettings.vue') return { default: icon };
+    if (name === '../workbench/WorkbenchCicdSettings.vue') return { default: icon };
+    if (name === '../../skills/SkillInstructionsCatalog.vue') return { default: icon };
+    if (name === '../workbench/WorkbenchOverview.vue') return { default: icon };
+    if (name === '../workbench/WorkbenchSkillSelection.vue') return { default: icon };
+    if (name === '../workbench/WorkbenchToolSelection.vue') return { default: icon };
+    if (name === '../workbench/WorkbenchBrowserAuth.vue') return { default: browserAuthPanel };
+    if (name === '../workbench/WorkbenchTaskNotices.vue') return { default: noticesPanel };
+    if (name === '../workbench/WorkbenchWebPolicy.vue') return { default: webPolicyPanel };
+    if (name === '../workbench/WorkbenchBudgetField.vue') return { default: budgetPanel };
+    if (name === '../workbench/useClosureHandoff') return handoffExports;
+    if (name === '../workbench/useBrowserAuthSessions') return authExports;
+    if (name === '../../skills/useSkillsCatalog') return skillsExports;
+    if (name === '../workbench/useFollowupRecovery') return followupExports;
+    if (name === '../workbench/useWorkbenchTaskCreation') return creationExports;
+    if (name === '../workbench/useWorkbenchPresentation') return presentationExports;
     throw new Error(`Unexpected import: ${name}`);
   }, exports);
   let bindings;

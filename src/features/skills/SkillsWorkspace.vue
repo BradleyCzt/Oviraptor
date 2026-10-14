@@ -3,8 +3,8 @@ import { computed } from "vue";
 import { open } from "@tauri-apps/plugin-dialog";
 import { BookOpen, Braces, ChevronRight, Download, FileText, FolderOpen, Package, RefreshCw, Search, ShieldAlert, X } from "@lucide/vue";
 import { useI18n } from "../../i18n";
-import WorkbenchSkillsCatalog from "../sentinel/workbench/WorkbenchSkillsCatalog.vue";
-import { useWorkbenchSkills } from "../sentinel/workbench/useWorkbenchSkills";
+import SkillInstructionsCatalog from "./SkillInstructionsCatalog.vue";
+import { useSkillsCatalog } from "./useSkillsCatalog";
 import { skillsApi } from "./api";
 import { useSkillsLibrary } from "./useSkillsLibrary";
 import type { PackagedSkill } from "./types";
@@ -12,7 +12,7 @@ const emit = defineEmits<{ notify: [type: "success" | "error" | "info", text: st
 const { tr } = useI18n();
 const library = useSkillsLibrary({ api: skillsApi, pickDirectory: () => open({ multiple: false, directory: true, title: tr("选择包含 SKILL.md 或 skills/ 的目录", "Choose a folder containing SKILL.md or skills/") }) });
 const { packages, loading, error, search, preview, previewBusy, importing, installing, changing, selected, resources, resourcesLoading, resourceError, selectedResource, resourcePage, resourceText, resourceLoading, packageSkillIds, visiblePackages } = library;
-const textCatalog = useWorkbenchSkills({ tr, notify: (type, text) => emit("notify", type, text), clearSelection: () => {}, context: "library" });
+const textCatalog = useSkillsCatalog({ tr, notify: (type, text) => emit("notify", type, text), clearSelection: () => {}, context: "library" });
 const totalSkills = computed(() => packages.value.reduce((sum, item) => sum + item.skills.length, 0));
 const enabledSkills = computed(() => packages.value.reduce((sum, item) => sum + item.skills.filter(skill => skill.enabled).length, 0));
 function bytes(value: number) { return value < 1024 ? `${value} B` : value < 1024 * 1024 ? `${(value / 1024).toFixed(1)} KB` : `${(value / (1024 * 1024)).toFixed(1)} MB`; }
@@ -54,7 +54,7 @@ function toggle(skill: PackagedSkill, event: Event) { const input = event.target
         <template v-if="selectedResource"><div class="skills-file-heading"><strong>{{selectedResource.path}}</strong><span>{{bytes(selectedResource.sizeBytes)}}</span></div><p v-if="selectedResource.kind==='script'" class="skills-script-notice">{{tr('脚本仅供阅读，不会从此页面执行。','Scripts are read-only here and are never executed from this page.')}}</p><p v-if="resourceLoading" class="skills-muted" role="status">{{tr('正在读取文件…','Reading file…')}}</p><p v-if="resourcePage?.encoding==='binary'" class="skills-muted">{{tr('已保留此二进制资源，不提供文本预览。','This binary resource is retained. A text preview is unavailable.')}}</p><pre v-else-if="resourcePage" tabindex="0">{{resourceText}}</pre><button v-if="resourcePage?.hasMore" class="button ghost compact" :disabled="resourceLoading" @click="library.readResource(selectedResource,true)">{{tr('继续读取','Read more')}}</button><small class="skills-resource-digest" :title="selectedResource.sha256">SHA-256 · {{selectedResource.sha256.slice(0,16)}}</small></template>
       </aside>
     </div>
-    <details class="skills-text-editor" v-if="!loading&&!error"><summary><FileText :size="17"/><strong>{{tr('文本指令与 JSON','Text instructions & JSON')}}</strong><span>{{tr('新建、编辑或导入现有指令','Create, edit, or import existing instructions')}}</span></summary><WorkbenchSkillsCatalog :catalog="textCatalog" standalone :exclude-skill-ids="packageSkillIds"/></details>
+    <details class="skills-text-editor" v-if="!loading&&!error"><summary><FileText :size="17"/><strong>{{tr('文本指令与 JSON','Text instructions & JSON')}}</strong><span>{{tr('新建、编辑或导入现有指令','Create, edit, or import existing instructions')}}</span></summary><SkillInstructionsCatalog :catalog="textCatalog" standalone :exclude-skill-ids="packageSkillIds"/></details>
   </section>
 </template>
 <style scoped>

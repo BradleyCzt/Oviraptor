@@ -325,7 +325,7 @@ test('the cluster panel is a real child of the page and cannot reach the collect
     '簇面板不得持有启动、恢复、停止或写线索的能力');
   assert.doesNotMatch(source, /from "\.\.\/\.\.\/api"/, '簇面板只能走暴露面自己的 IPC 包装');
   assert.match(source, /import \{ exposureApi \} from "\.\/api"/);
-  const pageSource = readSource('src/components/ExposureSurface.vue');
+  const pageSource = readSource('src/features/assets/exposure/ExposureSurface.vue');
   assert.match(pageSource, /ExposureClustersPanel v-if="view === 'clusters'"/, '簇视图必须挂在页签上');
   assert.match(panel.renderSource, /pageExposureClusters|load/, '模板要真的走分页读取');
 });
