@@ -1,4 +1,16 @@
-fn detect_target(value: &str) -> &'static str {
+//! Asset inventory, targets, decisions and asset-pipeline history.
+//! Scan status is a read projection; this module cannot invoke scan execution.
+use crate::{db, models::{
+    Asset, AssetBulkArchiveInput, AssetBulkDecisionInput, AssetEvent, AssetPage,
+    AssetQuery, AssetSummary, ContentRuleApplyResult, ContentRuleInput, DecisionInput,
+    InterruptedJob, JobRun, LogEntry, StaleProject, StartupStatus, Target, TargetImportInput,
+}, AppState};
+use rusqlite::{params, params_from_iter, types::Value as SqlValue, Row};
+use serde_json::Value as JsonValue;
+use std::collections::HashSet;
+use tauri::State;
+
+pub(super) fn detect_target(value: &str) -> &'static str {
     let value = value.trim();
     if value.starts_with("http://") || value.starts_with("https://") {
         return "domain";
@@ -153,7 +165,7 @@ fn date_asset_field(field: &str) -> bool {
     )
 }
 
-fn asset_filter(query: &AssetQuery, apply_decision_view: bool) -> (String, Vec<SqlValue>) {
+pub(super) fn asset_filter(query: &AssetQuery, apply_decision_view: bool) -> (String, Vec<SqlValue>) {
     let deleted_view = if query.deleted_view.trim().is_empty() {
         if query.include_deleted {
             "all"
@@ -356,7 +368,7 @@ fn asset_order(query: &AssetQuery) -> String {
     format!("{expression} {direction},a.id DESC")
 }
 
-fn asset_from_row(row: &Row<'_>) -> rusqlite::Result<Asset> {
+pub(super) fn asset_from_row(row: &Row<'_>) -> rusqlite::Result<Asset> {
     Ok(Asset {
         id: row.get(0)?,
         project_id: row.get(1)?,
@@ -402,7 +414,7 @@ fn asset_from_row(row: &Row<'_>) -> rusqlite::Result<Asset> {
     })
 }
 
-const ASSET_SELECT: &str = r#"SELECT a.id,pa.project_id,a.asset_key,a.company,a.host,a.link,a.ip,a.port,a.protocol,a.domain,a.title,
+pub(super) const ASSET_SELECT: &str = r#"SELECT a.id,pa.project_id,a.asset_key,a.company,a.host,a.link,a.ip,a.port,a.protocol,a.domain,a.title,
  a.status_code,a.probe_outcome,a.probe_entry_state,a.review_tier,a.content_category,a.score,pa.decision,pa.note,
  COALESCE(o.status,'unreviewed'),COALESCE(o.confidence,0),COALESCE(o.authorization_status,'unknown'),COALESCE(o.exposure_eligible,0),COALESCE(o.source,''),COALESCE(o.reason,''),pa.is_deleted,
  a.first_seen,a.last_seen,a.last_alive,a.extra_json,
@@ -857,3 +869,90 @@ pub async fn list_asset_events(
     rows.collect::<Result<Vec<_>, _>>()
         .map_err(|error| error.to_string())
 }
+
+#[tauri::command]
+pub fn startup_status(state: State<AppState>) -> Result<StartupStatus, String> {
+    let connection = db::open(&state.db_path)?;
+    connection
+        .execute(
+            "UPDATE runs SET status='interrupted',stage='interrupted',error='上次运行时应用或电脑被关闭，任务未完成',finished_at=datetime('now','localtime') WHERE status IN ('queued','running','cancel_requested')",
+            [],
+        )
+        .map_err(|error| error.to_string())?;
+    let reminder_days: i64 = connection
+        .query_row(
+            "SELECT value FROM app_settings WHERE key='reminder_days'",
+            [],
+            |row| row.get::<_, String>(0),
+        )
+        .unwrap_or_else(|_| "7".into())
+        .parse()
+        .unwrap_or(7);
+
+    let mut stale_statement = connection.prepare(r#"
+        SELECT p.id,p.name,
+               MAX(CASE WHEN r.status IN ('completed','historical_import') OR r.stage='completed' THEN COALESCE(r.finished_at,r.created_at) END) AS last_run,
+               CAST(julianday('now','localtime')-julianday(MAX(CASE WHEN r.status IN ('completed','historical_import') OR r.stage='completed' THEN COALESCE(r.finished_at,r.created_at) END)) AS INTEGER) AS days_old
+        FROM projects p LEFT JOIN runs r ON r.project_id=p.id
+        WHERE p.status='active'
+          AND (EXISTS(SELECT 1 FROM targets t WHERE t.project_id=p.id AND t.enabled=1)
+               OR EXISTS(SELECT 1 FROM project_assets pa WHERE pa.project_id=p.id AND pa.is_deleted=0))
+        GROUP BY p.id,p.name
+        HAVING last_run IS NULL OR days_old>=?1
+        ORDER BY COALESCE(days_old,999999) DESC,p.name
+    "#).map_err(|error| error.to_string())?;
+    let stale_projects = stale_statement
+        .query_map([reminder_days], |row| {
+            Ok(StaleProject {
+                project_id: row.get(0)?,
+                project_name: row.get(1)?,
+                last_run_at: row.get(2)?,
+                days_since_update: row.get(3)?,
+            })
+        })
+        .map_err(|error| error.to_string())?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|error| error.to_string())?;
+
+    let mut interrupted_statement = connection
+        .prepare(
+            r#"
+        SELECT r.id,r.project_id,p.name,r.profile_id,r.name,r.pipeline,r.created_at
+        FROM runs r JOIN projects p ON p.id=r.project_id
+        WHERE r.status='interrupted' ORDER BY r.id DESC LIMIT 30
+    "#,
+        )
+        .map_err(|error| error.to_string())?;
+    let interrupted_jobs = interrupted_statement
+        .query_map([], |row| {
+            Ok(InterruptedJob {
+                run_id: row.get(0)?,
+                project_id: row.get(1)?,
+                project_name: row.get(2)?,
+                profile_id: row.get(3)?,
+                name: row.get(4)?,
+                pipeline: row.get(5)?,
+                created_at: row.get(6)?,
+            })
+        })
+        .map_err(|error| error.to_string())?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|error| error.to_string())?;
+    Ok(StartupStatus {
+        reminder_days,
+        stale_projects,
+        interrupted_jobs,
+    })
+}
+
+#[tauri::command]
+pub fn acknowledge_interrupted_run(state: State<AppState>, run_id: i64) -> Result<(), String> {
+    db::open(&state.db_path)?
+        .execute(
+            "UPDATE runs SET status='restarted',stage='restarted' WHERE id=?1 AND status='interrupted'",
+            [run_id],
+        )
+        .map_err(|error| error.to_string())?;
+    Ok(())
+}
+

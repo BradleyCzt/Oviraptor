@@ -1,3 +1,10 @@
+//! CSV export is owned by assets and uses the same scoped inventory query.
+use super::assets::{asset_filter, asset_from_row, ASSET_SELECT};
+use crate::{db, models::{Asset, ExportRequest, ExportResult}, AppState};
+use rusqlite::params_from_iter;
+use std::{collections::HashMap, fs, io::Write, path::PathBuf};
+use tauri::State;
+
 // Keep the user project name readable while preventing path traversal and
 // platform-reserved filename characters. Time includes milliseconds.
 fn asset_export_filename(project: &str, timestamp: &str) -> String {

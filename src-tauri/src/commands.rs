@@ -14,7 +14,7 @@ use std::{
     thread,
     time::{Duration, Instant},
 };
-use tauri::{image::Image, AppHandle, Emitter, Manager, State};
+use tauri::{AppHandle, Emitter, Manager, State};
 use uuid::Uuid;
 
 #[cfg(test)]
@@ -41,8 +41,29 @@ fn json(text: String) -> JsonValue {
 }
 
 include!("commands/agent_instruction.rs");
-include!("commands/workspace_projects.rs");
-include!("commands/assets.rs");
+// Business modules compile with explicit imports instead of inheriting this
+// legacy scan/agent include! scope. IPC registration uses their actual owners.
+#[path = "commands/workspace_projects.rs"]
+pub(crate) mod workspace_projects;
+#[path = "commands/application_overview.rs"]
+pub(crate) mod application_overview;
+#[path = "commands/application_settings.rs"]
+pub(crate) mod application_settings;
+#[path = "commands/workspace_config_profiles.rs"]
+pub(crate) mod workspace_config_profiles;
+#[path = "commands/assets.rs"]
+pub(crate) mod assets;
+#[path = "commands/asset_export.rs"]
+pub(crate) mod asset_export;
+
+// Ownership review intentionally reuses the asset selection predicate.
+use assets::asset_filter;
+#[cfg(test)]
+use assets::detect_target;
+#[cfg(test)]
+use workspace_projects::{delete_project_for_connection, project_impact_for_connection};
+#[cfg(test)]
+use workspace_config_profiles::{delete_config_profile_inner, persist_config_profile, read_config_profiles};
 include!("commands/asset_ownership.rs");
 include!("commands/ownership_directory.rs");
 include!("commands/ownership_public_suffix.rs");
@@ -201,7 +222,6 @@ include!("commands/historical_import_views.rs");
 include!("commands/result_ingestion_recon.rs");
 include!("commands/result_ingestion_runs.rs");
 include!("commands/result_ingestion_engines.rs");
-include!("commands/asset_export.rs");
 #[cfg(test)]
 include!("commands/web_mode_test_support.rs");
 include!("commands/tests.rs");
