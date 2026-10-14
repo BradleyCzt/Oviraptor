@@ -6,6 +6,7 @@ const path = require('node:path');
 const vue = require('vue');
 const { parse, compileScript, compileTemplate } = require('@vue/compiler-sfc');
 const { compile, text, descendants, mountHost } = require('./vue_interaction_host.cjs');
+const { loadSentinelApi } = require('./sentinel_api_harness.cjs');
 const repo = path.join(__dirname, '..');
 const id = '11111111-1111-4111-8111-111111111111';
 const second = '22222222-2222-4222-8222-222222222222';
@@ -14,9 +15,7 @@ const deferred = () => { let resolve; const promise = new Promise(r => { resolve
 async function flush() { await new Promise(r => setImmediate(r)); for (let i = 0; i < 4; i++) await vue.nextTick(); }
 function modules(invoke) {
   const native = { invoke };
-  const api = compile(readFile('src/features/sentinel/api.ts'), {
-    '@tauri-apps/api/core': native, './reconciliation/api': { rootCostReconciliationApi: {} },
-  }).sentinelApi;
+  const api = loadSentinelApi(invoke);
   const creation = compile(readFile('src/features/sentinel/workbench/useWorkbenchTaskCreation.ts'), { '../../../api': { api } });
   const approval = compile(readFile('src/features/environment/toolApprovalApi.ts'), { '@tauri-apps/api/core': native });
   return { api, creation, approval };

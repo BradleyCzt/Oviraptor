@@ -1,21 +1,7 @@
 // Actual SFC/composable + actual api.ts; only Tauri invoke/status transport is a fixture.
 const { assert, test, renderDialog, deferred, flush, status, directive, mount } = require('../agent_dialog_harness.cjs');
-const fs = require('node:fs');
-const path = require('node:path');
-const ts = require('typescript');
+const { loadSentinelApi } = require('../sentinel_api_harness.cjs');
 const clone = value => JSON.parse(JSON.stringify(value));
-function productionApi(invoke) {
-  const filename = path.resolve(__dirname, '../../src/features/sentinel/api.ts');
-  const output = ts.transpileModule(fs.readFileSync(filename, 'utf8'), {
-    compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020 },
-  }).outputText;
-  const exports = {};
-  new Function('require', 'exports', output)(name => {
-    if (name === '@tauri-apps/api/core') return { invoke };
-    throw new Error(`Unexpected production API import: ${name}`);
-  }, exports);
-  return exports.sentinelApi;
-}
 function frozenDraft(scanId = 'A', extra = {}) {
   return { ...directive(scanId), intent: 'agent_proposal_request',
     requestedRoles: ['coordinator', 'deep_investigator'], ...extra };
@@ -45,7 +31,7 @@ async function mountReview(handler) {
   let snapshot = { ...status('A'), directiveDrafts: [clone(base)] };
   let reads = 0;
   const calls = [];
-  const api = productionApi((command, input) => {
+  const api = loadSentinelApi((command, input) => {
     calls.push({ command, input: clone(input) });
     if (handler) return handler(command, input);
     if (command === 'confirm_scan_directive')
