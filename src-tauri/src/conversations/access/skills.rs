@@ -16,11 +16,12 @@ pub(super) fn fingerprint(db: &Connection, id: i64) -> Result<String, String> {
     if !enabled {
         return Err("conversation_access_skill_unavailable".into());
     }
+    let generation:i64=db.query_row("SELECT COALESCE((SELECT generation FROM conversation_skill_generations WHERE skill_id=?1),0)",[id],|r|r.get(0)).map_err(store::err)?;
     let package = crate::skill_packages::package_fingerprint(db, id)?;
     Ok(format!(
         "{:x}",
         Sha256::digest(
-            serde_json::to_vec(&(id, name, description, instructions, package))
+            serde_json::to_vec(&(id, generation, name, description, instructions, package))
                 .map_err(|_| "conversation_access_invalid_skills")?
         )
     ))

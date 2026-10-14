@@ -303,3 +303,69 @@ fn absent_provider_never_blocks_plain_chat_or_creates_tool_consent() {
     validate_scope_revision(&db, 901, &item.id, plain.revision).unwrap();
     assert!(tool_specs(&db, &item).unwrap().is_empty());
 }
+
+#[test]
+fn disable_then_enable_at_same_timestamp_never_revives_prior_skill_consent() {
+    let f = Fixture::new();
+    let item = f.create();
+    let db = db::open(&f.path).unwrap();
+    configure(&db, "http://127.0.0.1:7/v1");
+    let id = add_skill(&db, "same-time-enabled", "Unchanged guidance.");
+    db.execute(
+        "UPDATE agent_skills SET updated_at='same-instant' WHERE id=?1",
+        [id],
+    )
+    .unwrap();
+    let original = grant(&f, &item, vec![id]);
+    db.execute(
+        "UPDATE agent_skills SET enabled=0,updated_at='same-instant' WHERE id=?1",
+        [id],
+    )
+    .unwrap();
+    db.execute(
+        "UPDATE agent_skills SET enabled=1,updated_at='same-instant' WHERE id=?1",
+        [id],
+    )
+    .unwrap();
+    let current = snapshot(&db, 901, &item.id).unwrap();
+    assert!(current.skills_require_review);
+    assert!(!current.provider_disclosure_accepted);
+    assert_ne!(current.skill_revision, original.skill_revision);
+    assert!(grant(&f, &item, vec![id]).provider_disclosure_accepted);
+}
+#[test]
+fn editing_then_restoring_text_at_same_timestamp_never_revives_prior_skill_consent() {
+    let f = Fixture::new();
+    let item = f.create();
+    let db = db::open(&f.path).unwrap();
+    configure(&db, "http://127.0.0.1:7/v1");
+    let id = add_skill(&db, "same-time-edited", "Original guidance.");
+    db.execute(
+        "UPDATE agent_skills SET updated_at='same-instant' WHERE id=?1",
+        [id],
+    )
+    .unwrap();
+    let original = grant(&f, &item, vec![id]);
+    db.execute("UPDATE agent_skills SET instructions='Temporary change',updated_at='same-instant' WHERE id=?1",[id]).unwrap();
+    db.execute("UPDATE agent_skills SET instructions='Original guidance.',updated_at='same-instant' WHERE id=?1",[id]).unwrap();
+    let current = snapshot(&db, 901, &item.id).unwrap();
+    assert!(current.skills_require_review);
+    assert!(!current.provider_disclosure_accepted);
+    assert_ne!(current.skill_revision, original.skill_revision);
+}
+#[test]
+fn deleting_and_recreating_same_skill_id_keeps_revocation_tombstone() {
+    let f = Fixture::new();
+    let item = f.create();
+    let db = db::open(&f.path).unwrap();
+    configure(&db, "http://127.0.0.1:7/v1");
+    let id = add_skill(&db, "same-id", "Original guidance.");
+    let original = grant(&f, &item, vec![id]);
+    db.execute("DELETE FROM agent_skills WHERE id=?1", [id])
+        .unwrap();
+    db.execute("INSERT INTO agent_skills(id,name,description,instructions,enabled) VALUES(?1,'same-id','Synthetic guidance','Original guidance.',1)",[id]).unwrap();
+    let current = snapshot(&db, 901, &item.id).unwrap();
+    assert!(current.skills_require_review);
+    assert!(!current.provider_disclosure_accepted);
+    assert_ne!(current.skill_revision, original.skill_revision);
+}

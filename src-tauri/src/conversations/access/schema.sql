@@ -22,3 +22,30 @@ CREATE TABLE IF NOT EXISTS conversation_directory_grants (
     created_at TEXT NOT NULL,
     UNIQUE(conversation_id,canonical_root)
 );
+
+-- Tombstones deliberately survive Skill deletion so reusing an id cannot revive
+-- an old grant. Created lazily before consent, after agent_skills exists.
+CREATE TABLE IF NOT EXISTS conversation_skill_generations (
+    skill_id INTEGER PRIMARY KEY,
+    generation INTEGER NOT NULL CHECK(typeof(generation)='integer' AND generation BETWEEN 1 AND 9007199254740991)
+);
+CREATE TRIGGER IF NOT EXISTS conversation_skill_generation_insert
+AFTER INSERT ON agent_skills
+BEGIN
+    INSERT INTO conversation_skill_generations(skill_id,generation) VALUES(NEW.id,1)
+    ON CONFLICT(skill_id) DO UPDATE SET generation=generation+1;
+END;
+CREATE TRIGGER IF NOT EXISTS conversation_skill_generation_update
+AFTER UPDATE OF name,description,instructions,enabled ON agent_skills
+WHEN NEW.name IS NOT OLD.name OR NEW.description IS NOT OLD.description
+    OR NEW.instructions IS NOT OLD.instructions OR NEW.enabled IS NOT OLD.enabled
+BEGIN
+    INSERT INTO conversation_skill_generations(skill_id,generation) VALUES(NEW.id,1)
+    ON CONFLICT(skill_id) DO UPDATE SET generation=generation+1;
+END;
+CREATE TRIGGER IF NOT EXISTS conversation_skill_generation_delete
+AFTER DELETE ON agent_skills
+BEGIN
+    INSERT INTO conversation_skill_generations(skill_id,generation) VALUES(OLD.id,1)
+    ON CONFLICT(skill_id) DO UPDATE SET generation=generation+1;
+END;
