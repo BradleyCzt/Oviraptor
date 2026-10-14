@@ -28,6 +28,7 @@ import defaultBrandIconUrl from "../src-tauri/icons/brand-icon.png";
 import "./styles.css";
 import "./probe-status.css";
 import "./theme-enhancements.css";
+import "./shell/agent-shell.css";
 
 const { locale, t, tr, setLocale } = useI18n();
 const pluginEnabled = ref(loadPluginEnabledState(localStorage));
@@ -107,7 +108,7 @@ const { logs: environmentInstallLogs, evicted: environmentInstallEvicted,
 });
 const configSection = ref<"profiles" | "workers" | "runtime" | "plugins">("profiles");
 const deletingProfileId = ref<number>();
-const sidebarCollapsed = ref(false); const loading = ref(true); const toasts = ref<ToastMessage[]>([]);
+const sidebarCollapsed = ref(true); const loading = ref(true); const toasts = ref<ToastMessage[]>([]);
 const deletingProjectId = ref<number>();
 const projectImpactLoadingId = ref<number>();
 const pendingProjectAction = ref<{ project: Project; impact: ProjectImpact; mode: "delete" | "archive" }>();
@@ -115,7 +116,44 @@ const storedTheme=localStorage.getItem("oviraptor-theme")||"cloud";
 const themePreset=ref(storedTheme==="cloud"?"cloud":"codex");
 if(storedTheme!==themePreset.value)localStorage.setItem("oviraptor-theme",themePreset.value);
 const accentColor=ref(localStorage.getItem("oviraptor-accent")||"#2878ff");
-const showTheme=ref(false);
+const sidebarElement = ref<HTMLElement>();
+const sidebarTrigger = ref<HTMLButtonElement>();
+const utilityMenu = ref<HTMLDetailsElement>();
+const isMobile = ref(false);
+let sidebarOpenedFrom: HTMLElement | undefined;
+let mobileQuery: MediaQueryList | undefined;
+function updateMobileLayout() { isMobile.value = mobileQuery?.matches ?? false; }
+function closeUtilityMenu(restoreFocus = false) { if (utilityMenu.value) { utilityMenu.value.open = false; if (restoreFocus) utilityMenu.value.querySelector<HTMLElement>("summary")?.focus(); } }
+function closeSidebar() {
+  sidebarCollapsed.value = true;
+  void nextTick(() => {
+    const target = isMobile.value ? (sidebarOpenedFrom?.isConnected ? sidebarOpenedFrom : sidebarTrigger.value) : sidebarElement.value?.querySelector<HTMLElement>(".sidebar-toggle");
+    target?.focus();
+  });
+}
+function toggleSidebar(event?: MouseEvent) {
+  if (!sidebarCollapsed.value) { closeSidebar(); return; }
+  sidebarOpenedFrom = event?.currentTarget as HTMLElement | undefined;
+  sidebarCollapsed.value = false;
+  if (isMobile.value) void nextTick(() => sidebarElement.value?.querySelector<HTMLButtonElement>("button")?.focus());
+}
+function handleSidebarKeys(event: KeyboardEvent) {
+  if (event.key === "Escape") { event.preventDefault(); event.stopPropagation(); closeSidebar(); return; }
+  if (event.key !== "Tab" || !isMobile.value || sidebarCollapsed.value) return;
+  const focusable = Array.from(sidebarElement.value?.querySelectorAll<HTMLElement>('button:not([disabled]), input:not([disabled]), select:not([disabled]), summary, [tabindex="0"]') ?? []).filter(element => element.getClientRects().length > 0);
+  const first = focusable[0], last = focusable[focusable.length - 1];
+  if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last?.focus(); }
+  else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first?.focus(); }
+}
+function historySelected() { if (isMobile.value) closeSidebar(); }
+onMounted(() => {
+  if (typeof window.matchMedia === "function") {
+    mobileQuery = window.matchMedia("(max-width: 760px)");
+    updateMobileLayout();
+    mobileQuery.addEventListener("change", updateMobileLayout);
+  }
+});
+onUnmounted(() => mobileQuery?.removeEventListener("change", updateMobileLayout));
 const brandIconUrl=ref(defaultBrandIconUrl);
 let unlisten: UnlistenFn | undefined;
 let unlistenTray: UnlistenFn | undefined;
@@ -152,8 +190,8 @@ function navigateFromTray(destination:string) {
   const item=route.section?{key:route.section,view:route.view,label:["任务与成本","Tasks & cost"] as const,icon:"tasks" as const,section:route.section}:undefined;
   applyRoute(route.module,route.view,item);
 }
-function switchModule(module:ModuleKey) { applyRoute(module,moduleDefinition(module).defaultView); }
-function openWorkspaceSection(item:WorkspaceNavItem) { applyRoute(activeModule.value,item.view,item); }
+function switchModule(module:ModuleKey) { if (applyRoute(module,moduleDefinition(module).defaultView)) historySelected(); }
+function openWorkspaceSection(item:WorkspaceNavItem) { if (applyRoute(activeModule.value,item.view,item)) historySelected(); }
 function selectProject(id?:number) {
   const candidate=parseProjectId(id);
   selectedProjectId.value=candidate&&projects.value.some(project=>project.id===candidate)?candidate:undefined;
@@ -199,7 +237,7 @@ function resumeInterrupted(job:InterruptedJob){
 function consumeWorkspaceIntent(id:number){if(pendingWorkspaceIntent.value?.id===id)pendingWorkspaceIntent.value=undefined;}
 function onInterruptedResumed(runId:number){startup.value.interruptedJobs=startup.value.interruptedJobs.filter(job=>job.runId!==runId);}
 function notify(type: "success"|"error"|"info", text: string) { const item={id:Date.now()+Math.random(),type,text}; toasts.value.push(item); setTimeout(()=>toasts.value=toasts.value.filter(t=>t.id!==item.id),5000); }
-function setTheme(preset:string){themePreset.value=preset;localStorage.setItem("oviraptor-theme",preset);showTheme.value=false}
+function setTheme(preset:string){themePreset.value=preset;localStorage.setItem("oviraptor-theme",preset)}
 function saveAccent(){localStorage.setItem("oviraptor-accent",accentColor.value)}
 let workspaceRefreshGeneration=0;
 async function refresh(_waitForSecondary:boolean|Event=false){
@@ -377,32 +415,47 @@ onUnmounted(()=>{unlisten?.();unlistenTray?.();if(workerSyncTimer)clearInterval(
 </script>
 
 <template>
-  <div class="app-shell" :class="[{ 'sidebar-collapsed': sidebarCollapsed },`theme-${themePreset}`]" :style="{'--blue':accentColor}">
-    <aside class="sidebar">
-      <div class="brand"><div class="brand-mark"><img v-if="brandIconUrl" :src="brandIconUrl" alt="Oviraptor" /></div><div class="brand-copy"><strong>{{t.appName}}</strong><span>Eating • Taking</span></div></div>
-      <button class="sidebar-toggle" @click="sidebarCollapsed=!sidebarCollapsed"><Menu :size="17" /></button>
-      <WorkspaceNavigation :module="activeModule" :view="activeView" :sentinel-menu="workspaceMetadata.navigationKey||pluginNavigation?.key||'dialog'" :hacker-one-enabled="hackerOneEnabled" :enabled-plugins="pluginEnabled" :running-jobs="workspaceMetadata.badges?.runningJobs" :blocked-count="workspaceMetadata.badges?.blockedCount" :fuse="workspaceMetadata.badges?.fuse" @module-change="switchModule" @navigate="openWorkspaceSection" />
+  <div class="app-shell agent-shell" :class="[{ 'sidebar-collapsed': sidebarCollapsed, 'chat-route': activeView==='chat' },`theme-${themePreset}`]" :style="{'--blue':accentColor}">
+    <button v-if="!sidebarCollapsed" class="sidebar-backdrop" tabindex="-1" :aria-label="tr('关闭侧边栏','Close sidebar')" @click="closeSidebar"></button>
+    <aside id="app-navigation" ref="sidebarElement" class="sidebar" :inert="isMobile&&sidebarCollapsed" :role="isMobile&&!sidebarCollapsed?'dialog':undefined" :aria-modal="isMobile&&!sidebarCollapsed?true:undefined" :aria-label="tr('导航和历史记录','Navigation and history')" @keydown="handleSidebarKeys">
+      <div class="sidebar-heading">
+        <div class="brand"><div class="brand-mark"><img v-if="brandIconUrl" :src="brandIconUrl" alt="" /></div><div class="brand-copy"><strong>{{t.appName}}</strong></div></div>
+        <button class="sidebar-toggle" :aria-expanded="!sidebarCollapsed" aria-controls="sidebar-expanded-content" :aria-label="sidebarCollapsed?tr('展开侧边栏','Expand sidebar'):tr('收起侧边栏','Collapse sidebar')" :title="sidebarCollapsed?tr('展开侧边栏','Expand sidebar'):tr('收起侧边栏','Collapse sidebar')" @click="toggleSidebar"><Menu :size="18" /></button>
+      </div>
+      <WorkspaceNavigation :collapsed="sidebarCollapsed" :module="activeModule" :view="activeView" :sentinel-menu="workspaceMetadata.navigationKey||pluginNavigation?.key||'dialog'" :hacker-one-enabled="hackerOneEnabled" :enabled-plugins="pluginEnabled" :running-jobs="workspaceMetadata.badges?.runningJobs" :blocked-count="workspaceMetadata.badges?.blockedCount" :fuse="workspaceMetadata.badges?.fuse" @module-change="switchModule" @navigate="openWorkspaceSection" />
+      <div id="sidebar-expanded-content" class="sidebar-expanded-content" v-show="!sidebarCollapsed">
+        <div id="conversation-history" v-show="activeView==='chat'" class="shell-conversation-history"></div>
+        <div class="sidebar-project">
+          <span class="sidebar-label">{{tr('当前工作空间','WORKSPACE')}}</span>
+          <button class="current-project" :title="tr('管理项目与范围','Manage projects and scope')" @click="navigate('projects');historySelected()"><span class="project-dot"></span><span>{{selectedProject?.name||t.allProjects}}</span><ChevronDown :size="14" /></button>
+          <button class="sidebar-create-workspace" @click="openProject()"><Plus :size="15" />{{tr('新建工作空间','New workspace')}}</button>
+        </div>
+      </div>
       <div class="sidebar-fixed-links">
-        <button v-if="moduleDefinition(activeModule).hasLogs" :class="{active:activeView==='logs'}" @click="navigate('logs')"><TerminalSquare :size="17" /><span>{{t.logs}}</span></button>
-        <button :class="{active:activeView==='settings'&&configSection==='plugins'}" @click="managePlugins"><Puzzle :size="17"/><span>{{tr('内置插件','Built-in plugins')}}</span></button>
-        <button :class="{active:activeView==='settings'}" @click="navigate('settings')"><Settings2 :size="17" /><span>{{t.settings}}</span></button>
+        <button v-if="moduleDefinition(activeModule).hasLogs" :title="t.logs" :aria-label="t.logs" :class="{active:activeView==='logs'}" @click="navigate('logs');historySelected()"><TerminalSquare :size="17" /><span>{{t.logs}}</span></button>
+        <button :title="t.settings" :aria-label="t.settings" :class="{active:activeView==='settings'}" @click="navigate('settings');historySelected()"><Settings2 :size="17" /><span>{{t.settings}}</span></button>
       </div>
-      <div class="sidebar-project">
-        <span class="sidebar-label">CURRENT WORKSPACE</span>
-        <button class="current-project" :title="tr('管理项目与范围','Manage projects and scope')" @click="navigate('projects')"><span class="project-dot"></span><span>{{selectedProject?.name||t.allProjects}}</span><ChevronDown :size="14" /></button>
-        <button class="sidebar-create-workspace" @click="openProject()"><Plus :size="15" />{{tr('新建工作空间','New workspace')}}</button>
-      </div>
-      <footer class="sidebar-footer"><button :title="tr('查看更新说明','View release notes')" @click="releaseNotesDialog=true">v{{packageInfo.version}}</button><ShieldCheck :size="16" /><span>Local-first · SQLite</span></footer>
+      <footer class="sidebar-footer"><button :title="tr('查看更新说明','View release notes')" @click="releaseNotesDialog=true">v{{packageInfo.version}}</button><span>Local-first</span></footer>
     </aside>
 
-    <main class="main-area">
+    <main class="main-area" :inert="isMobile&&!sidebarCollapsed">
       <header class="topbar">
-        <div class="page-heading"><span>{{selectedProject?.name||t.allProjects}}</span><h1>{{viewTitle}}</h1></div>
+        <div class="topbar-leading"><button ref="sidebarTrigger" class="top-icon main-sidebar-toggle" :aria-expanded="!sidebarCollapsed" aria-controls="app-navigation" :aria-label="sidebarCollapsed?tr('展开侧边栏','Expand sidebar'):tr('收起侧边栏','Collapse sidebar')" @click="toggleSidebar"><Menu :size="19"/></button><div class="page-heading"><h1>{{viewTitle}}</h1><span v-if="activeView!=='chat'">{{selectedProject?.name||t.allProjects}}</span></div></div>
         <div class="topbar-actions">
-          <div class="project-switcher-group"><select class="project-switcher" :value="selectedProjectId" @change="selectProject(Number(($event.target as HTMLSelectElement).value)||undefined)"><option value="">{{t.allProjects}}</option><option v-for="project in projects" :key="project.id" :value="project.id">{{project.name}}{{project.status==='archived'?tr('（已归档）',' (archived)'):''}}</option></select><button class="workspace-create-cta" :title="tr('新建公共工作空间','Create shared workspace')" @click="openProject()"><Plus :size="16" /><span>{{tr('新建工作空间','New workspace')}}</span></button></div>
-          <button class="top-icon" @click="setLocale(locale==='zh'?'en':'zh')"><Languages :size="18" /><span>{{locale==='zh'?'EN':'中'}}</span></button>
-          <div class="theme-picker"><button class="top-icon" :title="tr('主题与强调色','Theme and accent')" @click="showTheme=!showTheme"><Palette :size="18" /></button><div v-if="showTheme" class="theme-popover panel"><strong>{{tr('界面主题','Interface theme')}}</strong><button v-for="item in [['cloud',tr('云白','Cloud')],['codex',tr('Codex','Codex')]]" :key="item[0]" :class="{active:themePreset===item[0]}" @click="setTheme(item[0])">{{item[1]}}</button><label><span>{{tr('自定义强调色','Custom accent')}}</span><input v-model="accentColor" type="color" @change="saveAccent" /></label></div></div>
-          <button class="top-icon" :title="tr('查看任务与 Scope 变化','View task and scope changes')" @click="navigate(h1HasChanges?'hackerone':'tasks')"><Bell :size="18" /><i v-if="workspaceMetadata.badges?.runningJobs||h1HasChanges"></i></button>
+          <div class="project-switcher-group"><select class="project-switcher" :aria-label="tr('选择工作空间','Choose workspace')" :value="selectedProjectId" @change="selectProject(Number(($event.target as HTMLSelectElement).value)||undefined)"><option value="">{{t.allProjects}}</option><option v-for="project in projects" :key="project.id" :value="project.id">{{project.name}}{{project.status==='archived'?tr('（已归档）',' (archived)'):''}}</option></select></div>
+          <details ref="utilityMenu" class="shell-utility-menu" @keydown.esc.stop="closeUtilityMenu(true)">
+            <summary class="top-icon" :aria-label="tr('应用选项','App options')" :title="tr('应用选项','App options')"><SlidersHorizontal :size="18"/></summary>
+            <div class="shell-utility-panel">
+              <div class="utility-theme-heading"><Palette :size="16"/><strong>{{tr('外观','Appearance')}}</strong></div>
+              <div class="utility-theme-options"><button v-for="item in [['cloud',tr('浅色','Light')],['codex',tr('深色','Dark')]]" :key="item[0]" :class="{active:themePreset===item[0]}" :aria-pressed="themePreset===item[0]" @click="setTheme(item[0])">{{item[1]}}</button></div>
+              <label class="utility-accent"><span>{{tr('强调色','Accent color')}}</span><input v-model="accentColor" type="color" @change="saveAccent" /></label>
+              <button @click="setLocale(locale==='zh'?'en':'zh')"><Languages :size="16"/>{{locale==='zh'?'English':'中文'}}</button>
+              <button @click="openProject();closeUtilityMenu()"><Plus :size="16"/>{{tr('新建工作空间','New workspace')}}</button>
+              <button @click="managePlugins();closeUtilityMenu()"><Puzzle :size="16"/>{{tr('内置插件','Built-in plugins')}}</button>
+              <button @click="navigate('settings');closeUtilityMenu()"><Settings2 :size="16"/>{{t.settings}}</button>
+              <button v-if="activeModule!=='chat'" @click="navigate(h1HasChanges?'hackerone':'tasks');closeUtilityMenu()"><Bell :size="16"/>{{tr('任务与变化','Tasks & changes')}}</button>
+            </div>
+          </details>
         </div>
       </header>
 
@@ -421,7 +474,7 @@ onUnmounted(()=>{unlisten?.();unlistenTray?.();if(workerSyncTimer)clearInterval(
         </section>
         <div v-if="loading" class="app-loading"><div class="loader-ring"></div><span>{{tr('正在初始化本地资产数据库…','Initializing local asset database…')}}</span></div>
 
-        <ConversationWorkspace v-else-if="activeView==='chat'" :projects="projects" :project-id="selectedProjectId" :plugin-host="pluginHost" @select-project="selectProject" @create-project="openProject()" />
+        <ConversationWorkspace v-else-if="activeView==='chat'" :projects="projects" :project-id="selectedProjectId" :plugin-host="pluginHost" history-target="#conversation-history" @history-selected="historySelected" @select-project="selectProject" @create-project="openProject()" />
 
         <component v-else-if="activeWorkspace" :is="activeWorkspace" :key="activeModule" :projects="projects" :profiles="profiles" :project-id="selectedProjectId" :view="activeView" :refresh-token="pluginRefreshToken" :navigation="pluginNavigation" :intent="pendingWorkspaceIntent" :scanning-enabled="pluginEnabled.sentinel" :resume-workflow="resumeWorkflow" @navigate="navigate" @select-project="selectProject" @create-project="openProject()" @restore-project="toggleArchive" @projects-changed="refresh" @notify="notify" @metadata="workspaceMetadata=$event" @intent-consumed="consumeWorkspaceIntent" @interrupted-resumed="onInterruptedResumed" />
 

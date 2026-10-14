@@ -1,0 +1,9 @@
+{
+  "name": "oviraptor-chat-ui-browser-qa",
+  "private": true,
+  "version": "1.0.0",
+  "description": "Synthetic-only browser acceptance tooling",
+  "devDependencies": {
+    "playwright": "1.58.2"
+  }
+}

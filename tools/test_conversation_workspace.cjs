@@ -47,12 +47,14 @@ function compileComponent(relative, imports) {
   return {...exports.default,render:rendered.render};
 }
 async function renderWorkspace(props, stateOverrides={}) {
-  const empty={conversations:vue.ref([]),total:vue.ref(0),includeArchived:vue.ref(false),query:vue.ref(''),selectedId:vue.ref(''),snapshot:vue.ref(),draft:vue.ref(''),titleDraft:vue.ref(''),loadingList:vue.ref(false),loading:vue.ref(false),loadingEarlier:vue.ref(false),busy:vue.ref(false),cancelling:vue.ref(false),listError:vue.ref(''),readError:vue.ref(''),actionError:vue.ref(''),hasListSnapshot:vue.ref(true),pendingSend:vue.ref(),pendingDelete:vue.ref(),canDelete:vue.ref(true),writable:vue.ref(true),replyActive:vue.ref(false),messageBytes:vue.ref(0),messageTooLong:vue.ref(false),canSend:vue.ref(false),...stateOverrides};
+  const empty={conversations:vue.ref([]),total:vue.ref(0),includeArchived:vue.ref(false),query:vue.ref(''),selectedId:vue.ref(''),snapshot:vue.ref(),draft:vue.ref(''),titleDraft:vue.ref(''),loadingList:vue.ref(false),loading:vue.ref(false),loadingEarlier:vue.ref(false),busy:vue.ref(false),cancelling:vue.ref(false),listError:vue.ref(''),readError:vue.ref(''),actionError:vue.ref(''),hasListSnapshot:vue.ref(true),pendingSend:vue.ref(),pendingDelete:vue.ref(),canDelete:vue.ref(true),writable:vue.ref(true),replyActive:vue.ref(false),messageBytes:vue.ref(0),messageTooLong:vue.ref(false),canSend:vue.ref(false),queuedSteer:vue.ref(),steering:vue.ref(false),steerSupported:vue.ref(true),steerSaving:vue.ref(false),steerNotice:vue.ref(''),canSteer:vue.ref(false),canSendSteer:vue.ref(false),...stateOverrides};
+  empty.composerDraft=stateOverrides.composerDraft||empty.draft;empty.composerBytes=stateOverrides.composerBytes||empty.messageBytes;empty.composerTooLong=stateOverrides.composerTooLong||empty.messageTooLong;
   const component=compileComponent('src/features/conversations/ConversationWorkspace.vue',name=>{
     if(name==='vue')return vue;
     if(name==='@lucide/vue')return new Proxy({},{get:()=>()=>null});
     if(name==='../../i18n')return {useI18n:()=>({tr:(_,en)=>en})};
     if(name==='./api')return {conversationApi:{}};
+    if(name==='./ConversationMessage.vue')return {default:{props:['message'],setup:props=>()=>vue.h('article',{class:`conversation-message ${props.message.role}`},props.message.content)}};
     if(name==='./useConversationWorkspace')return {useConversationWorkspace:()=>empty};
     throw Error(`Unexpected UI dependency ${name}`);
   });
@@ -218,4 +220,86 @@ test('an earlier page anchored to an old tail cannot bridge a gap after concurre
   const m=mount(t,{readConversation:async input=>input.beforeSequence?earlier.promise:++reads===1?snapshot('a',1,{messages:range(101,200),hasMore:true}):snapshot('a',1,{messages:range(301,400),hasMore:true})});m.b.selectConversation('a');await flush();
   const pending=m.b.loadEarlier();await m.b.readSelected();earlier.resolve(snapshot('a',1,{messages:range(1,100),hasMore:false}));await pending;
   assert.deepEqual(m.b.snapshot.value.messages.map(item=>item.sequence),range(301,400).map(item=>item.sequence));assert.equal(m.b.snapshot.value.hasMore,true);assert.equal(m.b.loadingEarlier.value,false);
+});
+
+
+test('active reply puts one stop action in the composer and reports committed reply semantics',async()=>{
+  const html=await renderWorkspace({projects:[project()],projectId:1},{selectedId:vue.ref('a'),snapshot:vue.ref(snapshot('a',1,{latestReply:reply()})),replyActive:vue.ref(true)});
+  assert.equal((html.match(/aria-label="Stop reply"/g)||[]).length,1);
+  assert.match(html,/<form class="conversation-composer"[\s\S]*aria-label="Stop reply"/);
+  assert.doesNotMatch(html,/aria-label="Send"/);
+  assert.match(html,/The complete reply will appear when ready/);
+});
+
+test('chat chrome keeps management discoverable in a disclosure and retry explicit',async()=>{
+  const html=await renderWorkspace({projects:[project()],projectId:1},{selectedId:vue.ref('a'),snapshot:vue.ref(snapshot()),pendingSend:vue.ref({operationId:'same-request'})});
+  assert.match(html,/<details class="conversation-actions"/);
+  assert.match(html,/Conversation options/);
+  assert.match(html,/Retry reuses the same request/);
+  assert.match(html,/aria-label="Retry send"/);
+  assert.match(html,/role="log"/);
+  assert.match(html,/aria-relevant="additions"/);
+});
+
+test('shell owns a stable hidden history target and starts collapsed without conditioning workspace on collapse',()=>{
+  const app=source('src/App.vue');
+  assert.match(app,/sidebarCollapsed = ref\(true\)/);
+  assert.match(app,/id="conversation-history" v-show="activeView==='chat'"/);
+  const workspace=app.match(/<ConversationWorkspace[^>]+>/)[0];
+  assert.match(workspace,/history-target="#conversation-history"/);
+  assert.doesNotMatch(workspace,/sidebarCollapsed/);
+  assert.match(app,/aria-controls="app-navigation"/);
+  assert.match(app,/:inert="isMobile&&!sidebarCollapsed"/);
+  assert.match(source('src/features/conversations/ConversationWorkspace.vue'),/<Teleport :to="historyTarget\|\|'body'" :disabled="!historyTarget">/);
+});
+
+test('chat scroll uses a bounded flex viewport and preserves access at small sizes',()=>{
+  const workspace=source('src/features/conversations/ConversationWorkspace.vue');
+  const shell=source('src/shell/agent-shell.css');
+  assert.doesNotMatch(workspace,/max-height:calc\(100vh - 410px\)|max-height:55vh/);
+  assert.match(workspace,/conversation-reading-area\{[^}]*flex:1;min-height:0/);
+  assert.match(workspace,/oldTop \+ element.scrollHeight - oldHeight/);
+  assert.match(workspace,/event.keyCode !== 229/);
+  assert.match(shell,/height:100dvh/);
+  assert.match(shell,/prefers-reduced-motion:reduce/);
+});
+
+
+test('Steer leaves active reply composer editable and names next-reply queue semantics',async()=>{
+  const html=await renderWorkspace({projects:[project()],projectId:1},{selectedId:vue.ref('a'),snapshot:vue.ref(snapshot('a',1,{latestReply:reply()})),replyActive:vue.ref(true),busy:vue.ref(true),canSteer:vue.ref(true)});
+  assert.doesNotMatch(html.match(/<textarea[^>]+>/)[0],/disabled/);
+  assert.match(html,/Enter to queue next reply/);
+  assert.match(html,/does not change the reply in progress/);
+  assert.match(html,/>Steer · Next reply<\/button>/);
+  assert.match(html,/aria-label="Stop reply"/);
+});
+
+test('uncertain queued Steer offers explicit retry and never a discard action',async()=>{
+  const html=await renderWorkspace({projects:[project()],projectId:1},{selectedId:vue.ref('a'),snapshot:vue.ref(snapshot()),canSendSteer:vue.ref(true),queuedSteer:vue.ref({content:'Use the shorter approach',status:'uncertain',reason:'dispatch_unknown',input:{operationId:'same-request'}})});
+  assert.match(html,/Delivery is uncertain/);assert.match(html,/Retry steer/);
+  assert.doesNotMatch(html,/Move back to composer/);
+  assert.match(html,/Use the shorter approach/);
+});
+
+
+test('unsupported Steer explains safe queue requirement without hiding ordinary chat',async()=>{
+  const html=await renderWorkspace({projects:[project()],projectId:1},{selectedId:vue.ref('a'),snapshot:vue.ref(snapshot('a',1,{latestReply:reply()})),replyActive:vue.ref(true),steerSupported:vue.ref(false)});
+  assert.match(html,/Steer needs safe local queue support\. Ordinary chat still works/);
+  assert.match(html,/aria-describedby="composer-guidance steer-support-notice"/);
+  assert.match(html,/class="composer-steer" disabled/);
+  assert.match(html,/aria-label="Stop reply"/);
+});
+
+test('unsupported saved queue requires recovery and disables returning it to composer',async()=>{
+  const html=await renderWorkspace({projects:[project()],projectId:1},{selectedId:vue.ref('a'),snapshot:vue.ref(snapshot()),steerSupported:vue.ref(false),queuedSteer:vue.ref({content:'Review this direction',status:'paused',reason:'reopened'})});
+  assert.match(html,/safe local queue support to review this saved direction before continuing/);
+  assert.doesNotMatch(html,/Ordinary chat still works/);
+  assert.match(html,/<button[^>]*disabled[^>]*>Move back to composer<\/button>/);
+});
+
+test('atomic queue save exposes progress and disables management and return actions',async()=>{
+  const html=await renderWorkspace({projects:[project()],projectId:1},{selectedId:vue.ref('a'),snapshot:vue.ref(snapshot()),steerSaving:vue.ref(true),queuedSteer:vue.ref({content:'Queue this',status:'paused',reason:'reopened'})});
+  assert.match(html,/Saving direction safely/);
+  assert.match(html,/<button[^>]*disabled[^>]*>Move back to composer<\/button>/);
+  assert.match(html,/class="conversation-new-chat" disabled/);
 });
