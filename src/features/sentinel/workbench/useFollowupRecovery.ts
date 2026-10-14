@@ -1,6 +1,6 @@
 import { ref, watch, type Ref } from "vue";
 import { api } from "../../../api";
-import type { GapFollowupDraftInput, GapFollowupPreview, GapFollowupSubmission } from "../../../types";
+import type { GapFollowupDraftInput, GapFollowupPreview, GapFollowupSubmission } from "../types";
 
 type RecoveryForm = { urls: string; taskName: string };
 

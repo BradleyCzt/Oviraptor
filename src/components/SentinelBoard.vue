@@ -89,28 +89,8 @@ import {
   validRouteRecord,
   validSensitiveRecord,
 } from "../features/sentinel/presentation";
-import type {
-  GapFollowupPreview,
-  ClosureHandoffPreview,
-  AppSecScanResult,
-  AppSecVulnerability,
-  BrowserAuthSession,
-  InvestigationGraph,
-  InvestigationHypothesis,
-  InvestigationValidation,
-  Project,
-  SentinelCheckpoint,
-  SentinelFinding,
-  SentinelFuseEntry,
-  SentinelOverviewStats,
-  SentinelOpportunity,
-  SentinelScan,
-  SentinelScanAttempt,
-  SentinelTarget,
-  SentinelValidation,
-  SentinelValidationWorkItem,
-  AgentTargetExecution,
-} from "../types";
+import type { GapFollowupPreview, ClosureHandoffPreview, AppSecScanResult, AppSecVulnerability, BrowserAuthSession, InvestigationGraph, InvestigationHypothesis, InvestigationValidation, SentinelCheckpoint, SentinelFinding, SentinelFuseEntry, SentinelOverviewStats, SentinelOpportunity, SentinelScan, SentinelScanAttempt, SentinelTarget, SentinelValidation, SentinelValidationWorkItem, AgentTargetExecution } from "../features/sentinel/types";
+import type { Project } from "../features/workspaces/types";
 
 const props = withDefaults(
   defineProps<{

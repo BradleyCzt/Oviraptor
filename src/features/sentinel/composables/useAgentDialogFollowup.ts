@@ -1,6 +1,6 @@
 import { ref, watch, type Ref } from "vue";
 import { sentinelApi } from "../api";
-import type { AgentTimelineItem, GapFollowupPreview, NativeScanStatus } from "../../../types";
+import type { AgentTimelineItem, GapFollowupPreview, NativeScanStatus } from "../types";
 
 type TaskView = { scanId: string; isCurrent: () => boolean };
 

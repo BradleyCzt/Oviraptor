@@ -3,7 +3,9 @@ import { onMounted, ref } from "vue";
 import { ExternalLink, RefreshCw, Search, Star, UploadCloud, X } from "@lucide/vue";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { api } from "../api";
-import type { ConfigProfile, HackerOneDetail, HackerOneEvent, HackerOneProgram, Project } from "../types";
+import type { ConfigProfile } from "../features/configuration/types";
+import type { HackerOneDetail, HackerOneEvent, HackerOneProgram } from "../features/hackerone/types";
+import type { Project } from "../features/workspaces/types";
 import { useI18n } from "../i18n";
 
 const props=defineProps<{projects:Project[];profiles:ConfigProfile[]}>();

@@ -4,7 +4,7 @@ import { AppWindow, ImageUp, RotateCcw } from "@lucide/vue";
 import ModalShell from "./ModalShell.vue";
 import { api } from "../api";
 import { useI18n } from "../i18n";
-import type { AppSettings } from "../types";
+import type { AppSettings } from "../shell/types";
 import ToolApprovalPanel from "../features/environment/ToolApprovalPanel.vue";
 
 const props = defineProps<{ settings: AppSettings }>();

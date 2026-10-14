@@ -1,4 +1,4 @@
-import type { ViewKey } from "../types";
+import type { ViewKey } from "./types";
 import { BUILTIN_PLUGINS, getBuiltinPlugin } from "../plugins/catalog";
 import type { PluginEnabledState } from "../plugins/types";
 

@@ -1,9 +1,6 @@
 import type { Ref } from "vue";
 import { api } from "../../../api";
-import type {
-  GapFollowupDraftInput, GapFollowupPreview, GapFollowupSubmission,
-  SentinelScan, WorkbenchScanInput,
-} from "../../../types";
+import type { GapFollowupDraftInput, GapFollowupPreview, GapFollowupSubmission, SentinelScan, WorkbenchScanInput } from "../types";
 
 export type WorkbenchMode = "web" | "code" | "greybox" | "cicd" | "skills";
 type CreationForm = Omit<WorkbenchScanInput, "scanType" | "urls" | "authSessionScopeId"> & {

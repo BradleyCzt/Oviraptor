@@ -21,7 +21,8 @@ import { computed, onBeforeUnmount, onMounted, ref, shallowRef, watch } from "vu
 import { Check, ChevronLeft, ChevronRight, Link2, RefreshCw, Save, ShieldCheck, ShieldQuestion, X } from "@lucide/vue";
 import { api } from "../api";
 import type { AssetOwnershipDecisionExpectation } from "../features/assets/api";
-import type { Asset, AssetOwnershipProfile, AssetOwnershipSummary, AssetQuery, Project } from "../types";
+import type { Asset, AssetOwnershipProfile, AssetOwnershipSummary, AssetQuery } from "../features/assets/types";
+import type { Project } from "../features/workspaces/types";
 import "../asset-ownership.css";
 import "../asset-ownership-fixes.css";
 import OwnershipProjectSetup from "./OwnershipProjectSetup.vue";

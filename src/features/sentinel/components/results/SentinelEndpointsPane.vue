@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { Network } from "@lucide/vue";
-import type { SentinelFinding } from "../../../../types";
+import type { SentinelFinding } from "../../types";
 import { endpointUrl, json, kindLabel, statusTone } from "../../presentation";
 
 defineProps<{

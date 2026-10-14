@@ -3,7 +3,7 @@ import { computed } from "vue";
 import { Activity, BrainCircuit, Braces, Database, FileClock, Globe2, LayoutDashboard, MessageSquare, Plus, ShieldAlert, ShieldCheck } from "@lucide/vue";
 import { useI18n } from "../i18n";
 import type { PluginEnabledState } from "../plugins/types";
-import type { ViewKey } from "../types";
+import type { ViewKey } from "./types";
 import { visibleModules, workspaceNavigation, type ModuleKey, type ShellIcon, type WorkspaceNavItem } from "./moduleCatalog";
 const props = defineProps<{ collapsed?: boolean; module: ModuleKey; view: ViewKey; sentinelMenu: string; hackerOneEnabled: boolean; enabledPlugins?: PluginEnabledState; runningJobs?: number; blockedCount?: number; fuse?: number }>();
 const emit = defineEmits<{ moduleChange: [module: ModuleKey]; navigate: [item: WorkspaceNavItem]; openSkills: [] }>();

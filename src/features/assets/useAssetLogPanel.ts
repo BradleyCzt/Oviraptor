@@ -1,6 +1,6 @@
 import { onBeforeUnmount, ref, watch } from "vue";
 import { api } from "../../api";
-import type { LogEntry } from "../../types";
+import type { LogEntry } from "./types";
 import { useCommittedRefresh } from "../../composables/useCommittedRefresh";
 
 export function useAssetLogPanel(project: () => number | undefined, active: () => boolean) {

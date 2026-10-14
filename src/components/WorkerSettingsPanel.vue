@@ -15,13 +15,9 @@ import {
   Trash2,
 } from "@lucide/vue";
 import { api } from "../api";
-import type {
-  EnvironmentReport,
-  LocalWorkerSettings,
-  RemoteWorkerNode,
-  SentinelScan,
-  WorkerHealth,
-} from "../types";
+import type { EnvironmentReport } from "../features/environment/types";
+import type { LocalWorkerSettings, RemoteWorkerNode, WorkerHealth } from "../features/runtime/types";
+import type { SentinelScan } from "../features/sentinel/types";
 
 const emit = defineEmits<{
   message: [type: "success" | "error" | "info", text: string];

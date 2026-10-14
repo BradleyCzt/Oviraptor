@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ClipboardCopy, FileJson } from "@lucide/vue";
-import type { SentinelFinding } from "../../../../types";
+import type { SentinelFinding } from "../../types";
 import { formatNumber, json, scriptTone } from "../../presentation";
 
 defineProps<{

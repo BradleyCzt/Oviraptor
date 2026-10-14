@@ -1,4 +1,4 @@
-import type { AgentKnowledgeEntry, AgentLearningCandidate } from "../../../types";
+import type { AgentKnowledgeEntry, AgentLearningCandidate } from "../../skills/catalogTypes";
 
 // Formatting belongs to the trace/knowledge surface, not the global UI layer.
 export function tracePresentation(tr: (zh: string, en: string) => string) {

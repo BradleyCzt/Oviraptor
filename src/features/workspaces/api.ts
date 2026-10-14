@@ -1,12 +1,8 @@
 import { invoke } from "@tauri-apps/api/core";
-import type {
-  AppSettings,
-  ConfigProfile,
-  DashboardStats,
-  Project,
-  ProjectImpact,
-  StartupStatus,
-} from "../../types";
+import type { AppSettings } from "../../shell/types";
+import type { ConfigProfile } from "../configuration/types";
+import type { DashboardStats } from "../assets/types";
+import type { Project, ProjectImpact, StartupStatus } from "./types";
 
 export const workspaceApi = {
   dashboardStats: (projectId?: number) =>

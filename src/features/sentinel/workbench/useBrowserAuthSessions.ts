@@ -1,7 +1,7 @@
 import { onBeforeUnmount, onMounted, ref } from "vue";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { api } from "../../../api";
-import type { BrowserAuthSession } from "../../../types";
+import type { BrowserAuthSession } from "../types";
 
 type AuthForm = {
   projectId: number;

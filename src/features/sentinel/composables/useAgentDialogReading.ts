@@ -3,7 +3,7 @@ import { sentinelApi } from "../api";
 import { useAgentDialogHistory } from "./useAgentDialogHistory";
 import { timelineIdentity as timelineKey } from "../timeline/projectionContract";
 import { humanAssessmentRows } from "../timeline/humanAssessmentContract";
-import type { AgentDialogView, AgentTimelineItem, NativeScanStatus } from "../../../types";
+import type { AgentDialogView, AgentTimelineItem, NativeScanStatus } from "../types";
 
 type TaskView = { scanId: string; isCurrent: () => boolean };
 const threadKey = (item: AgentTimelineItem) => item.threadKey || item.correlationId

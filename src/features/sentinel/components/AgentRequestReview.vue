@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { onUnmounted, ref, shallowRef, watch } from "vue";
 import { sentinelApi } from "../api";
-import type { AgentRequestDisposition, AgentRequestReviewInput, AgentRequestReviewItem, AgentRequestReviewPage } from "../../../types";
+import type { AgentRequestDisposition, AgentRequestReviewInput, AgentRequestReviewItem, AgentRequestReviewPage } from "../types";
 
 const props = defineProps<{ scanId: string; attemptNumber: number; targetUrl: string }>();
 const page = shallowRef<AgentRequestReviewPage | null>(null);

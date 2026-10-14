@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onUnmounted, ref, watch } from "vue";
 import { api } from "../../../api";
-import type { NativeScanStatus } from "../../../types";
+import type { NativeScanStatus } from "../types";
 import { useI18n } from "../../../i18n";
 import { createNativeRunStatusLabels } from "./nativeRunStatusLabels";
 import { useCommittedRefresh } from "../../../composables/useCommittedRefresh";

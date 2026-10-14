@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { KeyRound } from "@lucide/vue";
-import type { WorkbenchScanInput } from "../../../types";
+import type { WorkbenchScanInput } from "../types";
 
 defineProps<{
   form: Pick<WorkbenchScanInput, "environment" | "authProfileName" | "authType" | "authHeaderName" | "authValue">;

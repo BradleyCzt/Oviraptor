@@ -1,5 +1,5 @@
 import { computed, reactive, ref, type Ref } from "vue";
-import type { SentinelScan } from "../../../types";
+import type { SentinelScan } from "../types";
 import { scanTokenTotal, uncachedInput } from "../presentation";
 
 export type TokenUsageScope = "all" | "cloud" | "local";

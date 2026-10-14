@@ -18,7 +18,11 @@ const SkillsWorkspace = defineAsyncComponent(() => import("./features/skills/Ski
 import packageInfo from "../package.json";
 import { useI18n } from "./i18n";
 import { useInstallLogPanel } from "./features/environment/useInstallLogPanel";
-import type { AppSettings, ConfigProfile, EnvironmentPreparationStatus, EnvironmentReport, InterruptedJob, JobProgressEvent, Project, ProjectImpact, StartupStatus, ToastMessage, ViewKey } from "./types";
+import type { AppSettings, ToastMessage, ViewKey } from "./shell/types";
+import type { ConfigProfile } from "./features/configuration/types";
+import type { EnvironmentPreparationStatus, EnvironmentReport } from "./features/environment/types";
+import type { InterruptedJob, JobProgressEvent } from "./features/assets/types";
+import type { Project, ProjectImpact, StartupStatus } from "./features/workspaces/types";
 import AppSettingsDialog from "./components/AppSettingsDialog.vue";
 import ConfigDialog from "./components/ConfigDialog.vue";
 import ProjectDialog from "./components/ProjectDialog.vue";

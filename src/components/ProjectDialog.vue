@@ -3,7 +3,7 @@ import { reactive, ref } from "vue";
 import { FolderPlus } from "@lucide/vue";
 import ModalShell from "./ModalShell.vue";
 import { api } from "../api";
-import type { Project } from "../types";
+import type { Project } from "../features/workspaces/types";
 import { useI18n } from "../i18n";
 
 const props = defineProps<{ project?: Project }>();

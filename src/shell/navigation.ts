@@ -1,4 +1,4 @@
-import type { ViewKey } from "../types";
+import type { ViewKey } from "./types";
 import { isModuleKey, moduleDefinition, moduleForView, type ModuleKey } from "./moduleCatalog";
 
 export interface ShellRoute { module: ModuleKey; view: ViewKey }

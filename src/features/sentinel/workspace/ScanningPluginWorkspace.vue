@@ -6,7 +6,7 @@ import { humanizeScanCheckpoint } from "../presentation";
 import NativeProcessLogView from "../components/NativeProcessLogView.vue";
 import { useRunnerLogPanel } from "../execution/useRunnerLogPanel";
 import { useI18n } from "../../../i18n";
-import type { SentinelScan, SentinelScanAttempt } from "../../../types";
+import type { SentinelScan, SentinelScanAttempt } from "../types";
 import type { PluginWorkspaceProps, PluginWorkspaceEmits } from "../../../shell/workspaceContract";
 const SentinelBoard = defineAsyncComponent(() => import("../../../components/SentinelBoard.vue"));
 const props = defineProps<PluginWorkspaceProps>();

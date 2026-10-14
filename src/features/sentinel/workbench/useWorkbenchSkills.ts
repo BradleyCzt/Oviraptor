@@ -1,7 +1,7 @@
 import { computed, onMounted, reactive, ref } from "vue";
 import { open } from "@tauri-apps/plugin-dialog";
 import { api } from "../../../api";
-import type { AgentSkill } from "../../../types";
+import type { AgentSkill } from "../../skills/catalogTypes";
 
 type Notice = (type: "success" | "error" | "info", text: string) => void;
 

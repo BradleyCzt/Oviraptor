@@ -1,4 +1,7 @@
-import type { AssetPage, AssetQuery, Project, SentinelScan, ViewKey } from "../types";
+import type { AssetPage, AssetQuery } from "../features/assets/types";
+import type { Project } from "../features/workspaces/types";
+import type { SentinelScan } from "../features/sentinel/types";
+import type { ViewKey } from "../shell/types";
 
 /** Trusted, bundled application extensions. Chat is part of the host. */
 export type BuiltinPluginId = "asset" | "sentinel" | "hackerone";

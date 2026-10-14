@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, ref, watch } from "vue";
 import { CheckCircle2, Copy, RefreshCw, Send, ShieldAlert, UserRound, X } from "@lucide/vue";
-import type { InvestigationApiModel, InvestigationHypothesis, InvestigationValidation, SentinelOpportunity } from "../../../types";
+import type { InvestigationApiModel, InvestigationHypothesis, InvestigationValidation, SentinelOpportunity } from "../types";
 import { sentinelApi } from "../api";
 import { buildRawHttpRequest, buildRawHttpResponse, parseRawHttpRequest, prettyHttpBody } from "../httpMessage";
 

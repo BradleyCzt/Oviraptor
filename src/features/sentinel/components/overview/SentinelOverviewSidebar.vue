@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed } from "vue";
 import { useI18n } from "../../../../i18n";
-import type { InvestigationOverview } from "../../../../types";
+import type { InvestigationOverview } from "../../types";
 import type { InvestigationSummaryState } from "../../overview/useInvestigationSummary";
 import { formatCompactNumber, formatNumber } from "../../presentation";
 

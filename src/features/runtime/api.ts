@@ -1,12 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
-import type {
-  EnvironmentReport,
-  EnvironmentPreparationStatus,
-  LocalWorkerSettings,
-  RemoteWorkerNode,
-  SentinelScan,
-  WorkerHealth,
-} from "../../types";
+import type { EnvironmentReport, EnvironmentPreparationStatus } from "../environment/types";
+import type { LocalWorkerSettings, RemoteWorkerNode, WorkerHealth } from "./types";
+import type { SentinelScan } from "../sentinel/types";
 
 export type InstallLogRow = { id: number; stage: string; stream: string; message: string; time: string };
 export type InstallLogPage = { rows: InstallLogRow[]; more: boolean; olderRows: number; earliestId: number };

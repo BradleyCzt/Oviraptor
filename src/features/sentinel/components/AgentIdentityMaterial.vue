@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { onUnmounted, ref, watch } from "vue";
 import { api } from "../../../api";
-import type { ScanIdentityMaterial } from "../../../types";
+import type { ScanIdentityMaterial } from "../types";
 import { useI18n } from "../../../i18n";
 
 const props = defineProps<{ projectId?: number; scanId: string }>();

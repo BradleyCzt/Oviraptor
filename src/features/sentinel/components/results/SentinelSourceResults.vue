@@ -15,13 +15,7 @@ import {
   RefreshCw,
 } from "@lucide/vue";
 import { useI18n } from "../../../../i18n";
-import type {
-  AppSecScanResult,
-  SentinelFinding,
-  SentinelScan,
-  SentinelScanAttempt,
-  SentinelValidation,
-} from "../../../../types";
+import type { AppSecScanResult, SentinelFinding, SentinelScan, SentinelScanAttempt, SentinelValidation } from "../../types";
 import {
   attemptEndReason,
   attemptStageLabel,

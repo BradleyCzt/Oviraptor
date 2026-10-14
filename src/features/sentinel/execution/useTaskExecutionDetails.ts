@@ -1,5 +1,6 @@
 import { onBeforeUnmount, ref, watch } from "vue";
-import type { AgentAttemptMailboxPage, AgentAttemptToolPage, AgentKnowledgeEntry, AgentLearningCandidate, HistoricalImportPreview, NativeScanStatus, SentinelRunnerLogView, SentinelScan, SentinelScanAttempt } from "../../../types";
+import type { AgentAttemptMailboxPage, AgentAttemptToolPage, HistoricalImportPreview, NativeScanStatus, SentinelRunnerLogView, SentinelScan, SentinelScanAttempt } from "../types";
+import type { AgentKnowledgeEntry, AgentLearningCandidate } from "../../skills/catalogTypes";
 import { sentinelApi } from "../api";
 import { validateHistoricalPreviews } from "../results/historicalPreviewContract";
 import { useLiveRunnerLog } from "./useLiveRunnerLog";

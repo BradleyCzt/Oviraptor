@@ -2,12 +2,8 @@
 import { computed, onBeforeUnmount, reactive, ref, watch } from "vue";
 import { Check, FolderOpen, Plus, Save, Zap } from "@lucide/vue";
 import { useI18n } from "../i18n";
-import type {
-  GapFollowupPreview,
-  ClosureHandoffPreview,
-  Project,
-  SentinelScan,
-} from "../types";
+import type { GapFollowupPreview, ClosureHandoffPreview, SentinelScan } from "../features/sentinel/types";
+import type { Project } from "../features/workspaces/types";
 import { useClosureHandoff } from "../features/sentinel/workbench/useClosureHandoff";
 import { useBrowserAuthSessions } from "../features/sentinel/workbench/useBrowserAuthSessions";
 import { useWorkbenchSkills } from "../features/sentinel/workbench/useWorkbenchSkills";

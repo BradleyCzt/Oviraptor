@@ -1,6 +1,6 @@
 import { onBeforeUnmount, ref, watch } from "vue";
 import { api } from "../../../api";
-import type { SentinelRunnerLogView } from "../../../types";
+import type { SentinelRunnerLogView } from "../types";
 import { useLiveRunnerLog, type LogScope } from "./useLiveRunnerLog";
 
 // The global log panel uses the same committed-snapshot delivery as task detail.

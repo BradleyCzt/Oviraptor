@@ -1,6 +1,6 @@
 import { ref, type Ref } from "vue";
 import { api } from "../../../api";
-import type { ClosureHandoffInput, ClosureHandoffPreview, ClosureHandoffReceipt, SentinelScan } from "../../../types";
+import type { ClosureHandoffInput, ClosureHandoffPreview, ClosureHandoffReceipt, SentinelScan } from "../types";
 
 type HandoffForm = {
   projectId: number;

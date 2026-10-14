@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { Activity, Bug, CheckCircle2, ClipboardCheck, Save, X } from "@lucide/vue";
 import { useI18n } from "../../../../i18n";
-import type { SentinelFinding, SentinelValidation } from "../../../../types";
+import type { SentinelFinding, SentinelValidation } from "../../types";
 import {
   createSentinelLabels,
   endpointUrl,

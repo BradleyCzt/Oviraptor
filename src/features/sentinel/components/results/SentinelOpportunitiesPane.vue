@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { Fingerprint, ShieldAlert } from "@lucide/vue";
-import type { SentinelOpportunity } from "../../../../types";
+import type { SentinelOpportunity } from "../../types";
 
 defineProps<{
   selectedUrlOpportunities: SentinelOpportunity[];

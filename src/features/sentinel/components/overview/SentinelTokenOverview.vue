@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { useI18n } from "../../../../i18n";
-import type { SentinelScan } from "../../../../types";
+import type { SentinelScan } from "../../types";
 import type { TokenUsageScope, TokenUsageSummary } from "../../overview/useTokenUsage";
 import { createSentinelLabels, formatCompactNumber, formatNumber, scanTitle, scanTokenTotal } from "../../presentation";
 

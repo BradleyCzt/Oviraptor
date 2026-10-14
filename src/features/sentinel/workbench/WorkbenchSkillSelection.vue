@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { useI18n } from "../../../i18n";
-import type { AgentSkill, WorkbenchScanInput } from "../../../types";
+import type { AgentSkill } from "../../skills/catalogTypes";
+import type { WorkbenchScanInput } from "../types";
 import type { WorkbenchMode } from "./useWorkbenchTaskCreation";
 
 defineProps<{

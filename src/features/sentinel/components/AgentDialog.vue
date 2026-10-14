@@ -10,8 +10,8 @@ import { useAgentDialogFollowup } from "../composables/useAgentDialogFollowup";
 import { agentDialogLabels, dialogContextPresentation, humanReviewPresentation } from "./agentDialogLabels";
 import { timelineIdentity } from "../timeline/projectionContract";
 import { humanAssessmentRows } from "../timeline/humanAssessmentContract";
-import type { AgentTimelineItem, RootHumanAssessmentObligation } from "../../../types";
-import type { GapFollowupPreview, SentinelScan } from "../../../types";
+import type { AgentTimelineItem, RootHumanAssessmentObligation } from "../types";
+import type { GapFollowupPreview, SentinelScan } from "../types";
 import { useI18n } from "../../../i18n";
 
 const props = defineProps<{ projectId?: number; initialScanId?: string }>();

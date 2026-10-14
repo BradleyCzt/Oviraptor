@@ -2,7 +2,9 @@
 import { computed, onMounted, ref, watch } from "vue";
 import { FileText, Play, Plus, Trash2, UploadCloud } from "@lucide/vue";
 import { api } from "../api";
-import type { ConfigProfile, Project, Target } from "../types";
+import type { ConfigProfile } from "../features/configuration/types";
+import type { Project } from "../features/workspaces/types";
+import type { Target } from "../features/assets/types";
 import { useI18n } from "../i18n";
 
 const props = defineProps<{ projects: Project[]; profiles: ConfigProfile[]; selectedProjectId?: number }>();

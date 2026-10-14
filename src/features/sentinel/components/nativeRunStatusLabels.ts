@@ -1,4 +1,4 @@
-import type { NativeScanStatus } from "../../../types";
+import type { NativeScanStatus } from "../types";
 
 type Translate = (zh: string, en: string) => string;
 type Branch = NativeScanStatus["branches"][number];

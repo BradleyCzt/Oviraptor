@@ -1,21 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
-import type {
-  AssetEvent,
-  AssetPage,
-  AssetQuery,
-  AssetSelection,
-  AssetOwnershipProfile,
-  AssetOwnershipSummary,
-  AssetOwnershipAssessmentResult,
-  ExposureFinding,
-  ExposureSummary,
-  ExposureRun,
-  ExposureSourceResult,
-  ContentRuleApplyResult,
-  JobRun,
-  LogEntry,
-  Target,
-} from "../../types";
+import type { AssetEvent, AssetPage, AssetQuery, AssetSelection, AssetOwnershipProfile, AssetOwnershipSummary, AssetOwnershipAssessmentResult, ExposureFinding, ExposureSummary, ExposureRun, ExposureSourceResult, ContentRuleApplyResult, JobRun, LogEntry, Target } from "./types";
 
 /** O0：页面加载该行时看到的归属结论（与 list_assets 返回的 ownership* 字段一一对应）。 */
 export interface AssetOwnershipDecisionExpectation {

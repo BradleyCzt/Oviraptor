@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { useI18n } from "../../../i18n";
-import type { ClosureHandoffPreview, GapFollowupPreview } from "../../../types";
+import type { ClosureHandoffPreview, GapFollowupPreview } from "../types";
 import InlineConfirm from "../../../components/InlineConfirm.vue";
 import type { useClosureHandoff } from "./useClosureHandoff";
 import type { useFollowupRecovery } from "./useFollowupRecovery";

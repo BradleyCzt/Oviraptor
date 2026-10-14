@@ -6,7 +6,7 @@ import { assetApi } from "../api";
 import { workspaceApi } from "../../workspaces/api";
 import { useAssetLogPanel } from "../useAssetLogPanel";
 import { useI18n } from "../../../i18n";
-import type { AssetEvent, DashboardStats, InterruptedJob, JobProgressEvent, JobRun } from "../../../types";
+import type { AssetEvent, DashboardStats, InterruptedJob, JobProgressEvent, JobRun } from "../types";
 import type { PluginWorkspaceProps, PluginWorkspaceEmits, ResumeWorkflowResult } from "../../../shell/workspaceContract";
 const AssetWorkspace = defineAsyncComponent(() => import("../../../components/AssetWorkspace.vue"));
 const AssetOwnershipGate = defineAsyncComponent(() => import("../../../components/AssetOwnershipGate.vue"));

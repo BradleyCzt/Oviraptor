@@ -5,7 +5,7 @@ import { timelineIdentity, validTimelineRows } from "../timeline/projectionContr
 import { validStatusCursor, validStatusTimeline } from "../timeline/statusContract";
 import { validHumanAssessmentSnapshot } from "../timeline/humanAssessmentContract";
 import { validCollaborationEvent, type CollaborationEventNotification } from "../timeline/eventContract";
-import type { NativeScanStatus, SentinelScan } from "../../../types";
+import type { NativeScanStatus, SentinelScan } from "../types";
 
 type TaskView = { scanId: string; isCurrent: () => boolean };
 const timelineCacheLimit = 300;

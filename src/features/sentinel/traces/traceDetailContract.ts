@@ -1,4 +1,4 @@
-import type { AgentTraceDetail } from "../../../types";
+import type { AgentTraceDetail } from "../types";
 
 type RecordValue = Record<string, unknown>;
 const record = (value: unknown): value is RecordValue =>

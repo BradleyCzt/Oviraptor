@@ -2,7 +2,7 @@
 import { computed } from "vue";
 import { createSentinelLabels } from "../presentation";
 import { useI18n } from "../../../i18n";
-import type { SentinelScan } from "../../../types";
+import type { SentinelScan } from "../types";
 import type { WorkbenchMode } from "./useWorkbenchTaskCreation";
 
 const props = defineProps<{

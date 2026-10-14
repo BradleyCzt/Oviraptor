@@ -1,6 +1,6 @@
 import { onUnmounted, readonly, ref, type Ref } from "vue";
 import { api } from "../../../api";
-import type { AgentTraceDetail, AgentTraceSummary } from "../../../types";
+import type { AgentTraceDetail, AgentTraceSummary } from "../types";
 import { isTraceDetailForTask } from "./traceDetailContract";
 
 // Manual reads and polling share one selection revision, including A -> B -> A.

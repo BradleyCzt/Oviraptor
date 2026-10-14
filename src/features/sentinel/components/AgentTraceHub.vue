@@ -15,12 +15,8 @@ import {
 import { open } from "@tauri-apps/plugin-dialog";
 import { api } from "../../../api";
 import { useI18n } from "../../../i18n";
-import type {
-  AgentLearningCandidate,
-  AgentKnowledgeEntry,
-  AgentSkill,
-  AgentTraceSummary,
-} from "../../../types";
+import type { AgentLearningCandidate, AgentKnowledgeEntry, AgentSkill } from "../../skills/catalogTypes";
+import type { AgentTraceSummary } from "../types";
 import InlineConfirm from "../../../components/InlineConfirm.vue";
 import { tracePresentation } from "../traces/presentation";
 import { useLiveTrace } from "../traces/useLiveTrace";

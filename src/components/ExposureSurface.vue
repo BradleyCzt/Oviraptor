@@ -3,7 +3,7 @@ import { computed, ref, watch } from "vue";
 import { Download, ExternalLink, Plus, Search, ShieldAlert, Square, X } from "@lucide/vue";
 import { api } from "../api";
 import { exposureApi } from "../features/assets/exposure/api";
-import type { Project } from "../types";
+import type { Project } from "../features/workspaces/types";
 import type { ExposureFindingDraft } from "../features/assets/exposure/contracts";
 import { buildGradeRequest, intelGradeLine, sourceStatusView } from "../features/assets/exposure/contracts";
 import { useExposureSurface } from "../features/assets/exposure/useExposureSurface";

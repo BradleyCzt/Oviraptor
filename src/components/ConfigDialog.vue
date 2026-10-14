@@ -12,7 +12,8 @@ import {
 } from "@lucide/vue";
 import ModalShell from "./ModalShell.vue";
 import { api } from "../api";
-import type { ConfigProfile, SecurityRulePack } from "../types";
+import type { ConfigProfile } from "../features/configuration/types";
+import type { SecurityRulePack } from "../features/skills/catalogTypes";
 import { useI18n } from "../i18n";
 
 const props = defineProps<{ profile?: ConfigProfile }>();

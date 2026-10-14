@@ -3,7 +3,7 @@ import { defineAsyncComponent, onUnmounted, ref, watch } from "vue";
 import { RefreshCw, ShieldCheck } from "@lucide/vue";
 import { hackerOneApi } from "../api";
 import { useI18n } from "../../../i18n";
-import type { HackerOneEvent } from "../../../types";
+import type { HackerOneEvent } from "../types";
 import type { PluginWorkspaceProps, PluginWorkspaceEmits } from "../../../shell/workspaceContract";
 const HackerOneBoard=defineAsyncComponent(()=>import("../../../components/HackerOneBoard.vue"));
 const props=defineProps<PluginWorkspaceProps>();

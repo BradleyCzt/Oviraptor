@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import type { NativeBudgetDimension } from "../../../types";
+import type { NativeBudgetDimension } from "../types";
 import { useI18n } from "../../../i18n";
 defineProps<{ dimensions: NativeBudgetDimension[] }>();
 const { tr } = useI18n();

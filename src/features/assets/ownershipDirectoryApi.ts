@@ -1,5 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
-import type { AssetOwnershipProfile } from "../../types";
+import type { AssetOwnershipProfile } from "./types";
 import type { AssetOwnershipDecisionExpectation } from "./api";
 
 // O1 项目预填闭环：共享组织目录（只记录组织事实，不携带授权）+ 只读候选建议 + 项目绑定（CAS）。

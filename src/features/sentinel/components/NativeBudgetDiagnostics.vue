@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { onUnmounted, ref } from "vue";
 import { api } from "../../../api";
-import type { NativeBudgetDiagnostics } from "../../../types";
+import type { NativeBudgetDiagnostics } from "../types";
 import { useI18n } from "../../../i18n";
 import { useCommittedRefresh } from "../../../composables/useCommittedRefresh";
 import { validCollaborationEvent } from "../timeline/eventContract";

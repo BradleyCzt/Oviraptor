@@ -1,4 +1,7 @@
-import type { ConfigProfile, InterruptedJob, Project, ViewKey } from "../types";
+import type { ConfigProfile } from "../features/configuration/types";
+import type { InterruptedJob } from "../features/assets/types";
+import type { Project } from "../features/workspaces/types";
+import type { ViewKey } from "./types";
 import type { WorkspaceNavItem } from "./moduleCatalog";
 
 /** The host owns shared project/profile context; built-ins own their business state. */
