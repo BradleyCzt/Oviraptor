@@ -7,7 +7,7 @@ const output=path.resolve(process.env.OVIRAPTOR_QA_OUTPUT||path.join(repo,'qa-ar
 const bundle=path.join(output,'bundle'),artifacts=path.join(output,'screenshots');
 fs.mkdirSync(artifacts,{recursive:true});
 const markdown=`# A clear plan\n\nSynthetic assistant reply with **bold**, *emphasis*, \`inline code\`, and a [safe link](https://example.com/reference).\n\n- Review the history\n- Keep one composer\n\n> Synthetic quoted context\n\n| Area | Outcome |\n| --- | --- |\n| Chat | Local-only fixture |\n| Rendering | Real Vue components |\n\n\`\`\`typescript\nconst greeting: string = "hello";\nconsole.log(greeting);\n\`\`\`\n\n<script>window.__unsafe = true</script>\n[unsafe](javascript:alert(1))`;
-const results=[],contexts=[];
+const results=[],contexts=[],captureLayouts=[];
 let browser,server,origin;
 async function pageFixture(options={},viewport={width:1440,height:1000}){
  const context=await browser.newContext({viewport,deviceScaleFactor:1});contexts.push(context);
@@ -21,7 +21,35 @@ async function pageFixture(options={},viewport={width:1440,height:1000}){
 async function toggleFor(page){const desktop=page.locator('.sidebar-toggle').first();return await desktop.isVisible()?desktop:page.locator('.main-sidebar-toggle').first();}
 async function chooseChat(page){const toggle=await toggleFor(page);if(await toggle.getAttribute('aria-expanded')==='false')await toggle.click();await page.locator('.conversation-row').first().click();await page.locator('.conversation-composer textarea').waitFor();}
 async function collapse(page){const toggle=await toggleFor(page);if(await toggle.getAttribute('aria-expanded')==='true')await toggle.click();}
-async function shot(page,name){await page.screenshot({path:path.join(artifacts,name+'.png'),fullPage:true});}
+async function settleCapture(page){
+ // Vue updates, loaded fonts and finite CSS transitions must settle before
+ // judging geometry. Do not wait for the intentional infinite reply pulse.
+ await page.evaluate(async()=>{
+   await document.fonts.ready;
+   await new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)));
+   const finite=document.getAnimations().filter(animation=>Number.isFinite(animation.effect?.getComputedTiming().endTime));
+   await Promise.all(finite.map(animation=>animation.finished.catch(()=>{})));
+   await new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)));
+ });
+}
+async function captureGeometry(page){return page.evaluate(()=>{
+ const rect=selector=>document.querySelector(selector)?.getBoundingClientRect().toJSON();
+ const sidebar=document.querySelector('.sidebar');
+ return {viewport:{width:innerWidth,height:innerHeight},mobile:matchMedia('(max-width:760px)').matches,collapsed:document.querySelector('.app-shell')?.classList.contains('sidebar-collapsed'),sidebar:rect('.sidebar'),sidebarVisibility:sidebar?getComputedStyle(sidebar).visibility:null,main:rect('.main-area'),composer:rect('.conversation-composer')};
+});}
+async function shot(page,name){
+ await settleCapture(page);
+ const geometry=await captureGeometry(page);
+ // Capture even if a subsequent geometry assertion fails, for diagnosis.
+ await page.screenshot({path:path.join(artifacts,name+'.png'),fullPage:true,animations:'disabled'});
+ captureLayouts.push({name,...geometry});
+ fs.writeFileSync(path.join(output,'screenshot-layouts.json'),JSON.stringify(captureLayouts,null,2));
+ const expectedMainLeft=geometry.mobile?0:geometry.collapsed?64:276;
+ assert(Math.abs(geometry.main.x-expectedMainLeft)<1,`${name}: settled main x ${geometry.main.x}, expected ${expectedMainLeft}`);
+ if(!geometry.mobile)assert(Math.abs(geometry.sidebar.width-expectedMainLeft)<1,`${name}: settled sidebar width ${geometry.sidebar.width}, expected ${expectedMainLeft}`);
+ else if(!geometry.collapsed)assert(Math.abs(geometry.sidebar.x)<1,`${name}: mobile drawer still translated ${geometry.sidebar.x}`);
+}
+
 async function fit(page){return page.evaluate(()=>({viewport:innerWidth,document:document.documentElement.scrollWidth,composer:document.querySelector('.conversation-composer')?.getBoundingClientRect().toJSON(),transcript:document.querySelector('.conversation-transcript')?.getBoundingClientRect().toJSON(),bodyHeight:document.body.scrollHeight,viewportHeight:innerHeight}));}
 async function scenario(name,fn){let m;try{m=await fn();assert.deepEqual(m.errors,[],'Browser runtime errors');assert.deepEqual(m.blocked,[],'Non-local network attempted');const state=await m.page.evaluate(()=>({unknown:window.__QA__.unknown,network:window.__QA__.network,calls:window.__QA__.calls,mutations:window.__QA__.mutations}));assert.deepEqual(state.unknown,[],'Unimplemented IPC');assert.deepEqual(state.network,[],'External fetch attempted');results.push({name,status:'passed',layout:await fit(m.page),state});console.log('PASS',name);}catch(error){const page=m?.page||contexts.at(-1)?.pages()[0];if(page)await shot(page,name+'-failure').catch(()=>{});results.push({name,status:'failed',error:String(error)});console.error('FAIL',name,error);}}
 (async()=>{
@@ -40,4 +68,4 @@ async function scenario(name,fn){let m;try{m=await fn();assert.deepEqual(m.error
  await scenario('08-stop-pauses-steer',async()=>{const m=await pageFixture({available:true,replyStatus:'running'}),p=m.page;await chooseChat(p);await collapse(p);await p.locator('.conversation-composer textarea').fill('Synthetic direction retained after stop');await p.locator('.composer-steer').click();await p.getByRole('button',{name:'Stop reply',exact:true}).click();await p.getByText('Steer paused',{exact:true}).waitFor();assert.equal(await p.getByRole('button',{name:'Send steer',exact:true}).isDisabled(),true);assert.equal(await p.evaluate(()=>window.__QA__.mutations.filter(c=>c.cmd==='send_conversation_message').length),0);await shot(p,'15-steer-paused-after-stop');await p.evaluate(()=>{window.__QA__.snapshots['chat-1'].latestReply.status='cancelled'});await p.locator('.conversation-actions summary').click();await p.getByRole('button',{name:'Refresh history',exact:true}).click();await p.waitForFunction(()=>!document.querySelector('.composer-submit.is-stop'));assert.equal(await p.evaluate(()=>window.__QA__.mutations.filter(c=>c.cmd==='send_conversation_message').length),0);await p.getByRole('button',{name:'Send steer',exact:true}).click();await p.waitForFunction(()=>window.__QA__.mutations.some(c=>c.cmd==='send_conversation_message'));return m;});
  await scenario('09-two-window-steer-lock',async()=>{const m=await pageFixture({available:true,replyStatus:'running',preserveStorage:true}),p=m.page;assert.equal(await p.evaluate(()=>typeof navigator.locks?.request),'function','Native Web Locks are available on localhost');const second=await m.context.newPage();second.on('pageerror',e=>m.errors.push(String(e)));await second.goto(origin);await second.locator('.conversation-workspace').waitFor();await chooseChat(p);await chooseChat(second);await collapse(p);await collapse(second);await p.locator('.conversation-composer textarea').fill('Synthetic direction from window A');await second.locator('.conversation-composer textarea').fill('Synthetic direction from window B');await Promise.all([p.locator('.composer-steer').click(),second.locator('.composer-steer').click()]);await p.waitForFunction(()=>!!localStorage.getItem('oviraptor.conversation.steer.v1:1:chat-1'));const accepted=await p.locator('.conversation-steer-queue').count()+await second.locator('.conversation-steer-queue').count();assert.equal(accepted,1,'Exactly one competing direction is accepted');const saved=await p.evaluate(()=>JSON.parse(localStorage.getItem('oviraptor.conversation.steer.v1:1:chat-1')));const loser=(await p.locator('.conversation-steer-queue').count())?second:p;const losingText=await loser.locator('.conversation-composer textarea').inputValue();assert(losingText&&losingText!==saved.content,'Unaccepted direction remains editable');assert.equal(await p.evaluate(()=>window.__QA__.mutations.length),0);assert.equal(await second.evaluate(()=>window.__QA__.mutations.length),0);await shot(p,'16-steer-concurrent-window-a');await shot(second,'17-steer-concurrent-window-b');await second.close();return m;});
 })().catch(error=>{console.error(error);results.push({name:'setup',status:'failed',error:String(error)});}).finally(async()=>{for(const context of contexts)await context.close().catch(()=>{});await browser?.close();if(server)await new Promise(resolve=>server.close(resolve));const manifestPath=path.join(output,'source-before.sha256');if(fs.existsSync(manifestPath)){const original=fs.readFileSync(manifestPath,'utf8');const after=original.trim().split('\n').map(line=>{const file=line.slice(66);return crypto.createHash('sha256').update(fs.readFileSync(path.join(repo,file))).digest('hex')+'  '+file}).join('\n')+'\n';fs.writeFileSync(path.join(output,'source-after-browser.sha256'),after);if(original!==after)results.push({name:'stable-source-inputs',status:'failed',error:'Application source changed during browser QA'});}
-fs.writeFileSync(path.join(output,'browser-results.json'),JSON.stringify({commit:process.env.GITHUB_SHA||null,browserLaunched:!!browser,screenshots:fs.readdirSync(artifacts).filter(name=>name.endsWith('.png')),mode:'Actual Chromium pixels; actual Vue app; synthetic-only IPC; no provider/scans/credentials',results},null,2));if(results.some(r=>r.status==='failed'))process.exitCode=1;console.log(`${results.filter(r=>r.status==='passed').length}/${results.length} scenarios passed`);});
+fs.writeFileSync(path.join(output,'browser-results.json'),JSON.stringify({commit:process.env.GITHUB_SHA||null,browserLaunched:!!browser,captureLayouts,screenshots:fs.readdirSync(artifacts).filter(name=>name.endsWith('.png')),mode:'Actual Chromium pixels; actual Vue app; synthetic-only IPC; no provider/scans/credentials',results},null,2));if(results.some(r=>r.status==='failed'))process.exitCode=1;console.log(`${results.filter(r=>r.status==='passed').length}/${results.length} scenarios passed`);});
