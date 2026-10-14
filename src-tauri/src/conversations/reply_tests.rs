@@ -41,7 +41,7 @@ fn unavailable_model_saves_human_text_without_simulated_assistant() {
     assert_eq!(f.read(&item).messages[0].role, "user");
 }
 #[test]
-fn real_reply_contract_has_no_tools_and_idempotency_never_resends() {
+fn real_reply_contract_has_only_scoped_tools_and_idempotency_never_resends() {
     let f = Fixture::new();
     let item = f.create();
     let op = Uuid::new_v4().to_string();
@@ -55,10 +55,12 @@ fn real_reply_contract_has_no_tools_and_idempotency_never_resends() {
         make(),
         |_| Ok(profile()),
         |_, request, _| {
-            assert!(request.tools.is_empty());
+            assert!(request.tools.iter().any(|tool| tool.name=="project_get_context"));
+            assert!(!request.tools.iter().any(|tool| tool.name=="assets_search"));
+            assert!(request.strict_tool_calls);
             assert!(request.reject_redirects);
             assert_eq!(request.max_response_bytes, Some(1_048_576));
-            assert_eq!(request.request_timeout, Some(Duration::from_secs(90)));
+            assert!(request.request_timeout.is_some_and(|timeout| timeout<=Duration::from_secs(90) && timeout>Duration::from_secs(85)));
             Ok(ModelResponse {
                 text: "Real mock-provider answer".into(),
                 ..Default::default()
@@ -346,8 +348,8 @@ fn real_loopback_response_is_persisted_as_assistant_after_user() {
     assert_eq!(view.messages[1].role, "assistant");
     assert_eq!(view.messages[1].content, "Loopback provider answer");
     let sent = String::from_utf8(server.join().unwrap()).unwrap();
-    assert!(!sent.contains("\"tools\""));
-    assert!(!sent.contains("\"tool_choice\""));
+    assert!(sent.contains("\"tools\""));
+    assert!(sent.contains("\"tool_choice\""));
     assert!(sent.contains("A real request"));
 }
 

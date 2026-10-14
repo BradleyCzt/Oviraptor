@@ -7,6 +7,7 @@ const SHARED_VIEWS: readonly ViewKey[] = ["projects", "settings", "logs"];
 export const DEFAULT_ROUTE: ShellRoute = { module: "chat", view: "chat" };
 
 export function normalizeRoute(module: unknown, view: unknown): ShellRoute {
+  if (view === "skills") return { module: "chat", view: "skills" };
   const owner = moduleForView(view);
   if (owner) return { module: owner, view: view as ViewKey };
   const selected = isModuleKey(module) ? module : "chat";
@@ -33,7 +34,10 @@ export function persistRoute(storage: NavigationStorage, route: ShellRoute) {
 }
 export function restoreRoute(storage: NavigationStorage): ShellRoute {
   migrateLegacyNavigation(storage);
-  const route = normalizeRoute(storage.getItem("oviraptor-module"), storage.getItem("oviraptor-view"));
+  // Startup is always Chat. Saved project/theme preferences still migrate, but
+  // a previous business view never implicitly loads a plugin on the next launch.
+  // Explicit in-session navigation continues to use normalizeRoute.
+  const route = { ...DEFAULT_ROUTE };
   persistRoute(storage, route);
   return route;
 }

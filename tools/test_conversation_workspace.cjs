@@ -47,13 +47,15 @@ function compileComponent(relative, imports) {
   return {...exports.default,render:rendered.render};
 }
 async function renderWorkspace(props, stateOverrides={}) {
-  const empty={conversations:vue.ref([]),total:vue.ref(0),includeArchived:vue.ref(false),query:vue.ref(''),selectedId:vue.ref(''),snapshot:vue.ref(),draft:vue.ref(''),titleDraft:vue.ref(''),loadingList:vue.ref(false),loading:vue.ref(false),loadingEarlier:vue.ref(false),busy:vue.ref(false),cancelling:vue.ref(false),listError:vue.ref(''),readError:vue.ref(''),actionError:vue.ref(''),hasListSnapshot:vue.ref(true),pendingSend:vue.ref(),pendingDelete:vue.ref(),canDelete:vue.ref(true),writable:vue.ref(true),replyActive:vue.ref(false),messageBytes:vue.ref(0),messageTooLong:vue.ref(false),canSend:vue.ref(false),queuedSteer:vue.ref(),steering:vue.ref(false),steerSupported:vue.ref(true),steerSaving:vue.ref(false),steerNotice:vue.ref(''),canSteer:vue.ref(false),canSendSteer:vue.ref(false),...stateOverrides};
+  const empty={viewActive:vue.ref(true),conversations:vue.ref([]),total:vue.ref(0),includeArchived:vue.ref(false),query:vue.ref(''),selectedId:vue.ref(''),snapshot:vue.ref(),draft:vue.ref(''),titleDraft:vue.ref(''),loadingList:vue.ref(false),loading:vue.ref(false),loadingEarlier:vue.ref(false),busy:vue.ref(false),cancelling:vue.ref(false),listError:vue.ref(''),readError:vue.ref(''),actionError:vue.ref(''),hasListSnapshot:vue.ref(true),pendingSend:vue.ref(),pendingDelete:vue.ref(),canDelete:vue.ref(true),writable:vue.ref(true),replyActive:vue.ref(false),messageBytes:vue.ref(0),messageTooLong:vue.ref(false),canSend:vue.ref(false),queuedSteer:vue.ref(),steering:vue.ref(false),steerSupported:vue.ref(true),steerSaving:vue.ref(false),steerNotice:vue.ref(''),canSteer:vue.ref(false),canSendSteer:vue.ref(false),...stateOverrides};
   empty.composerDraft=stateOverrides.composerDraft||empty.draft;empty.composerBytes=stateOverrides.composerBytes||empty.messageBytes;empty.composerTooLong=stateOverrides.composerTooLong||empty.messageTooLong;
   const component=compileComponent('src/features/conversations/ConversationWorkspace.vue',name=>{
     if(name==='vue')return vue;
     if(name==='@lucide/vue')return new Proxy({},{get:()=>()=>null});
     if(name==='../../i18n')return {useI18n:()=>({tr:(_,en)=>en})};
     if(name==='./api')return {conversationApi:{}};
+    if(name==='./ConversationAccessPanel.vue')return {default:{props:['projectId','conversationId'],render:()=>null}};
+    if(name==='./ConversationToolActivity.vue')return {default:{props:['activity'],setup:props=>()=>props.activity.length?vue.h('div',{class:'conversation-tool-activity'},props.activity.map(item=>item.summary).join(' ')):null}};
     if(name==='./ConversationMessage.vue')return {default:{props:['message'],setup:props=>()=>vue.h('article',{class:`conversation-message ${props.message.role}`},props.message.content)}};
     if(name==='./useConversationWorkspace')return {useConversationWorkspace:()=>empty};
     throw Error(`Unexpected UI dependency ${name}`);
@@ -244,7 +246,7 @@ test('chat chrome keeps management discoverable in a disclosure and retry explic
 test('shell owns a stable hidden history target and starts collapsed without conditioning workspace on collapse',()=>{
   const app=source('src/App.vue');
   assert.match(app,/sidebarCollapsed = ref\(true\)/);
-  assert.match(app,/id="conversation-history" v-show="activeView==='chat'"/);
+  assert.match(app,/id="conversation-history" class="shell-conversation-history"/);
   const workspace=app.match(/<ConversationWorkspace[^>]+>/)[0];
   assert.match(workspace,/history-target="#conversation-history"/);
   assert.doesNotMatch(workspace,/sidebarCollapsed/);
@@ -302,4 +304,25 @@ test('atomic queue save exposes progress and disables management and return acti
   assert.match(html,/Saving direction safely/);
   assert.match(html,/<button[^>]*disabled[^>]*>Move back to composer<\/button>/);
   assert.match(html,/class="conversation-new-chat" disabled/);
+});
+
+
+test('polling AI title preserves a dirty manual rename draft',async t=>{
+ let title='Original';const m=mount(t,{readConversation:async()=>snapshot('a',1,{conversation:conversation('a',1,{title,titleSource:'ai'})})});m.b.selectConversation('a');await flush();
+ m.b.titleDraft.value='My edited title';title='Generated title';await m.b.readSelected();assert.equal(m.b.titleDraft.value,'My edited title');assert.equal(m.b.snapshot.value.conversation.title,'Generated title');
+ m.b.titleDraft.value='';title='Another title';await m.b.readSelected();assert.equal(m.b.titleDraft.value,'');
+});
+test('polling title updates a pristine rename field',async t=>{
+ let title='Original';const m=mount(t,{readConversation:async()=>snapshot('a',1,{conversation:conversation('a',1,{title})})});m.b.selectConversation('a');await flush();title='AI title';await m.b.readSelected();assert.equal(m.b.titleDraft.value,'AI title');
+});
+const toolActivity=(id,userMessageId)=>({id,replyId:'reply-'+id,userMessageId,round:1,callId:'call-'+id,name:'assets_search',status:'completed',summary:'Saved tool '+id,createdAt:'2026-10-14T01:00:00Z'});
+test('tool activity follows loaded message pages without leaking from replaced history',async t=>{
+ let tail=2;const m=mount(t,{readConversation:async input=>input.beforeSequence?snapshot('a',1,{messages:[message(1)],toolActivity:[toolActivity('old','a-1')],hasMore:false}):snapshot('a',1,{messages:[message(tail)],toolActivity:[toolActivity('latest','a-'+tail)],hasMore:true})});m.b.selectConversation('a');await flush();await m.b.loadEarlier();await m.b.readSelected();assert.deepEqual(new Set(m.b.snapshot.value.toolActivity.map(item=>item.id)),new Set(['old','latest']));
+ tail=200;await m.b.readSelected();assert.deepEqual(m.b.snapshot.value.toolActivity.map(item=>item.userMessageId),['a-200']);
+});
+test('tool activity can attach to an assistant page when its parent user message is older',async t=>{
+ const answer={...message(2,'a','assistant'),replyToMessageId:'a-1'};const m=mount(t,{readConversation:async()=>snapshot('a',1,{messages:[answer],toolActivity:[toolActivity('saved','a-1')]})});m.b.selectConversation('a');await flush();assert.equal(m.b.snapshot.value.toolActivity.length,1);
+});
+test('invalid tool activity is a read error, never simulated execution',async t=>{
+ const m=mount(t,{readConversation:async()=>snapshot('a',1,{toolActivity:[{...toolActivity('bad','a-1'),status:'executing_shell'}]})});m.b.selectConversation('a');await flush();assert.match(m.b.readError.value,/Invalid saved tool activity/);assert.equal(m.b.snapshot.value,undefined);
 });

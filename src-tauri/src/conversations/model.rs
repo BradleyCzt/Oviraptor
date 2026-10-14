@@ -6,6 +6,7 @@ pub struct Conversation {
     pub id: String,
     pub project_id: i64,
     pub title: String,
+    pub title_source: String,
     pub archived: bool,
     pub revision: i64,
     pub message_count: i64,
@@ -68,6 +69,21 @@ pub struct ConversationView {
     pub links: Vec<Link>,
     pub reply_availability: ReplyAvailability,
     pub latest_reply: Option<Reply>,
+    pub tool_activity: Vec<ToolActivity>,
+}
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ToolActivity {
+    pub id: String,
+    pub reply_id: String,
+    pub user_message_id: String,
+    pub round: i64,
+    pub call_id: String,
+    pub name: String,
+    pub status: String,
+    pub summary: String,
+    pub arguments: serde_json::Value,
+    pub created_at: String,
 }
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]

@@ -1074,3 +1074,55 @@ fn small_deepseek_structured_calls_freeze_non_thinking_without_expanding_reserva
         assert_eq!(provider.hits(), 1);
     }
 }
+
+#[test]
+fn strict_conversation_tool_wire_rejects_malformed_without_retry() {
+    let valid = serde_json::json!({"id":"c0","type":"function","function":{"name":"project_context","arguments":"{}"}});
+    let mut invalid_calls = vec![serde_json::json!({}), serde_json::json!("bad"), serde_json::json!([null])];
+    for (field, value) in [("id", serde_json::json!("")), ("id", serde_json::json!("c 0")), ("type", serde_json::json!("custom"))] {
+        let mut call = valid.clone(); call[field] = value; invalid_calls.push(serde_json::json!([call]));
+    }
+    let mut missing_id = valid.clone(); missing_id.as_object_mut().unwrap().remove("id");
+    invalid_calls.push(serde_json::json!([missing_id]));
+    for args in [serde_json::json!(null), serde_json::json!({}), serde_json::json!(""), serde_json::json!("{"), serde_json::json!("[]")] {
+        let mut call = valid.clone(); call["function"]["arguments"] = args; invalid_calls.push(serde_json::json!([call]));
+    }
+    invalid_calls.push(serde_json::json!([valid.clone(), valid.clone()]));
+    invalid_calls.push(serde_json::json!([])); // tool_calls finish reason requires a call
+    for calls in invalid_calls {
+        let response = serde_json::json!({"choices":[{"message":{"content":"must not accept partial text","tool_calls":calls},"finish_reason":"tool_calls"}]}).to_string();
+        let provider = MockProvider::spawn(move |_, _| raw(response.clone()));
+        let mut request = ModelRequest::default(); request.strict_tool_calls = true;
+        let failure = gateway(&provider.base_url, true).complete_once_observed(&request, &CancelToken::new()).unwrap_err();
+        assert!(matches!(failure, super::openai_compatible::OneShotFailure::TransportOutcomeUnknown(ModelError::Protocol(ref code)) if code == "model_tool_calls_invalid"));
+        assert_eq!(provider.hits(), 1);
+    }
+}
+
+#[test]
+fn strict_conversation_tool_wire_accepts_plain_text_and_valid_calls_preserves_legacy() {
+    for response in [
+        serde_json::json!({"choices":[{"message":{"content":"plain text"},"finish_reason":"stop"}]}).to_string(),
+        serde_json::json!({"choices":[{"message":{"content":"plain text","tool_calls":null},"finish_reason":"stop"}]}).to_string(),
+        completion("", &[("project_context", serde_json::json!({}))], 30),
+    ] {
+        let provider = MockProvider::spawn(move |_, _| raw(response.clone()));
+        let mut request = ModelRequest::default(); request.strict_tool_calls = true;
+        gateway(&provider.base_url, true).complete_once_observed(&request, &CancelToken::new()).unwrap();
+        assert_eq!(provider.hits(), 1);
+    }
+    let response = serde_json::json!({"choices":[{"message":{"content":"","tool_calls":[{"function":{"name":"legacy"}}]},"finish_reason":"tool_calls"}]}).to_string();
+    let provider = MockProvider::spawn(move |_, _| raw(response.clone()));
+    let result = gateway(&provider.base_url, true).complete_once_observed(&ModelRequest::default(), &CancelToken::new()).unwrap();
+    assert_eq!(result.tool_calls[0].id, "call_0");
+    assert_eq!(result.tool_calls[0].arguments, serde_json::json!({}));
+}
+
+#[test]
+fn strict_conversation_tool_wire_rejects_legacy_function_call_without_exposing_payload() {
+    let provider = MockProvider::spawn(|_, _| raw(serde_json::json!({"choices":[{"message":{"content":"partial","function_call":{"name":"legacy","arguments":"secret-bearing-malformed-input"}},"finish_reason":"function_call"}]}).to_string()));
+    let mut request = ModelRequest::default(); request.strict_tool_calls = true;
+    let failure = gateway(&provider.base_url, true).complete_once_observed(&request, &CancelToken::new()).unwrap_err();
+    assert!(matches!(failure, super::openai_compatible::OneShotFailure::TransportOutcomeUnknown(ModelError::Protocol(ref code)) if code == "model_tool_calls_invalid"));
+    assert_eq!(provider.hits(), 1);
+}

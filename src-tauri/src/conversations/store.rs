@@ -12,7 +12,8 @@ pub(super) const MAX_INTEGER: i64 = 9_007_199_254_740_991;
 pub(super) const ACTIVE: &str = "('queued','running','cancel_requested')";
 pub(super) const CONVERSATION_COLUMNS: &str = "c.id,c.project_id,c.title,c.archived,c.revision,
     (SELECT COUNT(*) FROM conversation_messages m WHERE m.conversation_id=c.id),
-    COALESCE((SELECT substr(content,1,160) FROM conversation_messages m WHERE m.conversation_id=c.id ORDER BY sequence DESC LIMIT 1),''),c.created_at,c.updated_at";
+    COALESCE((SELECT substr(content,1,160) FROM conversation_messages m WHERE m.conversation_id=c.id ORDER BY sequence DESC LIMIT 1),''),c.created_at,c.updated_at,
+    COALESCE((SELECT source FROM conversation_title_state s WHERE s.conversation_id=c.id),'legacy')";
 pub(super) const MESSAGE_COLUMNS: &str =
     "id,conversation_id,sequence,role,content,reply_to_message_id,created_at";
 pub(super) const REPLY_COLUMNS: &str = "id,user_message_id,status,code,message,assistant_message_id,outcome_unknown,created_at,updated_at";
@@ -69,6 +70,7 @@ fn conversation_row(r: &Row<'_>) -> rusqlite::Result<Conversation> {
         id: r.get(0)?,
         project_id: r.get(1)?,
         title: r.get(2)?,
+        title_source: r.get(9)?,
         archived: r.get(3)?,
         revision: r.get(4)?,
         message_count: r.get(5)?,
@@ -322,6 +324,7 @@ pub(super) fn create(path: &Path, input: CreateInput) -> Result<Conversation, St
     let id = Uuid::new_v4().to_string();
     let now = stamp();
     if tx.execute("INSERT INTO conversations(id,project_id,create_operation_id,create_title,title,created_at,updated_at) VALUES(?1,?2,?3,?4,?4,?5,?5)",params![id,input.project_id,input.operation_id,title,now]).map_err(err)?!=1{return Err("conversation_write_not_persisted".into());}
+    super::title::initialize(&tx, &id, input.title.is_some())?;
     let saved = conversation(&tx, input.project_id, &id)?;
     if saved.title != title || saved.revision != 1 {
         return Err("conversation_write_not_persisted".into());
@@ -388,6 +391,7 @@ pub(super) fn read(path: &Path, input: ReadInput) -> Result<ConversationView, St
     messages.reverse();
     let links = links(&tx, &item)?;
     let latest_reply = latest_reply(&tx, &item.id)?;
+    let tool_activity = super::tools::activity(&tx, &item, &messages)?;
     let reply_availability = super::reply::availability(&tx, &item);
     tx.commit().map_err(err)?;
     Ok(ConversationView {
@@ -397,6 +401,7 @@ pub(super) fn read(path: &Path, input: ReadInput) -> Result<ConversationView, St
         links,
         reply_availability,
         latest_reply,
+        tool_activity,
     })
 }
 pub(super) fn update(path: &Path, input: UpdateInput) -> Result<Conversation, String> {
@@ -429,6 +434,9 @@ pub(super) fn update(path: &Path, input: UpdateInput) -> Result<Conversation, St
         != 1
     {
         return Err("conversation_write_not_persisted".into());
+    }
+    if input.title.is_some() {
+        super::title::mark_manual(&tx, &item.id)?;
     }
     bump(&tx, &item.id, input.expected_revision)?;
     let saved = conversation(&tx, input.project_id, &item.id)?;

@@ -30,6 +30,7 @@ module.exports = function fixture({ project = null, long = false, empty = false,
       case 'dashboard_stats':return {projectCount:projects.length,assetCount:0,aliveCount:0,pendingCount:0,newCount:0,changedCount:0,blockedCount:0,runningJobs:0};
       case 'get_app_icon_data_url':return '';
       case 'list_worker_nodes':case 'list_hackerone_events':case 'list_runs':case 'list_asset_events':case 'list_hackerone_programs':case 'list_targets':case 'list_sentinel_scans':return [];
+      case 'get_agent_dialog_selection':return {projectId:args.projectId??null,revision:0,selectedScanId:null,selectedScan:null,selectionUnavailable:false};
       case 'list_conversations':{const items=conversations.filter(c=>c.projectId===args.input.projectId && (!args.input.query || c.title.includes(args.input.query))); return {items,total:items.length}}
       case 'read_conversation':return snapshots[args.input.conversationId];
       case 'sentinel_overview_stats':return Object.fromEntries('taskCount urlCount fingerprintCount apiCount endpointCount vulnerabilityCount highRiskCount reviewerConfirmedCount reviewerHighRiskCount sourceReviewerConfirmedCount sourceReviewAuditedTaskCount sourceReviewUnavailableTaskCount sourceReviewUnverifiedTaskCount otherVulnerabilityCount validatedCount pendingVulnerabilityCount vulnerableUrlCount activeFuseCount opportunityCount readyOpportunityCount'.split(' ').map(x=>[x,0]));

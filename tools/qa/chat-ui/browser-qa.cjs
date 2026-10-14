@@ -58,6 +58,45 @@ async function scenario(name,fn){let m;try{m=await fn();assert.deepEqual(m.error
  await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));origin=`http://127.0.0.1:${server.address().port}`;
  browser=await chromium.launch({headless:true});
  await scenario('00-default-home',async()=>{const m=await pageFixture({project:null});await shot(m.page,'00-default-home');assert.equal(await m.page.locator('.sidebar-toggle').first().getAttribute('aria-expanded'),'false');return m;});
+ for(const saved of [{module:'asset',view:'assets',label:'Assets',selector:'.asset-plugin-workspace',read:'dashboard_stats'},{module:'sentinel',view:'sentinel',label:'Scanning',selector:'.scanning-plugin-workspace',read:'list_sentinel_scans'}]){
+  await scenario(`startup-${saved.module}-restores-chat-only`,async()=>{
+   const m=await pageFixture({route:{module:saved.module,view:saved.view},hackerOne:true}),p=m.page;
+   await p.waitForFunction(()=>window.__QA__.calls.some(call=>call.cmd==='list_conversations'));
+   assert.equal(await p.locator('.asset-plugin-workspace,.scanning-plugin-workspace,.hackerone-plugin-workspace').count(),0,'No plugin workspace is mounted at startup');
+   assert.deepEqual(await p.evaluate(()=>({module:localStorage.getItem('oviraptor-module'),view:localStorage.getItem('oviraptor-view'),project:localStorage.getItem('oviraptor-project')})),{module:'chat',view:'chat',project:'1'});
+   const pluginReads=await p.evaluate(()=>window.__QA__.calls.filter(call=>/^(dashboard_stats|list_assets|list_runs|list_asset_events|list_sentinel_|sentinel_overview_stats|investigation_overview|list_hackerone_|get_agent_dialog_selection|list_worker_nodes|sync_worker_node)/.test(call.cmd)));
+   assert.deepEqual(pluginReads,[],'No plugin data initialization before explicit selection, including configured HackerOne');
+   await chooseChat(p);await settleCapture(p);
+   const historyText=await p.locator('#conversation-history').textContent();
+   const order=await p.evaluate(()=>{
+    const rect=selector=>document.querySelector(selector).getBoundingClientRect().toJSON();
+    const chat=document.querySelector('.workspace-chat-module'),history=document.querySelector('#conversation-history'),plugins=document.querySelector('.workspace-plugin-group'),workspace=document.querySelector('.sidebar-project');
+    const before=(a,b)=>Boolean(a.compareDocumentPosition(b)&Node.DOCUMENT_POSITION_FOLLOWING);
+    return {dom:before(chat,history)&&before(history,plugins)&&before(plugins,workspace),chat:rect('.workspace-chat-module'),history:rect('#conversation-history'),plugins:rect('.workspace-plugin-group'),workspace:rect('.sidebar-project'),entries:[...plugins.querySelectorAll('.workspace-plugin-modules button')].map(button=>button.getAttribute('aria-label'))};
+   });
+   assert(order.dom,'DOM order is Chat, history, bottom plugins, workspace');
+   assert(order.chat.bottom<=order.history.top+1&&order.history.bottom<=order.plugins.top+1&&order.plugins.bottom<=order.workspace.top+1,JSON.stringify(order));
+   assert.deepEqual(order.entries,['Assets','Scanning','HackerOne','Skills']);
+   assert(order.workspace.top-order.plugins.bottom<=14,'Plugin group sits directly above workspace');
+   await shot(p,`18-startup-${saved.module}-chat-history-order`);
+   await p.locator('.workspace-plugin-modules').getByRole('button',{name:saved.label,exact:true}).click();
+   await p.locator(saved.selector).waitFor();
+   await p.waitForFunction(read=>window.__QA__.calls.some(call=>call.cmd===read),saved.read);
+   assert.equal(await p.evaluate(()=>localStorage.getItem('oviraptor-module')),saved.module,'Only the clicked plugin becomes active');
+   assert.equal(await p.locator('.asset-plugin-workspace,.scanning-plugin-workspace,.hackerone-plugin-workspace').count(),1);
+   await shot(p,`19-explicit-${saved.module}-workspace`);
+   assert.equal(await p.locator('.conversation-workspace').isVisible(),false,'Chat page stays mounted but hidden behind the explicit plugin');
+   assert.equal(await p.locator('#conversation-history').isVisible(),true,'Saved chat history remains visible under Chat while a plugin is active');
+   assert.equal(await p.locator('#conversation-history').textContent(),historyText);
+   await p.locator('.conversation-row').first().click();
+   await p.locator('.conversation-workspace').waitFor();await p.locator('.conversation-composer').waitFor();
+   assert.equal(await p.evaluate(()=>localStorage.getItem('oviraptor-module')),'chat','Clicking history returns to Chat');
+   assert.equal(await p.locator('#conversation-history').textContent(),historyText,'Explicit plugin navigation preserves saved conversation history');
+   assert.equal(await p.locator('.asset-plugin-workspace,.scanning-plugin-workspace,.hackerone-plugin-workspace').count(),0);
+   assert.equal(await p.evaluate(()=>window.__QA__.mutations.length),0,'Navigation never starts scans or changes business data');
+   return m;
+  });
+ }
  await scenario('01-wide-chat-shell',async()=>{const m=await pageFixture({markdown}),p=m.page;assert.equal(await p.locator('.sidebar-toggle').first().getAttribute('aria-expanded'),'false');await shot(p,'01-wide-empty');await chooseChat(p);await p.locator('.conversation-composer textarea').fill('Synthetic unsent draft');const transcript=await p.locator('.conversation-transcript').textContent();await shot(p,'02-wide-expanded');await collapse(p);assert.equal(await p.locator('.conversation-composer textarea').inputValue(),'Synthetic unsent draft');assert.equal(await p.locator('.conversation-transcript').textContent(),transcript);assert.equal(await p.locator('.conversation-composer').count(),1);assert.equal(await p.locator('.conversation-transcript table').count(),1);assert.equal(await p.locator('.conversation-transcript pre').count(),1);assert.equal(await p.locator('.conversation-transcript script, .conversation-transcript iframe, .conversation-transcript img').count(),0);assert.equal(await p.locator('.conversation-transcript a[href^="javascript:"]').count(),0);await shot(p,'03-wide-rich-chat');await p.getByRole('button',{name:'Copy code',exact:true}).click();assert.equal(await p.evaluate(()=>window.__QA__.clipboard[0]),'const greeting: string = "hello";\nconsole.log(greeting);\n');await p.locator('.conversation-message.assistant .message-actions').getByRole('button',{name:'Copy message',exact:true}).click();assert.equal(await p.evaluate(()=>window.__QA__.clipboard[1]),markdown);await shot(p,'11-copy-confirmations');await p.locator('.conversation-transcript a').first().click();assert.equal(await p.evaluate(()=>window.__QA__.openedLinks[0]),'https://example.com/reference');const layout=await fit(p);assert(layout.document<=layout.viewport+1,JSON.stringify(layout));assert(layout.composer.width<1050,'Composer should retain readable width');return m;});
  await scenario('02-keyboard-save-retry-stop',async()=>{const m=await pageFixture({available:true,failNextSend:true}),p=m.page;await chooseChat(p);await collapse(p);const input=p.locator('.conversation-composer textarea');await input.fill('Synthetic keyboard send');await input.press('Shift+Enter');assert.equal(await p.evaluate(()=>window.__QA__.mutations.length),0);await input.fill('Synthetic keyboard send');await input.dispatchEvent('keydown',{key:'Enter',isComposing:true});assert.equal(await p.evaluate(()=>window.__QA__.mutations.length),0);await input.press('Enter');await p.getByRole('button',{name:'Retry send',exact:true}).waitFor();assert.equal(await input.inputValue(),'Synthetic keyboard send');await p.getByRole('button',{name:'Retry send',exact:true}).click();await p.getByRole('button',{name:'Stop reply',exact:true}).waitFor();const sends=await p.evaluate(()=>window.__QA__.mutations.filter(c=>c.cmd==='send_conversation_message'));assert.equal(sends.length,2);assert.deepEqual(sends[0].args,sends[1].args);assert.equal(await p.locator('.conversation-composer').count(),1);await p.getByRole('button',{name:'Stop reply',exact:true}).click();await p.waitForFunction(()=>document.querySelector('.composer-submit.is-stop')?.disabled);await shot(p,'04-reply-stopping');return m;});
  await scenario('03-narrow-rich-chat',async()=>{const m=await pageFixture({markdown},{width:390,height:844}),p=m.page;await chooseChat(p);const mobileToggle=await toggleFor(p);if(await mobileToggle.getAttribute('aria-expanded')==='false')await mobileToggle.click();await shot(p,'05-narrow-sidebar');await collapse(p);await shot(p,'06-narrow-rich-chat');const layout=await fit(p);assert(layout.document<=layout.viewport+1,JSON.stringify(layout));assert(layout.composer.x>=0&&layout.composer.x+layout.composer.width<=layout.viewport+1,'Composer within narrow viewport');assert.equal(await p.locator('.conversation-composer').count(),1);return m;});

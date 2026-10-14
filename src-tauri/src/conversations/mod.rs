@@ -1,5 +1,9 @@
-//! Project-scoped human conversations. No scan, agent run, directive or tool
-//! authority is created here. Only explicit Send may make one model request.
+//! Project-scoped conversations with bounded, explicitly granted read tools.
+//! Only explicit Send starts a model loop; no scan or command authority is created.
+mod access;
+mod agent;
+mod tools;
+mod title;
 mod model;
 mod reply;
 mod store;
@@ -47,6 +51,11 @@ macro_rules! command {
         }
     };
 }
+command!(get_conversation_access, access::ScopeInput, access::AccessSnapshot, access::get);
+command!(set_conversation_access, access::SetAccessInput, access::AccessSnapshot, access::set);
+command!(list_conversation_access_skills, access::ScopeInput, Vec<access::SkillChoice>, access::catalog);
+command!(grant_conversation_directory, access::GrantDirectoryInput, access::AccessSnapshot, access::grant_directory);
+command!(revoke_conversation_directory, access::RevokeDirectoryInput, access::AccessSnapshot, access::revoke_directory);
 command!(list_conversations, ListInput, ConversationPage, store::list);
 command!(
     create_conversation,

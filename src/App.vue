@@ -14,6 +14,7 @@ import WorkspaceNavigation from "./shell/WorkspaceNavigation.vue";
 import { moduleDefinition, type ModuleKey, type WorkspaceNavItem } from "./shell/moduleCatalog";
 import { normalizeRoute, parseProjectId, persistRoute, restoreRoute, trayRoute } from "./shell/navigation";
 const ConversationWorkspace = defineAsyncComponent(() => import("./features/conversations/ConversationWorkspace.vue"));
+const SkillsWorkspace = defineAsyncComponent(() => import("./features/skills/SkillsWorkspace.vue"));
 import packageInfo from "../package.json";
 import { useI18n } from "./i18n";
 import { useInstallLogPanel } from "./features/environment/useInstallLogPanel";
@@ -33,11 +34,6 @@ import "./shell/agent-shell.css";
 const { locale, t, tr, setLocale } = useI18n();
 const pluginEnabled = ref(loadPluginEnabledState(localStorage));
 const initialRoute = restoreRoute(localStorage);
-if (isBuiltinPluginId(initialRoute.module) && !pluginEnabled.value[initialRoute.module]) {
-  initialRoute.module="chat";
-  if(!["projects","settings"].includes(initialRoute.view))initialRoute.view="chat";
-  persistRoute(localStorage,initialRoute);
-}
 const activeView = ref<ViewKey>(initialRoute.view);
 const activeModule = ref<ModuleKey>(initialRoute.module);
 const projects = ref<Project[]>([]); const profiles = ref<ConfigProfile[]>([]);
@@ -145,7 +141,8 @@ function handleSidebarKeys(event: KeyboardEvent) {
   if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last?.focus(); }
   else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first?.focus(); }
 }
-function historySelected() { if (isMobile.value) closeSidebar(); }
+function closeMobileSidebar() { if (isMobile.value) closeSidebar(); }
+function historySelected() { applyRoute("chat", "chat"); closeMobileSidebar(); }
 onMounted(() => {
   if (typeof window.matchMedia === "function") {
     mobileQuery = window.matchMedia("(max-width: 760px)");
@@ -163,10 +160,21 @@ let workerAutoSyncRunning=false;
 const selectedProject = computed(() => projects.value.find(project => project.id === selectedProjectId.value));
 const activeProfile = computed(() => profiles.value.find(profile=>profile.isDefault)||profiles.value[0]);
 const hackerOneEnabled = computed(() => Boolean(activeProfile.value?.settings?.hackerOneUsername?.trim() && activeProfile.value?.settings?.hackerOneToken?.trim()));
+let pluginActivityGeneration = 0;
+async function refreshPluginActivity() {
+  const request = ++pluginActivityGeneration;
+  h1HasChanges.value = false;
+  if (activeModule.value !== "hackerone" || !hackerOneEnabled.value || !pluginEnabled.value.hackerone) return;
+  try {
+    const events = await api.listHackerOneEvents(1);
+    if (request === pluginActivityGeneration && activeModule.value === "hackerone") h1HasChanges.value = events.length > 0;
+  } catch { /* Activity is optional; the explicitly opened workspace owns read errors. */ }
+}
+watch(activeModule, module => { void refreshPluginActivity(); if (module === "asset") void autoSyncWorkers(); });
 const activeWorkspace = computed(() => isBuiltinPluginId(activeModule.value) && pluginAvailable(activeModule.value) && !["projects","settings"].includes(activeView.value) ? BUILTIN_WORKSPACES[activeModule.value] : undefined);
 const viewTitle = computed(() => {
   if(activeWorkspace.value&&workspaceMetadata.value.title)return workspaceMetadata.value.title;
-  return ({chat:tr("对话","Chat"),dashboard:t.value.dashboard,projects:t.value.projects,query:t.value.query,assets:t.value.assets,ownership:tr("归属门禁","Ownership gate"),exposure:tr("公开暴露面","Public exposure"),quarantine:t.value.quarantine,hackerone:"HackerOne SRC",sentinel:tr("扫描","Scanning"),changes:t.value.changes,tasks:t.value.tasks,logs:t.value.logs,settings:t.value.settings})[activeView.value];
+  return ({chat:tr("对话","Chat"),skills:tr("Skills 管理","Skills"),dashboard:t.value.dashboard,projects:t.value.projects,query:t.value.query,assets:t.value.assets,ownership:tr("归属门禁","Ownership gate"),exposure:tr("公开暴露面","Public exposure"),quarantine:t.value.quarantine,hackerone:"HackerOne SRC",sentinel:tr("扫描","Scanning"),changes:t.value.changes,tasks:t.value.tasks,logs:t.value.logs,settings:t.value.settings})[activeView.value];
 });
 function pluginAvailable(module:ModuleKey) { return module==="chat" || (pluginEnabled.value[module] && (module!=="hackerone" || hackerOneEnabled.value)); }
 function applyRoute(module:ModuleKey, view:ViewKey, navigation?:WorkspaceNavItem) {
@@ -185,13 +193,14 @@ function applyRoute(module:ModuleKey, view:ViewKey, navigation?:WorkspaceNavItem
   return true;
 }
 function navigate(view:ViewKey) { applyRoute(activeModule.value,view); }
+function openSkills() { applyRoute("chat", "skills"); closeMobileSidebar(); }
 function navigateFromTray(destination:string) {
   const route=trayRoute(destination);if(!route)return;
   const item=route.section?{key:route.section,view:route.view,label:["任务与成本","Tasks & cost"] as const,icon:"tasks" as const,section:route.section}:undefined;
   applyRoute(route.module,route.view,item);
 }
-function switchModule(module:ModuleKey) { if (applyRoute(module,moduleDefinition(module).defaultView)) historySelected(); }
-function openWorkspaceSection(item:WorkspaceNavItem) { if (applyRoute(activeModule.value,item.view,item)) historySelected(); }
+function switchModule(module:ModuleKey) { if (applyRoute(module,moduleDefinition(module).defaultView)&&isMobile.value) closeSidebar(); }
+function openWorkspaceSection(item:WorkspaceNavItem) { if (applyRoute(activeModule.value,item.view,item)&&isMobile.value) closeSidebar(); }
 function selectProject(id?:number) {
   const candidate=parseProjectId(id);
   selectedProjectId.value=candidate&&projects.value.some(project=>project.id===candidate)?candidate:undefined;
@@ -249,8 +258,7 @@ async function refresh(_waitForSecondary:boolean|Event=false){
     if(selectedProjectId.value&&!projects.value.some(project=>project.id===selectedProjectId.value))selectProject(undefined);
     if(!pluginAvailable(activeModule.value))applyRoute("chat",["settings","projects"].includes(activeView.value)?activeView.value:"chat");
     pluginRefreshToken.value++;
-    if(hackerOneEnabled.value&&pluginEnabled.value.hackerone)void api.listHackerOneEvents(1).then(value=>{if(request===workspaceRefreshGeneration)h1HasChanges.value=value.length>0;}).catch(()=>{});
-    else h1HasChanges.value=false;
+    void refreshPluginActivity();
   }catch(error){if(request===workspaceRefreshGeneration)notify("error",String(error));}
   finally{if(request===workspaceRefreshGeneration)loading.value=false;}
 }
@@ -384,8 +392,9 @@ async function installEnvironment(){
     notify("error",message);
   } finally { environmentInstalling.value=false; await refreshPreparationStatus(); }
 }
+function assetWorkspaceActive() { return activeModule.value === "asset" && !["settings", "projects", "skills"].includes(activeView.value); }
 async function autoSyncWorkers(){
-  if(workerAutoSyncRunning)return;
+  if(workerAutoSyncRunning||!assetWorkspaceActive())return;
   workerAutoSyncRunning=true;
   try{
     const nodes=await api.listWorkerNodes();
@@ -393,6 +402,7 @@ async function autoSyncWorkers(){
     // compete for SQLite and memory with active scans and previously caused a
     // burst exactly when a suspended macOS window became visible again.
     for(const node of nodes.filter(node=>node.enabled)){
+      if(!assetWorkspaceActive())break;
       try{await api.syncWorkerNode(node.id);}catch{/* 节点错误已写入节点状态。 */}
     }
   }catch{/* 尚未配置 Worker 时保持安静。 */}
@@ -422,18 +432,19 @@ onUnmounted(()=>{unlisten?.();unlistenTray?.();if(workerSyncTimer)clearInterval(
         <div class="brand"><div class="brand-mark"><img v-if="brandIconUrl" :src="brandIconUrl" alt="" /></div><div class="brand-copy"><strong>{{t.appName}}</strong></div></div>
         <button class="sidebar-toggle" :aria-expanded="!sidebarCollapsed" aria-controls="sidebar-expanded-content" :aria-label="sidebarCollapsed?tr('展开侧边栏','Expand sidebar'):tr('收起侧边栏','Collapse sidebar')" :title="sidebarCollapsed?tr('展开侧边栏','Expand sidebar'):tr('收起侧边栏','Collapse sidebar')" @click="toggleSidebar"><Menu :size="18" /></button>
       </div>
-      <WorkspaceNavigation :collapsed="sidebarCollapsed" :module="activeModule" :view="activeView" :sentinel-menu="workspaceMetadata.navigationKey||pluginNavigation?.key||'dialog'" :hacker-one-enabled="hackerOneEnabled" :enabled-plugins="pluginEnabled" :running-jobs="workspaceMetadata.badges?.runningJobs" :blocked-count="workspaceMetadata.badges?.blockedCount" :fuse="workspaceMetadata.badges?.fuse" @module-change="switchModule" @navigate="openWorkspaceSection" />
-      <div id="sidebar-expanded-content" class="sidebar-expanded-content" v-show="!sidebarCollapsed">
-        <div id="conversation-history" v-show="activeView==='chat'" class="shell-conversation-history"></div>
-        <div class="sidebar-project">
-          <span class="sidebar-label">{{tr('当前工作空间','WORKSPACE')}}</span>
-          <button class="current-project" :title="tr('管理项目与范围','Manage projects and scope')" @click="navigate('projects');historySelected()"><span class="project-dot"></span><span>{{selectedProject?.name||t.allProjects}}</span><ChevronDown :size="14" /></button>
-          <button class="sidebar-create-workspace" @click="openProject()"><Plus :size="15" />{{tr('新建工作空间','New workspace')}}</button>
-        </div>
-      </div>
+      <WorkspaceNavigation id="sidebar-expanded-content" :collapsed="sidebarCollapsed" :module="activeModule" :view="activeView" :sentinel-menu="workspaceMetadata.navigationKey||pluginNavigation?.key||'dialog'" :hacker-one-enabled="hackerOneEnabled" :enabled-plugins="pluginEnabled" :running-jobs="workspaceMetadata.badges?.runningJobs" :blocked-count="workspaceMetadata.badges?.blockedCount" :fuse="workspaceMetadata.badges?.fuse" @module-change="switchModule" @navigate="openWorkspaceSection" @open-skills="openSkills">
+        <template #history><div id="conversation-history" class="shell-conversation-history"></div></template>
+        <template #workspace>
+          <div class="sidebar-project">
+            <span class="sidebar-label">{{tr('当前工作空间','WORKSPACE')}}</span>
+            <button class="current-project" :title="tr('管理项目与范围','Manage projects and scope')" @click="navigate('projects');closeMobileSidebar()"><span class="project-dot"></span><span>{{selectedProject?.name||t.allProjects}}</span><ChevronDown :size="14" /></button>
+            <button class="sidebar-create-workspace" @click="openProject()"><Plus :size="15" />{{tr('新建工作空间','New workspace')}}</button>
+          </div>
+        </template>
+      </WorkspaceNavigation>
       <div class="sidebar-fixed-links">
-        <button v-if="moduleDefinition(activeModule).hasLogs" :title="t.logs" :aria-label="t.logs" :class="{active:activeView==='logs'}" @click="navigate('logs');historySelected()"><TerminalSquare :size="17" /><span>{{t.logs}}</span></button>
-        <button :title="t.settings" :aria-label="t.settings" :class="{active:activeView==='settings'}" @click="navigate('settings');historySelected()"><Settings2 :size="17" /><span>{{t.settings}}</span></button>
+        <button v-if="moduleDefinition(activeModule).hasLogs" :title="t.logs" :aria-label="t.logs" :class="{active:activeView==='logs'}" @click="navigate('logs');closeMobileSidebar()"><TerminalSquare :size="17" /><span>{{t.logs}}</span></button>
+        <button :title="t.settings" :aria-label="t.settings" :class="{active:activeView==='settings'}" @click="navigate('settings');closeMobileSidebar()"><Settings2 :size="17" /><span>{{t.settings}}</span></button>
       </div>
       <footer class="sidebar-footer"><button :title="tr('查看更新说明','View release notes')" @click="releaseNotesDialog=true">v{{packageInfo.version}}</button><span>Local-first</span></footer>
     </aside>
@@ -474,11 +485,13 @@ onUnmounted(()=>{unlisten?.();unlistenTray?.();if(workerSyncTimer)clearInterval(
         </section>
         <div v-if="loading" class="app-loading"><div class="loader-ring"></div><span>{{tr('正在初始化本地资产数据库…','Initializing local asset database…')}}</span></div>
 
-        <ConversationWorkspace v-else-if="activeView==='chat'" :projects="projects" :project-id="selectedProjectId" :plugin-host="pluginHost" history-target="#conversation-history" @history-selected="historySelected" @select-project="selectProject" @create-project="openProject()" />
+        <ConversationWorkspace v-if="!loading" v-show="activeView==='chat'" :active="activeView==='chat'" :projects="projects" :project-id="selectedProjectId" :plugin-host="pluginHost" history-target="#conversation-history" @history-selected="historySelected" @select-project="selectProject" @create-project="openProject()" />
 
-        <component v-else-if="activeWorkspace" :is="activeWorkspace" :key="activeModule" :projects="projects" :profiles="profiles" :project-id="selectedProjectId" :view="activeView" :refresh-token="pluginRefreshToken" :navigation="pluginNavigation" :intent="pendingWorkspaceIntent" :scanning-enabled="pluginEnabled.sentinel" :resume-workflow="resumeWorkflow" @navigate="navigate" @select-project="selectProject" @create-project="openProject()" @restore-project="toggleArchive" @projects-changed="refresh" @notify="notify" @metadata="workspaceMetadata=$event" @intent-consumed="consumeWorkspaceIntent" @interrupted-resumed="onInterruptedResumed" />
+        <SkillsWorkspace v-if="!loading&&activeView==='skills'" @notify="notify"/>
 
-        <template v-else-if="activeView==='projects'">
+        <component v-if="!loading&&activeWorkspace" :is="activeWorkspace" :key="activeModule" :projects="projects" :profiles="profiles" :project-id="selectedProjectId" :view="activeView" :refresh-token="pluginRefreshToken" :navigation="pluginNavigation" :intent="pendingWorkspaceIntent" :scanning-enabled="pluginEnabled.sentinel" :resume-workflow="resumeWorkflow" @navigate="navigate" @select-project="selectProject" @create-project="openProject()" @restore-project="toggleArchive" @projects-changed="refresh" @notify="notify" @metadata="workspaceMetadata=$event" @intent-consumed="consumeWorkspaceIntent" @interrupted-resumed="onInterruptedResumed" />
+
+        <template v-else-if="!loading&&activeView==='projects'">
           <div class="section-toolbar"><div><span class="eyebrow">SHARED WORKSPACES</span><h2>{{tr('项目与范围','Projects and scope')}}</h2><p>{{tr('一个工作空间共享对话、资产范围、扫描、证据、漏洞结论和知识沉淀。','One workspace holds conversations, asset scope, scans, evidence, conclusions, and learned knowledge.')}}</p></div><button class="button primary" @click="openProject()"><Plus :size="16" /> {{tr('新建工作空间','New workspace')}}</button></div>
           <div v-if="projects.length" class="project-grid shared-project-grid">
             <article v-for="project in projects" :key="project.id" class="project-card shared-project-card" :class="{selected:selectedProjectId===project.id,archived:project.status==='archived'}">
@@ -493,7 +506,7 @@ onUnmounted(()=>{unlisten?.();unlistenTray?.();if(workerSyncTimer)clearInterval(
           <div v-else class="first-run panel"><div class="first-run-icon"><FolderKanban :size="28" /></div><h2>{{tr('创建第一个公共工作空间','Create your first shared workspace')}}</h2><p>{{tr('无需先采集资产；也可以直接创建 Nest Web、代码审计或灰盒任务。','Asset collection is optional; you can start directly with Nest web, code, or grey-box tasks.')}}</p><button class="button primary" @click="openProject()"><Plus :size="16" /> {{tr('创建工作空间','Create workspace')}}</button></div>
         </template>
 
-        <template v-else-if="activeView==='settings'">
+        <template v-else-if="!loading&&activeView==='settings'">
           <div class="section-toolbar"><div><span class="eyebrow">CONFIGURATION CENTER</span><h2>{{tr('配置中心','Configuration center')}}</h2><p>{{tr('运行方案、远程 Worker 和本机环境分区管理，避免创建无内容的空配置。','Manage runtime profiles, remote Workers and the local environment without creating empty profiles.')}}</p></div><button class="button ghost" @click="appSettingsDialog=true"><AppWindow :size="16" /> {{tr('应用设置','App settings')}}</button></div>
           <nav class="config-center-nav">
             <button :class="{active:configSection==='profiles'}" @click="configSection='profiles'"><SlidersHorizontal :size="18"/><span><b>{{tr('运行方案','Runtime profiles')}}</b><small>{{tr('账号、模型与扫描参数','Accounts, models and scan policy')}}</small></span></button>

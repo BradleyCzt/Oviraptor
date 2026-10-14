@@ -8,6 +8,7 @@ mod auth_session;
 mod collaboration_events;
 mod commands;
 mod conversations;
+mod skill_packages;
 mod db;
 mod execution_service;
 mod installation_logs;
@@ -330,6 +331,11 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             commands::dashboard_stats,
             commands::list_projects,
+            conversations::get_conversation_access,
+            conversations::set_conversation_access,
+            conversations::list_conversation_access_skills,
+            conversations::grant_conversation_directory,
+            conversations::revoke_conversation_directory,
             conversations::list_conversations,
             conversations::create_conversation,
             conversations::read_conversation,
@@ -338,6 +344,13 @@ pub fn run() {
             conversations::send_conversation_message,
             conversations::cancel_conversation_reply,
             conversations::delete_conversation,
+            skill_packages::list_skill_packages,
+            skill_packages::preview_skill_package,
+            skill_packages::import_skill_package,
+            skill_packages::install_bundled_skill_package,
+            skill_packages::set_packaged_skill_enabled,
+            skill_packages::list_skill_package_resources,
+            skill_packages::read_skill_package_resource,
             commands::save_project,
             commands::project_impact,
             commands::archive_project,

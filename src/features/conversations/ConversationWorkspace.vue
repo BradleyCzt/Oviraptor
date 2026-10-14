@@ -4,15 +4,19 @@ import { Archive, ArrowDown, ArrowUp, Ellipsis, MessageSquare, Plus, RefreshCw, 
 import type { Project } from "../../types";
 import type { BuiltinPluginHost } from "../../plugins";
 const ConversationPluginPanel = defineAsyncComponent(() => import("./ConversationPluginPanel.vue"));
+import ConversationToolActivity from "./ConversationToolActivity.vue";
+import ConversationAccessPanel from "./ConversationAccessPanel.vue";
 import ConversationMessage from "./ConversationMessage.vue";
 import { useI18n } from "../../i18n";
 import { conversationApi } from "./api";
 import { useConversationWorkspace } from "./useConversationWorkspace";
-const props = defineProps<{ projects: Project[]; projectId?: number; pluginHost?: BuiltinPluginHost; historyTarget?: string }>();
+const props = defineProps<{ projects: Project[]; projectId?: number; pluginHost?: BuiltinPluginHost; historyTarget?: string; active?: boolean }>();
 const emit = defineEmits<{ selectProject: [id: number]; createProject: []; historySelected: [] }>();
 const { tr } = useI18n();
 const selectedProject = computed(() => props.projects.find(project => project.id === props.projectId));
-const state = useConversationWorkspace({ project: () => selectedProject.value, api: conversationApi });
+const accessBusy = ref(false);
+const agentMode = ref<boolean>();
+const state = useConversationWorkspace({ project: () => selectedProject.value, api: conversationApi, active: () => props.active !== false, writeBlocked: () => accessBusy.value });
 const { conversations, total, includeArchived, query, selectedId, snapshot, composerDraft, composerBytes, composerTooLong, queuedSteer, steering, steerSupported, steerSaving, steerNotice, canSteer, canSendSteer, titleDraft, loadingList, loading, loadingEarlier, busy, cancelling, listError, readError, actionError, hasListSnapshot, pendingSend, pendingDelete, writable, replyActive, canSend, canDelete } = state;
 const transcript = ref<HTMLElement>();
 const composerInput = ref<HTMLTextAreaElement>();
@@ -31,7 +35,7 @@ const replyStatus = computed(() => {
   return status ? ({ queued: tr("等待回复", "Reply queued"), running: tr("正在回复…", "Replying…"), completed: tr("回复已保存", "Reply saved"), unavailable: tr("模型暂不可用", "Model unavailable"), failed: tr("回复失败", "Reply failed"), cancel_requested: tr("正在取消…", "Cancelling…"), cancelled: tr("回复已取消", "Reply cancelled"), interrupted: tr("回复已中断", "Reply interrupted") })[status] : "";
 });
 function closeActions(restoreFocus = false) { if (actionsMenu.value) { actionsMenu.value.open = false; if (restoreFocus) actionsMenu.value.querySelector<HTMLElement>("summary")?.focus(); } }
-watch([selectedId, () => props.projectId], () => { selectionGeneration++; prependGeneration = undefined; renameOpen.value = false; archiveOpen.value = false; closeActions(); forceFollow = true; followingTail.value = true; unreadBelow.value = false; });
+watch([selectedId, () => props.projectId], () => { accessBusy.value = false; agentMode.value = undefined; selectionGeneration++; prependGeneration = undefined; renameOpen.value = false; archiveOpen.value = false; closeActions(); forceFollow = true; followingTail.value = true; unreadBelow.value = false; });
 function observeScroll() {
   const element = transcript.value;
   if (!element || prependGeneration === selectionGeneration) return;
@@ -43,7 +47,7 @@ function jumpToLatest() {
   followingTail.value = true;
   unreadBelow.value = false;
 }
-watch(() => snapshot.value?.messages[snapshot.value.messages.length - 1]?.id, async (id, previous) => {
+watch(() => `${snapshot.value?.messages[snapshot.value.messages.length - 1]?.id ?? ""}:${snapshot.value?.toolActivity?.[snapshot.value.toolActivity.length-1]?.id ?? ""}`, async (id, previous) => {
   const generation = selectionGeneration;
   const follow = forceFollow || followingTail.value;
   await nextTick();
@@ -72,8 +76,8 @@ async function loadEarlier() {
     if (generation === selectionGeneration && element && element === transcript.value && id === selectedId.value) element.scrollTop = oldTop + element.scrollHeight - oldHeight;
   } finally { if (prependGeneration === generation) { prependGeneration = undefined; observeScroll(); } }
 }
-function chooseConversation(id: string) { state.selectConversation(id); emit("historySelected"); }
-async function newConversation() { await state.createConversation(); if (!actionError.value) emit("historySelected"); }
+function chooseConversation(id: string) { emit("historySelected"); state.selectConversation(id); }
+async function newConversation() { emit("historySelected"); await nextTick(); await state.createConversation(); }
 async function rename() {
   if (!titleDraft.value.trim()) return;
   await state.updateConversation({ title: titleDraft.value.trim() });
@@ -135,7 +139,7 @@ function submit(event: KeyboardEvent) {
     </div>
     <div v-else class="conversation-main">
       <header class="conversation-header">
-        <div class="conversation-heading"><h2>{{snapshot?.conversation.title||tr('新想法，新对话','A fresh conversation')}}</h2><span>{{snapshot?.replyAvailability.model||tr('本地对话','Local conversations')}}</span></div>
+        <div class="conversation-heading"><h2>{{snapshot?.conversation.title||tr('新想法，新对话','A fresh conversation')}}</h2><span>{{snapshot?.replyAvailability.model||tr('本地对话','Local conversations')}} · {{selectedProject.name}}<small v-if="snapshot?.conversation.titleSource==='ai'" class="conversation-title-source">{{tr('AI 标题','AI title')}}</small></span></div>
         <div class="conversation-header-actions">
           <button class="chat-icon-button" :disabled="busy||steerSaving||selectedProject.status!=='active'" :aria-label="tr('新对话','New chat')" :title="tr('新对话','New chat')" @click="newConversation"><Plus :size="18"/></button>
           <details v-if="snapshot" ref="actionsMenu" class="conversation-actions" @keydown.esc.stop="closeActions(true)">
@@ -164,7 +168,7 @@ function submit(event: KeyboardEvent) {
             <div class="conversation-message-column">
               <button v-if="snapshot.hasMore" class="button ghost compact conversation-earlier" :disabled="loadingEarlier" @click="loadEarlier">{{loadingEarlier?tr('读取中…','Loading…'):tr('更早的消息','Earlier messages')}}</button>
               <div v-if="!snapshot.messages.length" class="conversation-empty"><div class="conversation-welcome-mark"><MessageSquare :size="30"/></div><h3>{{tr('有什么想讨论的？','What’s on your mind?')}}</h3><p>{{tr('提一个问题，探索一个想法，或者一起理清思路。','Ask a question, explore an idea, or work through a thought.')}}</p></div>
-              <ConversationMessage v-for="message in snapshot.messages" :key="message.id" :message="message"/>
+              <template v-for="message in snapshot.messages" :key="message.id"><ConversationMessage :message="message"/><ConversationToolActivity v-if="message.role==='user'||message.replyToMessageId&&!snapshot.messages.some(item=>item.id===message.replyToMessageId)" :activity="snapshot.toolActivity?.filter(item=>item.userMessageId===(message.role==='user'?message.id:message.replyToMessageId))??[]"/></template>
               <div v-if="replyActive" class="conversation-pending" role="status"><span class="reply-pulse" aria-hidden="true"></span><span>{{replyStatus}}<small>{{tr('完成后会显示完整回复','The complete reply will appear when ready')}}</small></span></div>
               <ConversationPluginPanel v-if="pluginHost" :host="pluginHost" :project-id="selectedProject.id" :project-active="selectedProject.status==='active'" :snapshot="snapshot" :blocked="busy||steerSaving||replyActive||!!queuedSteer||!!readError||!!pendingSend" :save-links="state.setLinks"/>
             </div>
@@ -177,13 +181,14 @@ function submit(event: KeyboardEvent) {
           </div>
         </div>
         <div class="conversation-compose-area">
+          <ConversationAccessPanel v-if="snapshot.toolActivity!==undefined" :key="`${selectedProject.id}:${snapshot.conversation.id}`" :project-id="selectedProject.id" :conversation-id="snapshot.conversation.id" :writable="writable&&state.viewActive.value" :reply-active="replyActive" :blocked="busy||steerSaving||!!queuedSteer||!!pendingSend||!!readError" :model="snapshot.replyAvailability.model" @busy="accessBusy=$event" @mode="agentMode=$event"/>
           <p v-if="!queuedSteer&&steerReceipt" class="conversation-reply-status" role="status">{{steerReceipt}}</p>
           <div v-if="snapshot.latestReply&&!replyActive" class="conversation-reply-status" role="status"><span>{{replyStatus}}</span><small v-if="snapshot.latestReply.message">{{snapshot.latestReply.message}}</small><small v-if="snapshot.latestReply.outcomeUnknown">{{tr('提供商可能已处理此次请求；不会自动重发。','The provider may have processed this request. It will not be retried automatically.')}}</small></div>
           <p v-if="snapshot.conversation.archived" class="conversation-notice">{{tr('该对话已归档，恢复后可以继续。','This conversation is archived. Restore it to continue.')}}</p>
           <form class="conversation-composer" @submit.prevent="submitComposer">
             <textarea ref="composerInput" v-model="composerDraft" :disabled="!writable||(busy&&!replyActive)||steering" :placeholder="snapshot.conversation.archived?tr('已归档的对话','Archived conversation'):replyActive?tr('补充下一次回复的方向…','Add direction for the next reply…'):tr('输入消息…','Message Oviraptor…')" :aria-label="tr('消息','Message')" :aria-describedby="!steerSupported&&(replyActive||queuedSteer)?'composer-guidance steer-support-notice':'composer-guidance'" rows="2" maxlength="16384" @keydown="submit"/>
             <footer>
-              <span class="composer-mode"><MessageSquare :size="14"/>{{snapshot.replyAvailability.available?tr('对话','Chat'):tr('仅保存','Save only')}}</span>
+              <span class="composer-mode"><MessageSquare :size="14"/>{{snapshot.replyAvailability.available?(agentMode===false?tr('普通对话','Plain chat'):agentMode===true?'Agent':tr('对话','Chat')):tr('仅保存','Save only')}}</span>
               <small id="composer-guidance" v-if="composerTooLong" class="conversation-error">{{tr(`消息为 ${composerBytes.toLocaleString()} 字节，最多 16,384 字节，请缩短后发送。`,`Message is ${composerBytes.toLocaleString()} bytes; shorten it to 16,384 bytes or less.`)}}</small>
               <small id="composer-guidance" v-else>{{replyActive?tr('Enter 排队下一条 · Shift+Enter 换行','Enter to queue next reply · Shift+Enter for a new line'):pendingSend?tr('重试使用相同请求，不会自动重复发送','Retry reuses the same request'):tr('Enter 发送 · Shift+Enter 换行','Enter to send · Shift+Enter for a new line')}}</small>
               <button v-if="replyActive" type="submit" class="composer-steer" :disabled="!canSteer" :title="tr('排队在当前回复完成后发送，不改变正在进行的回复','Queue for after the current reply; does not change the reply in progress')">{{tr('Steer · 下一轮补充','Steer · Next reply')}}</button>
@@ -194,7 +199,7 @@ function submit(event: KeyboardEvent) {
           <p v-if="!steerSupported&&(replyActive||queuedSteer)" id="steer-support-notice" class="conversation-model-notice" role="status">{{queuedSteer?tr('请在支持安全本地队列的窗口中恢复此指引，再继续对话。','Reopen in a window with safe local queue support to review this saved direction before continuing.'):tr('Steer 暂不可用：此环境不支持安全本地队列；普通聊天仍可使用。','Steer needs safe local queue support. Ordinary chat still works.')}}</p>
           <p v-else-if="steerSaving" class="conversation-model-notice" role="status">{{tr('正在安全保存指引…','Saving direction safely…')}}</p>
           <p v-if="!snapshot.replyAvailability.available" class="conversation-model-notice">{{snapshot.replyAvailability.message||tr('尚未配置可用模型；消息仍可保存，助手不会生成回复。','No model is available. Messages can still be saved without an assistant reply.')}}</p>
-          <p class="conversation-privacy"><span>{{tr('普通对话 · 不执行工具或扫描','Conversation · no tool or scan execution')}}</span> · {{tr('消息保存在本地 · 请求回复时发送给已配置的模型提供商','Stored locally · Replies send conversation text to your configured model provider')}}</p>
+          <p class="conversation-privacy"><span>{{snapshot.toolActivity!==undefined?(agentMode===false?tr('当前项目上下文 · 普通对话','Current project context · plain chat'):tr('当前项目上下文 · 按授权使用只读工具','Current project context · permission-scoped read-only tools')):tr('普通对话 · 不执行工具或扫描','Conversation · no tool or scan execution')}}</span> · {{snapshot.toolActivity!==undefined?tr('消息保存在本地 · 对话和获准读取的数据会发送给所选模型提供商','Stored locally · Conversation and permitted data are sent to your selected model provider'):tr('消息保存在本地 · 请求回复时发送给已配置的模型提供商','Stored locally · Replies send conversation text to your configured model provider')}}</p>
         </div>
       </template>
       <div v-else-if="!selectedId&&!loading" class="conversation-welcome">
@@ -205,7 +210,7 @@ function submit(event: KeyboardEvent) {
   </section>
 </template>
 <style scoped>
-.conversation-workspace{display:flex;flex:1;min-height:0;min-width:0;height:100%;color:var(--app-ink,#172033)}
+.conversation-title-source{margin-left:8px;font-size:9px;border:1px solid var(--line,#ddd);border-radius:4px;padding:1px 4px}.conversation-workspace{display:flex;flex:1;min-height:0;min-width:0;height:100%;color:var(--app-ink,#172033)}
 .conversation-workspace.has-local-history{gap:20px}.has-local-history>.conversation-list{width:250px;flex-shrink:0}
 .conversation-welcome{display:flex;flex:1;min-height:0;overflow:auto;flex-direction:column;align-items:center;justify-content:center;gap:16px;padding:40px 24px;text-align:center;max-width:760px;margin:0 auto}
 .conversation-welcome-mark{width:58px;height:58px;display:grid;place-items:center;background:color-mix(in srgb,var(--app-ink,#172033) 5%,transparent);border:1px solid var(--line);border-radius:18px;color:var(--app-ink,#172033)}

@@ -34,6 +34,7 @@ function mount(t, options = {}) {
   const exports = {};
   new Function('require', 'exports', 'setTimeout', 'clearTimeout', transpile(source))(name => { assert.equal(name, 'vue'); return vue; }, exports, fn => { timers.set(++timerId, fn); return timerId; }, id => timers.delete(id));
   const selection = vue.ref(project(1));
+  const active = vue.ref(true), writeBlocked = vue.ref(false);
   const data = { value: options.snapshot ?? snapshot() };
   const calls = [];
   const defaults = {
@@ -45,9 +46,9 @@ function mount(t, options = {}) {
   const api = new Proxy({}, { get: (_, name) => (...args) => { calls.push([name, ...args]); return (options.api?.[name] ?? defaults[name])(...args); } });
   let state;
   const renderer = vue.createRenderer({ createComment: () => ({}), insert() {}, remove() {}, parentNode: () => null, nextSibling: () => null });
-  const app = renderer.createApp({ setup() { state = exports.useConversationWorkspace({ project: () => selection.value, api, storage, locks: options.locks === undefined ? storage?.locks ?? lockManager() : options.locks, operationId: () => `steer-operation-${++operation}` }); return () => null; } });
+  const app = renderer.createApp({ setup() { state = exports.useConversationWorkspace({ project: () => selection.value, active: () => active.value, writeBlocked: () => writeBlocked.value, api, storage, locks: options.locks === undefined ? storage?.locks ?? lockManager() : options.locks, operationId: () => `steer-operation-${++operation}` }); return () => null; } });
   app.mount({}); if (t) t.after(() => app.unmount());
-  return { state, data, selection, calls, storage, timers, unmount: () => app.unmount(), async tick() { const pending = [...timers.values()]; timers.clear(); for (const fn of pending) fn(); await flush(); } };
+  return { state, data, selection, active, writeBlocked, calls, storage, timers, unmount: () => app.unmount(), async tick() { const pending = [...timers.values()]; timers.clear(); for (const fn of pending) fn(); await flush(); } };
 }
 const sends = m => m.calls.filter(([name]) => name === 'sendConversationMessage').map(([, input]) => input);
 async function queue(m, content = 'Please make the next reply concise') {
@@ -287,4 +288,14 @@ test('the post-lock promise gap cannot send after model availability changes', a
   m = mount(t, { locks }); await queue(m); changeAfterWrite = true; completeOriginal(m); await m.state.readSelected(); await flush();
   assert.equal(sends(m).length, 0); assert.equal(m.state.queuedSteer.value.status, 'uncertain'); assert.equal(m.state.queuedSteer.value.reason, 'changed');
   assert.equal(m.state.queuedSteer.value.input.requestReply, true); assert.deepEqual(JSON.parse(m.storage.getItem(key())).input, m.state.queuedSteer.value.input);
+});
+
+
+test('hiding Chat pauses Steer and polling; reactivation only reads saved state', async t => {
+ const m=mount(t);await queue(m);m.active.value=false;await flush();assert.equal(m.state.queuedSteer.value.status,'paused');assert.equal(m.timers.size,0);
+ const before=m.calls.length;completeOriginal(m);await m.state.readSelected();await flush();assert.equal(m.calls.length,before);assert.equal(sends(m).length,0);
+ m.active.value=true;await flush();assert.equal(m.state.snapshot.value.latestReply.status,'completed');assert.equal(sends(m).length,0);assert.equal(m.state.canSendSteer.value,true);
+});
+test('permission writes block follow-up dispatch until the write has settled', async t => {
+ const m=mount(t);await queue(m);m.writeBlocked.value=true;completeOriginal(m);await m.state.readSelected();await flush();assert.equal(sends(m).length,0);m.writeBlocked.value=false;await flush();assert.equal(sends(m).length,1);
 });

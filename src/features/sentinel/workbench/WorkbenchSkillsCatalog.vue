@@ -1,42 +1,44 @@
 <script setup lang="ts">
+import { computed } from "vue";
 import { BookOpen, Braces, Download, Plus, RefreshCw, Save, Sparkles, Trash2, Upload, X } from "@lucide/vue";
 import InlineConfirm from "../../../components/InlineConfirm.vue";
 import { useI18n } from "../../../i18n";
 import type { useWorkbenchSkills } from "./useWorkbenchSkills";
 
-const props = defineProps<{ catalog: ReturnType<typeof useWorkbenchSkills> }>();
+const props = defineProps<{ catalog: ReturnType<typeof useWorkbenchSkills>; standalone?: boolean; excludeSkillIds?: number[] }>();
 const { tr } = useI18n();
 const { skills, skillBusy, refiningSkillId, deleteSkill, editingSkill, showSkillEditor,
   skillForm, skillPreview, refineSkill, exportSkills, importSkills,
   importInternalSecSkills, editSkill, cloneBuiltinSkill, insertSkillTemplate,
   saveSkill, removeSkill } = props.catalog;
+const visibleSkills = computed(() => skills.value.filter(skill => !props.excludeSkillIds?.includes(skill.id)));
 </script>
 
 <template>
   <div class="skills-toolbar">
     <div>
-      <span class="eyebrow">NEST SKILLS</span>
-      <h3>{{ tr("扫描技能", "Scan skills") }}</h3>
-      <p>{{ tr("每个任务自行选择 Skill；代码审计不会再默认加载“业务前端深度分析”。", "Each task chooses its own skills; code audit no longer forces the frontend skill.") }}</p>
+      <span class="eyebrow">{{standalone?'SAVED INSTRUCTIONS':'NEST SKILLS'}}</span>
+      <h3>{{ standalone?tr("文本指令", "Text instructions"):tr("扫描技能", "Scan skills") }}</h3>
+      <p>{{ standalone?tr("创建或导入现有文本指令。技能包在上方管理，不在此编辑。", "Create or import existing text instructions. Package skills are managed above and cannot be edited here."):tr("每个任务自行选择 Skill；代码审计不会再默认加载“业务前端深度分析”。", "Each task chooses its own skills; code audit no longer forces the frontend skill.") }}</p>
     </div>
     <div>
-      <button class="button ghost" @click="importSkills"><Upload :size="15" />{{ tr("导入", "Import") }}</button>
-      <button class="button ghost" @click="importInternalSecSkills"><BookOpen :size="15" />{{ tr("导入内部 sec_skills", "Import internal sec_skills") }}</button>
+      <button class="button ghost" @click="importSkills"><Upload :size="15" />{{ standalone?tr("导入 JSON", "Import JSON"):tr("导入", "Import") }}</button>
+      <button v-if="!standalone" class="button ghost" @click="importInternalSecSkills"><BookOpen :size="15" />{{ tr("导入内部 sec_skills", "Import internal sec_skills") }}</button>
       <button class="button ghost" @click="exportSkills"><Download :size="15" />{{ tr("导出", "Export") }}</button>
       <button class="button primary" @click="editSkill()"><Plus :size="15" />{{ tr("新增技能", "New skill") }}</button>
     </div>
   </div>
   <div class="skill-card-grid">
-    <article v-for="skill in skills" :key="skill.id" class="panel skill-card-v2">
+    <article v-for="skill in visibleSkills" :key="skill.id" class="panel skill-card-v2">
       <header>
         <span :class="{ builtin: skill.builtin }">{{ skill.builtin ? tr("内置", "Built-in") : tr("自定义", "Custom") }}</span>
         <em>{{ skill.enabled ? tr("已启用", "Enabled") : tr("已停用", "Disabled") }}</em>
       </header>
       <h3>{{ skill.name }}</h3>
       <p>{{ skill.description }}</p>
-      <details><summary>{{ tr("查看扫描指令", "View instructions") }}</summary><pre>{{ skill.instructions }}</pre></details>
+      <details><summary>{{ tr("查看指令", "View instructions") }}</summary><pre>{{ skill.instructions }}</pre></details>
       <footer>
-        <button class="button ghost compact" :disabled="refiningSkillId === skill.id" @click="refineSkill(skill)">
+        <button v-if="!standalone" class="button ghost compact" :disabled="refiningSkillId === skill.id" @click="refineSkill(skill)">
           <Sparkles v-if="refiningSkillId !== skill.id" :size="13" />
           <RefreshCw v-else :size="13" class="spinning" />
           {{ refiningSkillId === skill.id ? tr("精炼中", "Refining") : tr("用最新知识精炼", "Refine with latest") }}
@@ -70,7 +72,7 @@ const { skills, skillBusy, refiningSkillId, deleteSkill, editingSkill, showSkill
         <span>Objective → Scope → Analysis workflow → Output requirements</span>
         <p>{{ tr("写清检查目标、包含/排除范围、验证步骤和输出字段。不要在 Skill 中要求跳过授权边界、批量破坏或把普通信息当漏洞。", "Define objective, include/exclude scope, verification steps, and output fields. Do not request scope bypass, destructive bulk actions, or ordinary observations as vulnerabilities.") }}</p>
       </div>
-      <label class="field span-two"><span>{{ tr("传给 Nest 的指令", "Instructions sent to Nest") }}</span>
+      <label class="field span-two"><span>{{ standalone?tr("指令内容", "Instructions"):tr("传给 Nest 的指令", "Instructions sent to Nest") }}</span>
         <textarea v-model="skillForm.instructions" rows="16" :placeholder="tr('点击“插入规范模板”开始填写', 'Use Insert template to start')"></textarea>
       </label>
       <div class="skill-preview span-two">

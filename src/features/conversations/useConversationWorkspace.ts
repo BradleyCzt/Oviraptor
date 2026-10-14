@@ -1,7 +1,7 @@
 import { computed, onUnmounted, ref, watch } from "vue";
 import type { Project } from "../../types";
 import type { ConversationApi } from "./api";
-import type { Conversation, ConversationLinksInput, ConversationScope, ConversationSendInput, ConversationSnapshot } from "./types";
+import type { Conversation, ConversationLinksInput, ConversationScope, ConversationSendInput, ConversationSnapshot, ConversationToolActivity } from "./types";
 
 type SteerLocks = Pick<LockManager, "request">;
 type SteerStorage = Pick<Storage, "getItem" | "setItem" | "removeItem">;
@@ -14,7 +14,7 @@ const steerKey = (projectId: number, id: string) => `oviraptor.conversation.stee
 const activeReplyStatuses = ["queued", "running", "cancel_requested"];
 const validSteerText = (content: unknown): content is string => typeof content === "string" && !!content.trim() && !content.includes("\0") && new TextEncoder().encode(content).length <= 16_384;
 
-export function useConversationWorkspace(deps: { project: () => Project | undefined; api: ConversationApi; operationId?: () => string; storage?: SteerStorage | null; locks?: SteerLocks | null }) {
+export function useConversationWorkspace(deps: { project: () => Project | undefined; api: ConversationApi; operationId?: () => string; storage?: SteerStorage | null; locks?: SteerLocks | null; active?: () => boolean; writeBlocked?: () => boolean }) {
   const conversations = ref<Conversation[]>([]);
   const total = ref(0);
   const includeArchived = ref(false);
@@ -49,6 +49,8 @@ export function useConversationWorkspace(deps: { project: () => Project | undefi
   let pendingCreate: { projectId: number; operationId: string } | undefined;
   const newOperationId = deps.operationId ?? (() => crypto.randomUUID());
   const project = computed(deps.project);
+  const viewActive = computed(() => deps.active?.() !== false);
+  const writeBlocked = computed(() => Boolean(deps.writeBlocked?.()));
   const writable = computed(() => project.value?.status === "active" && !snapshot.value?.conversation.archived);
   const replyActive = computed(() => Boolean(snapshot.value?.latestReply && activeReplyStatuses.includes(snapshot.value.latestReply.status)));
   const messageBytes = computed(() => new TextEncoder().encode(draft.value.trim()).length);
@@ -59,16 +61,16 @@ export function useConversationWorkspace(deps: { project: () => Project | undefi
   });
   const composerBytes = computed(() => new TextEncoder().encode(composerDraft.value.trim()).length);
   const composerTooLong = computed(() => composerBytes.value > 16_384);
-  const canSteer = computed(() => steerSupported.value && !steerSaving.value && writable.value && replyActive.value && !cancelling.value && snapshot.value?.latestReply?.status !== "cancel_requested" && !steering.value && !queuedSteer.value && !readError.value && validSteerText(steerDraft.value.trim()));
-  const canSendSteer = computed(() => steerSupported.value && !steerSaving.value && !!queuedSteer.value && ["paused", "uncertain"].includes(queuedSteer.value.status) && writable.value && !replyActive.value && !busy.value && !pendingSend.value && !readError.value);
-  const canSend = computed(() => !steerSaving.value && !composerTooLong.value && (!queuedSteer.value || !!pendingSend.value) && writable.value && !!snapshot.value && !busy.value && !replyActive.value && !readError.value && !!composerDraft.value.trim());
-  const canDelete = computed(() => !steerSaving.value && !queuedSteer.value && !!snapshot.value && project.value?.status === "active" && !busy.value && !replyActive.value && !readError.value);
+  const canSteer = computed(() => viewActive.value && !writeBlocked.value && steerSupported.value && !steerSaving.value && writable.value && replyActive.value && !cancelling.value && snapshot.value?.latestReply?.status !== "cancel_requested" && !steering.value && !queuedSteer.value && !readError.value && validSteerText(steerDraft.value.trim()));
+  const canSendSteer = computed(() => viewActive.value && !writeBlocked.value && steerSupported.value && !steerSaving.value && !!queuedSteer.value && ["paused", "uncertain"].includes(queuedSteer.value.status) && writable.value && !replyActive.value && !busy.value && !pendingSend.value && !readError.value);
+  const canSend = computed(() => viewActive.value && !writeBlocked.value && !steerSaving.value && !composerTooLong.value && (!queuedSteer.value || !!pendingSend.value) && writable.value && !!snapshot.value && !busy.value && !replyActive.value && !readError.value && !!composerDraft.value.trim());
+  const canDelete = computed(() => viewActive.value && !writeBlocked.value && !steerSaving.value && !queuedSteer.value && !!snapshot.value && project.value?.status === "active" && !busy.value && !replyActive.value && !readError.value);
   const currentProject = (epoch: number, projectId: number) => !disposed && epoch === projectEpoch && project.value?.id === projectId;
   const currentSelection = (epoch: number, projectId: number, id: string) => !disposed && epoch === selectionEpoch && project.value?.id === projectId && selectedId.value === id;
   function stopPoll() { if (poll) clearTimeout(poll); poll = undefined; }
   function schedulePoll() {
     stopPoll();
-    if (!disposed && (replyActive.value || steering.value || (busy.value && pendingSend.value))) poll = setTimeout(() => { void readSelected(false); }, 1500);
+    if (!disposed && viewActive.value && (replyActive.value || steering.value || (busy.value && pendingSend.value))) poll = setTimeout(() => { void readSelected(false); }, 1500);
   }
   function storage(): SteerStorage {
     const value = deps.storage === undefined ? globalThis.localStorage : deps.storage;
@@ -141,7 +143,7 @@ export function useConversationWorkspace(deps: { project: () => Project | undefi
     try {
       await withSteerLock(value, () => {
         if (!currentSelection(epoch, projectId, id)) return;
-        if (!writable.value || !replyActive.value || cancelling.value || snapshot.value?.latestReply?.id !== value.replyId || snapshot.value.latestReply.status === "cancel_requested" || queuedSteer.value) throw Error("The reply changed before Steer was queued. Your text has been kept");
+        if (!viewActive.value || writeBlocked.value || !writable.value || !replyActive.value || cancelling.value || snapshot.value?.latestReply?.id !== value.replyId || snapshot.value.latestReply.status === "cancel_requested" || queuedSteer.value) throw Error("The reply changed before Steer was queued. Your text has been kept");
         // Read/check/write/verify and acceptance happen under one cross-window lock.
         persistSteer(value); queuedSteer.value = value; autoSteerId = value.operationId;
         if (steerDraft.value.trim() === value.content) steerDraft.value = "";
@@ -174,7 +176,7 @@ export function useConversationWorkspace(deps: { project: () => Project | undefi
   async function dispatchSteer(automatic: boolean) {
     let value = queuedSteer.value;
     const current = snapshot.value;
-    if (!value || !current || busy.value || pendingSend.value || replyActive.value || readError.value || !writable.value || steering.value || steerSaving.value) return;
+    if (!viewActive.value || writeBlocked.value || !value || !current || busy.value || pendingSend.value || replyActive.value || readError.value || !writable.value || steering.value || steerSaving.value) return;
     if (automatic && (value.status !== "queued" || value.operationId !== autoSteerId)) return;
     if (!automatic && !canSendSteer.value) return;
     const { projectId, conversationId: id } = value, epoch = selectionEpoch;
@@ -182,7 +184,7 @@ export function useConversationWorkspace(deps: { project: () => Project | undefi
     steerSaving.value = true;
     try {
       const input = await withSteerLock(value, () => {
-        if (!currentSelection(epoch, projectId, id) || !writable.value || replyActive.value || readError.value || busy.value || pendingSend.value) return;
+        if (!currentSelection(epoch, projectId, id) || !viewActive.value || writeBlocked.value || !writable.value || replyActive.value || readError.value || busy.value || pendingSend.value) return;
         if (automatic && (autoSteerId !== value!.operationId || queuedSteer.value?.status !== "queued" || snapshot.value?.latestReply?.id !== value!.replyId || snapshot.value.latestReply.status !== "completed" || snapshot.value.latestReply.outcomeUnknown || !snapshot.value.replyAvailability.available)) return;
         const saved = readSteer(projectId, id);
         if (!saved || saved.operationId !== value!.operationId || saved.content !== value!.content) throw Error("Steer changed. Reopen the conversation to review it");
@@ -199,7 +201,7 @@ export function useConversationWorkspace(deps: { project: () => Project | undefi
       if (!input || !currentSelection(epoch, projectId, id)) return;
       // Lock admission and promise continuation are separate turns: recheck before IPC.
       // Keep the prewritten identity if state changed; another window may have seen it.
-      if (!writable.value || replyActive.value || readError.value || busy.value || pendingSend.value || automatic && (snapshot.value?.latestReply?.id !== value.replyId || snapshot.value.latestReply.status !== "completed" || snapshot.value.latestReply.outcomeUnknown || !snapshot.value.replyAvailability.available)) {
+      if (!viewActive.value || writeBlocked.value || !writable.value || replyActive.value || readError.value || busy.value || pendingSend.value || automatic && (snapshot.value?.latestReply?.id !== value.replyId || snapshot.value.latestReply.status !== "completed" || snapshot.value.latestReply.outcomeUnknown || !snapshot.value.replyAvailability.available)) {
         const paused: ConversationSteer = { ...value, input, status: "uncertain", reason: "changed" };
         queuedSteer.value = paused;
         await withSteerLock(value, () => persistSteer(paused));
@@ -242,6 +244,8 @@ export function useConversationWorkspace(deps: { project: () => Project | undefi
   async function maybeDispatchSteer() {
     const value = queuedSteer.value, current = snapshot.value;
     if (!value || value.status !== "queued" || !current || value.operationId !== autoSteerId) return;
+    if (!viewActive.value) { void pauseSteer("navigation"); return; }
+    if (writeBlocked.value) return;
     const reply = current.latestReply;
     if (!writable.value || !reply || reply.id !== value.replyId) { pauseSteer("changed"); return; }
     if (reply.status === "cancel_requested") { pauseSteer("reply_stopped"); return; }
@@ -254,6 +258,14 @@ export function useConversationWorkspace(deps: { project: () => Project | undefi
   async function sendQueuedSteer() { await dispatchSteer(false); }
   function validateSnapshot(value: ConversationSnapshot, projectId: number, id: string) {
     if (value.conversation.projectId !== projectId || value.conversation.id !== id || value.messages.some(message => message.conversationId !== id)) throw Error("Conversation response does not match the selected workspace");
+    if (value.toolActivity !== undefined && (!Array.isArray(value.toolActivity) || value.toolActivity.length > 800 || value.toolActivity.some(item => !item || typeof item.id !== "string" || !item.id || typeof item.replyId !== "string" || typeof item.userMessageId !== "string" || typeof item.name !== "string" || typeof item.callId !== "string" || !Number.isSafeInteger(item.round) || item.round < 1 || !["completed", "rejected"].includes(item.status) || typeof item.summary !== "string" || item.summary.length > 65_536 || typeof item.createdAt !== "string"))) throw Error("Invalid saved tool activity response");
+  }
+  function mergeActivity(previous: ConversationToolActivity[] | undefined, incoming: ConversationToolActivity[] | undefined, messages: ConversationSnapshot["messages"]) {
+    if (previous === undefined && incoming === undefined) return undefined;
+    const visible = new Set(messages.flatMap(message => message.role === "user" ? [message.id] : message.replyToMessageId ? [message.replyToMessageId] : []));
+    const rows = new Map<string, ConversationToolActivity>();
+    for (const item of [...(previous ?? []), ...(incoming ?? [])]) if (visible.has(item.userMessageId)) rows.set(item.id, item);
+    return [...rows.values()].sort((a, b) => a.createdAt.localeCompare(b.createdAt) || a.round - b.round || a.id.localeCompare(b.id));
   }
   async function loadList(append = false) {
     const projectId = project.value?.id;
@@ -273,7 +285,7 @@ export function useConversationWorkspace(deps: { project: () => Project | undefi
   }
   async function readSelected(showLoading = true) {
     const projectId = project.value?.id, id = selectedId.value;
-    if (!projectId || !id) return;
+    if (!projectId || !id || !viewActive.value) return;
     const epoch = selectionEpoch, request = ++readRequest;
     if (showLoading) loading.value = true;
     try {
@@ -285,8 +297,10 @@ export function useConversationWorkspace(deps: { project: () => Project | undefi
       const previous = snapshot.value?.messages ?? [];
       const overlaps = firstSequence !== undefined && previous.length > 0 && previous[previous.length - 1].sequence >= firstSequence - 1;
       const older = overlaps ? previous.filter(message => message.sequence < firstSequence!) : [];
-      snapshot.value = { ...value, messages: [...older, ...value.messages], hasMore: older.length ? snapshot.value!.hasMore : value.hasMore };
-      titleDraft.value = value.conversation.title;
+      const messages = [...older, ...value.messages];
+      const keepTitleDraft = snapshot.value && titleDraft.value !== snapshot.value.conversation.title;
+      snapshot.value = { ...value, messages, toolActivity: mergeActivity(snapshot.value?.toolActivity, value.toolActivity, messages), hasMore: older.length ? snapshot.value!.hasMore : value.hasMore };
+      if (!keepTitleDraft) titleDraft.value = value.conversation.title;
       readError.value = "";
       const index = conversations.value.findIndex(item => item.id === id);
       if (index >= 0) conversations.value[index] = value.conversation;
@@ -307,7 +321,7 @@ export function useConversationWorkspace(deps: { project: () => Project | undefi
   }
   async function createConversation() {
     const projectId = project.value?.id;
-    if (!projectId || project.value?.status !== "active" || busy.value) return;
+    if (!viewActive.value || writeBlocked.value || !projectId || project.value?.status !== "active" || busy.value) return;
     const epoch = selectionEpoch, request = ++actionRequest;
     busy.value = true; actionError.value = "";
     pendingCreate ??= { projectId, operationId: newOperationId() };
@@ -359,7 +373,7 @@ export function useConversationWorkspace(deps: { project: () => Project | undefi
   }
   async function updateConversation(change: { title?: string; archived?: boolean }) {
     const current = snapshot.value;
-    if (!current || !project.value || project.value.status !== "active" || busy.value || replyActive.value || queuedSteer.value || readError.value) return;
+    if (!viewActive.value || writeBlocked.value || !current || !project.value || project.value.status !== "active" || busy.value || replyActive.value || queuedSteer.value || readError.value) return;
     const { projectId, id } = current.conversation;
     const epoch = selectionEpoch, request = ++actionRequest;
     busy.value = true; actionError.value = "";
@@ -443,14 +457,15 @@ export function useConversationWorkspace(deps: { project: () => Project | undefi
   }
   async function loadEarlier() {
     const current = snapshot.value, projectId = project.value?.id, id = selectedId.value;
-    if (!current || !projectId || !current.hasMore || loadingEarlier.value || !current.messages.length) return;
+    if (!viewActive.value || !current || !projectId || !current.hasMore || loadingEarlier.value || !current.messages.length) return;
     const epoch = selectionEpoch, beforeSequence = current.messages[0].sequence;
     loadingEarlier.value = true;
     try {
       const value = await deps.api.readConversation({ projectId, conversationId: id, beforeSequence, limit: 100 });
       if (!currentSelection(epoch, projectId, id) || !snapshot.value || snapshot.value.messages[0]?.sequence !== beforeSequence) return;
       validateSnapshot(value, projectId, id);
-      snapshot.value = { ...snapshot.value, messages: [...value.messages.filter(message => !snapshot.value!.messages.some(existing => existing.id === message.id)), ...snapshot.value.messages], hasMore: value.hasMore };
+      const messages = [...value.messages.filter(message => !snapshot.value!.messages.some(existing => existing.id === message.id)), ...snapshot.value.messages];
+      snapshot.value = { ...snapshot.value, messages, toolActivity: mergeActivity(snapshot.value.toolActivity, value.toolActivity, messages), hasMore: value.hasMore };
     } catch (error) { if (currentSelection(epoch, projectId, id)) readError.value = String(error); }
     finally { if (currentSelection(epoch, projectId, id)) loadingEarlier.value = false; }
   }
@@ -463,6 +478,11 @@ export function useConversationWorkspace(deps: { project: () => Project | undefi
     loadingList.value = false; loading.value = false; loadingEarlier.value = false; busy.value = false; cancelling.value = false; hasListSnapshot.value = false;
     void loadList();
   }, { immediate: true, flush: "sync" });
+  watch(viewActive, active => {
+    if (!active) { void pauseSteer("navigation"); stopPoll(); }
+    else if (selectedId.value) void readSelected(false);
+  }, { flush: "sync" });
+  watch(writeBlocked, blocked => { if (!blocked) void maybeDispatchSteer(); }, { flush: "sync" });
   watch(includeArchived, () => { void loadList(); });
   watch(query, () => {
     // Invalidate immediately; an old search cannot land during the debounce.
@@ -473,5 +493,5 @@ export function useConversationWorkspace(deps: { project: () => Project | undefi
     searchTimer = setTimeout(() => { searchTimer = undefined; void loadList(); }, 250);
   }, { flush: "sync" });
   onUnmounted(() => { pauseSteer("reopened"); disposed = true; projectEpoch++; selectionEpoch++; actionRequest++; stopPoll(); if (searchTimer) clearTimeout(searchTimer); });
-  return { steerSupported, steerSaving, steerDraft, composerDraft, composerBytes, composerTooLong, queuedSteer, steering, steerNotice, canSteer, canSendSteer, queueSteer, sendQueuedSteer, discardQueuedSteer, conversations, total, includeArchived, query, selectedId, snapshot, draft, titleDraft, loadingList, loading, loadingEarlier, busy, cancelling, listError, readError, actionError, hasListSnapshot, pendingSend, pendingDelete, project, writable, replyActive, messageBytes, messageTooLong, canSend, canDelete, requestDelete, cancelDelete, confirmDelete, loadList, readSelected, selectConversation, createConversation, send, updateConversation, setLinks, cancelReply, loadEarlier };
+  return { viewActive, steerSupported, steerSaving, steerDraft, composerDraft, composerBytes, composerTooLong, queuedSteer, steering, steerNotice, canSteer, canSendSteer, queueSteer, sendQueuedSteer, discardQueuedSteer, conversations, total, includeArchived, query, selectedId, snapshot, draft, titleDraft, loadingList, loading, loadingEarlier, busy, cancelling, listError, readError, actionError, hasListSnapshot, pendingSend, pendingDelete, project, writable, replyActive, messageBytes, messageTooLong, canSend, canDelete, requestDelete, cancelDelete, confirmDelete, loadList, readSelected, selectConversation, createConversation, send, updateConversation, setLinks, cancelReply, loadEarlier };
 }

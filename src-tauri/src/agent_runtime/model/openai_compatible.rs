@@ -314,6 +314,9 @@ impl OpenAiCompatibleGateway {
                 return Err(ModelError::UnsupportedCapability(truncate(message, 300)));
             }
         }
+        if request.strict_tool_calls {
+            validate_strict_tool_calls(&parsed)?;
+        }
         let unambiguous_usage = usage_wire_is_unambiguous(&text);
         Ok(ModelResponse {
             text: extract_message_text(&parsed),
@@ -388,4 +391,37 @@ pub fn extract_tool_calls(body: &JsonValue) -> Vec<ToolCall> {
             }
         })
         .collect()
+}
+
+/// Conversation tools require an unambiguous protocol. Keep this opt-in so
+/// existing gateway consumers retain their historical normalization behavior.
+fn validate_strict_tool_calls(body: &JsonValue) -> Result<(), ModelError> {
+    let invalid = || ModelError::Protocol("model_tool_calls_invalid".into());
+    let message = body.pointer("/choices/0/message").and_then(JsonValue::as_object).ok_or_else(invalid)?;
+    if message.get("function_call").is_some_and(|value| !value.is_null()) {
+        return Err(invalid());
+    }
+    let calls = match message.get("tool_calls") {
+        None | Some(JsonValue::Null) => &[][..],
+        Some(JsonValue::Array(calls)) => calls.as_slice(),
+        _ => return Err(invalid()),
+    };
+    if calls.is_empty() && body.pointer("/choices/0/finish_reason").and_then(JsonValue::as_str) == Some("tool_calls") {
+        return Err(invalid());
+    }
+    let mut ids = std::collections::BTreeSet::new();
+    for call in calls {
+        let id = call.get("id").and_then(JsonValue::as_str).ok_or_else(invalid)?;
+        let name = call.pointer("/function/name").and_then(JsonValue::as_str).ok_or_else(invalid)?;
+        let arguments = call.pointer("/function/arguments").and_then(JsonValue::as_str).ok_or_else(invalid)?;
+        if id.is_empty() || id.len() > 256 || id.chars().any(|c| c.is_control() || c.is_whitespace())
+            || !ids.insert(id) || name.is_empty() || name.len() > 128
+            || name.chars().any(|c| c.is_control() || c.is_whitespace())
+            || call.get("type").and_then(JsonValue::as_str) != Some("function")
+            || !serde_json::from_str::<JsonValue>(arguments).is_ok_and(|value| value.is_object())
+        {
+            return Err(invalid());
+        }
+    }
+    Ok(())
 }

@@ -9,6 +9,7 @@ export function useWorkbenchSkills(options: {
   tr: (zh: string, en: string) => string;
   notify: Notice;
   clearSelection: () => void;
+  context?: "library";
 }) {
   const { tr, notify, clearSelection } = options;
   const skills = ref<AgentSkill[]>([]);
@@ -126,7 +127,7 @@ export function useWorkbenchSkills(options: {
       });
       showSkillEditor.value = false;
       await loadSkills();
-      notify("success", tr("技能已保存，之后启动的任务会读取它", "Skill saved for future scans"));
+      notify("success", options.context === "library" ? tr("指令已保存，可在需要时选择使用", "Instructions saved and available to select") : tr("技能已保存，之后启动的任务会读取它", "Skill saved for future scans"));
     } catch (error) {
       notify("error", String(error));
     } finally {
