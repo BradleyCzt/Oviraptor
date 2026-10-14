@@ -56,4 +56,3 @@ pub async fn dashboard_stats(
         running_jobs,
     })
 }
-

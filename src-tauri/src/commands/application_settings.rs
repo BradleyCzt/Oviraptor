@@ -1,5 +1,9 @@
 //! Application appearance and reminder preferences, independent of business runtime.
-use crate::{db, models::{AppSettings, AppSettingsInput}, AppState};
+use crate::{
+    db,
+    models::{AppSettings, AppSettingsInput},
+    AppState,
+};
 use base64::{engine::general_purpose::STANDARD as BASE64_STANDARD, Engine as _};
 use std::fs;
 use tauri::{image::Image, State};
@@ -98,4 +102,3 @@ pub fn reset_app_icon(state: State<AppState>) -> Result<(), String> {
         .map_err(|error| error.to_string())?;
     Ok(())
 }
-
