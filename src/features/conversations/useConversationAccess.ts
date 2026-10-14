@@ -76,7 +76,7 @@ export function useConversationAccess(deps: {
     const value = access.value;
     if (!value) return;
     const desired = { agentEnabled: value.agentEnabled, readAssets: value.readAssets, readScans: value.readScans, selectedSkillIds: [...value.selectedSkillIds], ...change };
-    const expanding = desired.agentEnabled && !value.agentEnabled || desired.readAssets && !value.readAssets || desired.readScans && !value.readScans || desired.selectedSkillIds.some(id => !value.selectedSkillIds.includes(id)) || disclosureAccepted.value && !value.providerDisclosureAccepted;
+    const expanding = desired.agentEnabled && !value.agentEnabled || desired.readAssets && !value.readAssets || desired.readScans && !value.readScans || desired.selectedSkillIds.some(id => !value.selectedSkillIds.includes(id)) || Object.keys(change).length === 0 && disclosureAccepted.value && !value.providerDisclosureAccepted;
     if (expanding ? !canExpand.value : !canRevoke.value) return;
     if (expanding && (!disclosureAccepted.value || !value.providerIdentity)) { error.value = "Confirm that your configured model provider may receive the selected tool results before enabling access"; return; }
     await mutate((input, fresh) => {
