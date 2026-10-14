@@ -17,6 +17,7 @@ const owners = {
     'soft_delete_asset_selections', 'list_runs', 'list_logs', 'list_asset_events', 'startup_status',
     'acknowledge_interrupted_run'],
   asset_export: ['export_assets'],
+  tool_administrator: ['approve_tool_inventory', 'revoke_tool_inventory', 'read_tool_approval_inventory'],
 };
 for (const [owner, commands] of Object.entries(owners)) {
   test(`${owner} has an explicit Rust boundary and stable IPC registration`, () => {

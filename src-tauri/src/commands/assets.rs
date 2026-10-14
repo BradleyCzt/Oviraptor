@@ -955,4 +955,3 @@ pub fn acknowledge_interrupted_run(state: State<AppState>, run_id: i64) -> Resul
         .map_err(|error| error.to_string())?;
     Ok(())
 }
-

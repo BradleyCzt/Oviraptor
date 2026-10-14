@@ -75,7 +75,8 @@ include!("commands/ownership_o3_tests.rs");
 include!("commands/exposure.rs");
 include!("commands/hackerone.rs");
 include!("commands/environment.rs");
-include!("commands/tool_administrator.rs");
+#[path = "commands/tool_administrator.rs"]
+pub(crate) mod tool_administrator;
 include!("commands/src_assurance.rs");
 include!("commands/web_investigation_policy.rs");
 include!("commands/native_agent_trace.rs");

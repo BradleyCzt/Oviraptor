@@ -15,6 +15,7 @@ Tauri command names, input/output types and database behavior.
 | `commands::application_overview` | Dashboard aggregate | Read-only shell projection across projects, assets and runs. No execution dependency. |
 | `commands::application_settings` | Appearance, icon and reminder preferences | Database, file access and Tauri image decoding. No model or scanning dependency. |
 | `commands::workspace_config_profiles` | Profile list/save/delete and preservation of inert stored fields | Database configuration policy. Does not resolve model credentials or execute tasks. |
+| `commands::tool_administrator` | Signed inventory approval/revocation/read for administrators | Explicit `tool_supply::administrator_service` API and Tauri state. Task-external preparation metadata grants no execution permission. |
 | `conversations` | Standalone project-aware chat, conversation scope, permissions, model tool loop and history | Separate existing module; does not initialize asset or scan workspaces. |
 | `skill_packages` | Declarative Skill package provenance/import/resources | Separate existing module. Guidance/resources never add executable capabilities. |
 | Legacy scan command group in `commands.rs` | Scan admission, control, native Agent orchestration, findings, evidence, ownership and exposure workflows | Still an explicitly retained migration debt. Existing internal modules such as `authorization_side`, `http_exchange` and exposure modules continue to enforce their narrower contracts. |
@@ -44,9 +45,14 @@ owns its DTO extraction; later Rust DTO extraction must preserve serialization.
 
 ## Verification
 
-- `node --test tools/test_rust_business_boundaries.cjs`: 7/7 passed. Guards real
-  Rust module declarations, explicit dependencies, all 30 migrated IPC routes
+- `node --test tools/test_rust_business_boundaries.cjs`: 8/8 passed. Guards real
+  Rust module declarations, explicit dependencies, all 33 migrated IPC routes
   and the shared asset filter dependency.
+- `rustc --edition 2021 --test` on the unchanged production
+  `ToolInventoryFrame` parser and its existing `tool_inventory_frame_tests`
+  source section: 1/1 passed, covering exact frame sizes, invalid magic, empty
+  sections, truncation, trailing bytes and upper bounds. This isolated std-only
+  check does not compile the surrounding Tauri commands.
 - Native Rust compile/tests must additionally pass on the integrated tree.
   Architectural source checks are not a replacement for compilation.
 - Existing project/configuration/asset Rust tests retain narrow test-only

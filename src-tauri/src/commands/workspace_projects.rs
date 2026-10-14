@@ -281,4 +281,3 @@ pub(super) fn delete_project_for_connection(
     // 孤儿资产清理由独立的数据库维护流程负责。
     transaction.commit().map_err(|error| error.to_string())
 }
-
