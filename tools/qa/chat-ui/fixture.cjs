@@ -16,7 +16,30 @@ module.exports = function enhanceFixture(options = {}) {
   qa.failNextAccessWrite = false;
   qa.failNextAccessRead = false;
   qa.accessSkills = [{id:1,name:'Synthetic saved skill',description:'Metadata only until explicitly selected and read',enabled:true},{id:2,name:'Disabled synthetic skill',description:'Not available for selection',enabled:false}];
-  const newAccess = c => ({version:1,projectId:c.projectId,conversationId:c.id,revision:1,agentEnabled:true,directorySupported:true,readAssets:false,readScans:false,selectedSkillIds:[],directories:[],providerDisclosureAccepted:false,...(options.access||{})});
+  // These are inert identities, not URLs to call or credentials to reuse.
+  qa.provider = {identity:'synthetic-recipient-a',label:'https://provider-a.example.invalid'};
+  qa.skillVersions = {1:1,2:1};
+  const skillRevision = ids => JSON.stringify(ids.map(id=>[id,qa.accessSkills.find(skill=>skill.id===id)?.enabled?qa.skillVersions[id]??1:null]));
+  const newAccess = c => {
+    const value={version:1,projectId:c.projectId,conversationId:c.id,revision:1,agentEnabled:true,directorySupported:true,readAssets:false,readScans:false,selectedSkillIds:[],directories:[],providerDisclosureAccepted:false,...(options.access||{})};
+    value.acceptedProvider=value.providerDisclosureAccepted?qa.provider.identity:null;
+    value.acceptedSkills=Object.fromEntries(value.selectedSkillIds.map(id=>[id,qa.skillVersions[id]??1]));
+    return value;
+  };
+  const accessSnapshot = value => {
+    const skillsRequireReview=value.selectedSkillIds.some(id=>!qa.accessSkills.find(skill=>skill.id===id)?.enabled||value.acceptedSkills[id]!==qa.skillVersions[id]);
+    const {acceptedProvider,acceptedSkills,...snapshot}=clone(value);
+    return {...snapshot,providerIdentity:qa.provider.identity,providerLabel:qa.provider.label,skillRevision:skillRevision(value.selectedSkillIds),skillsRequireReview,providerDisclosureAccepted:value.providerDisclosureAccepted&&acceptedProvider===qa.provider.identity&&!skillsRequireReview};
+  };
+  qa.changeProvider = (identity,label) => {qa.provider={identity,label};};
+  qa.changeSkill = (id,enabled) => {qa.skillVersions[id]=(qa.skillVersions[id]??1)+1;const skill=qa.accessSkills.find(item=>item.id===id);if(skill&&typeof enabled==='boolean')skill.enabled=enabled;};
+  const packageDigest='a'.repeat(64), resourceDigest='b'.repeat(64);
+  qa.skillPackages=[];
+  qa.failNextSkillImport=false;
+  qa.skillPreview={digest:packageDigest,name:'Synthetic review methods',skillCount:1,fileCount:3,totalBytes:240,skills:[{name:'Synthetic imported skill',description:'Read-only synthetic review instructions',entryPath:'SKILL.md'}],missingCapabilities:['synthetic execution is intentionally unavailable'],warnings:['Synthetic package preview: review local-only instructions']};
+  qa.skillResourceText={'SKILL.md':'# Synthetic imported skill\n\nRead project evidence and summarize verified outcomes.\n','references/checklist.md':'# Safe synthetic checklist\n\nKeep checks scoped to the selected project.\n','scripts/example.js':'// Read-only synthetic script preview.\n// Nothing is executed by this fixture.\n'};
+  qa.skillResources=Object.entries(qa.skillResourceText).map(([path,content])=>({path,sizeBytes:new TextEncoder().encode(content).length,sha256:resourceDigest,text:true,kind:path==='SKILL.md'?'instructions':path.startsWith('scripts/')?'script':'reference'}));
+  const importedPackage = () => ({id:'synthetic-package',name:qa.skillPreview.name,source:'local synthetic fixture',version:'1.0',license:'CC0-1.0',builtin:false,digest:packageDigest,skillCount:1,fileCount:3,totalBytes:240,createdAt:now,skills:[{id:101,...qa.skillPreview.skills[0],enabled:true}],missingCapabilities:qa.skillPreview.missingCapabilities});
   qa.addToolActivity = (id, userMessageId, name, status, summary) => {
     const s=qa.snapshots[id];s.toolActivity??=[];
     s.toolActivity.push({id:`synthetic-tool-${id}-${s.toolActivity.length+1}`,replyId:s.latestReply?.id||'synthetic-history-reply',userMessageId,round:1,callId:`synthetic-call-${s.toolActivity.length+1}`,name,status,summary,createdAt:now});
@@ -50,29 +73,53 @@ module.exports = function enhanceFixture(options = {}) {
   Object.defineProperty(navigator,'clipboard',{configurable:true,value:{writeText:async value=>{if(qa.clipboardFail)throw Error('Synthetic clipboard rejected');qa.clipboard.push(value)}}});
   window.__TAURI_INTERNALS__.invoke=async (cmd,args={})=>{
     if(cmd==='plugin:dialog|open'){qa.calls.push({cmd,args:clone(args)});if(qa.delays[cmd])await new Promise(r=>setTimeout(r,qa.delays[cmd]));return qa.nextDirectory;}
+    if(['list_skill_packages','preview_skill_package','import_skill_package','set_packaged_skill_enabled','list_skill_package_resources','read_skill_package_resource','list_agent_instructions'].includes(cmd)){
+      qa.calls.push({cmd,args:clone(args)});
+      if(qa.delays[cmd])await new Promise(r=>setTimeout(r,qa.delays[cmd]));
+      if(cmd==='list_skill_packages')return clone(qa.skillPackages);
+      if(cmd==='list_agent_instructions')return [];
+      if(cmd==='preview_skill_package')return clone(qa.skillPreview);
+      if(cmd==='import_skill_package'){
+        if(args.input.path!==qa.nextDirectory||args.input.expectedDigest!==packageDigest)throw Error('synthetic_package_preview_changed');
+        qa.mutations.push({cmd,args:clone(args)});if(qa.failNextSkillImport){qa.failNextSkillImport=false;throw Error('Synthetic import failed; preview retained for review');}const item=importedPackage();qa.skillPackages=[item];qa.accessSkills.push({id:101,name:item.skills[0].name,description:item.skills[0].description,enabled:true});qa.skillVersions[101]=1;return clone(item);
+      }
+      if(cmd==='set_packaged_skill_enabled'){
+        const skill=qa.skillPackages.flatMap(item=>item.skills).find(item=>item.id===args.skillId);if(!skill)throw Error('synthetic_skill_unavailable');
+        qa.mutations.push({cmd,args:clone(args)});skill.enabled=args.enabled;qa.changeSkill(skill.id,args.enabled);return;
+      }
+      if(!qa.skillPackages.some(item=>item.skills.some(skill=>skill.id===args.skillId)))throw Error('synthetic_skill_unavailable');
+      if(cmd==='list_skill_package_resources')return {skillId:args.skillId,packageId:'synthetic-package',resources:clone(qa.skillResources)};
+      const content=qa.skillResourceText[args.path];if(content===undefined)throw Error('synthetic_resource_unavailable');
+      const bytes=new TextEncoder().encode(content),offset=args.offset??0,end=Math.min(offset+(args.limit??65536),bytes.length);
+      return {skillId:args.skillId,path:args.path,content:new TextDecoder().decode(bytes.slice(offset,end)),encoding:'utf8',offset,nextOffset:end<bytes.length?end:null,hasMore:end<bytes.length,totalBytes:bytes.length};
+    }
     if(['get_conversation_access','set_conversation_access','grant_conversation_directory','revoke_conversation_directory','list_conversation_access_skills'].includes(cmd)){
       qa.calls.push({cmd,args:clone(args)});const input=args.input||{},s=qa.snapshots[input.conversationId];
       if(!s||s.conversation.projectId!==input.projectId)throw Error('conversation_scope_mismatch');
       if(qa.delays[cmd])await new Promise(r=>setTimeout(r,qa.delays[cmd]));
       const value=qa.access[input.conversationId]??(qa.access[input.conversationId]=newAccess(s.conversation));
-      if(cmd==='get_conversation_access'){if(qa.failNextAccessRead){qa.failNextAccessRead=false;throw Error('Synthetic permissions read failed');}return clone(value);}
+      if(cmd==='get_conversation_access'){if(qa.failNextAccessRead){qa.failNextAccessRead=false;throw Error('Synthetic permissions read failed');}return accessSnapshot(value);}
       if(cmd==='list_conversation_access_skills')return clone(qa.accessSkills);
       qa.mutations.push({cmd,args:clone(args)});
       if(qa.failNextAccessWrite){qa.failNextAccessWrite=false;throw Error('Synthetic access save failed');}
       if(input.expectedRevision!==value.revision)throw Error('conversation_access_revision_conflict');
+      const old=accessSnapshot(value);
+      if(input.providerDisclosureAccepted&&(input.providerIdentity!==old.providerIdentity||input.expectedSkillRevision!==old.skillRevision))throw Error('conversation_access_provider_or_skill_changed_review_required');
       const active=s.latestReply&&['queued','running','cancel_requested'].includes(s.latestReply.status);
       if(cmd==='set_conversation_access'){
-        const expanding=input.agentEnabled&&!value.agentEnabled||input.readAssets&&!value.readAssets||input.readScans&&!value.readScans||input.selectedSkillIds.some(id=>!value.selectedSkillIds.includes(id));
+        const expanding=input.agentEnabled&&!value.agentEnabled||input.readAssets&&!value.readAssets||input.readScans&&!value.readScans||input.selectedSkillIds.some(id=>!value.selectedSkillIds.includes(id))||input.providerDisclosureAccepted&&!old.providerDisclosureAccepted;
         if(expanding&&active)throw Error('conversation_reply_active');
         if(expanding&&!input.providerDisclosureAccepted)throw Error('conversation_provider_disclosure_required');
+        if(input.providerDisclosureAccepted&&input.selectedSkillIds.some(id=>!qa.accessSkills.find(skill=>skill.id===id)?.enabled))throw Error('conversation_access_skill_unavailable');
         Object.assign(value,{agentEnabled:input.agentEnabled,readAssets:input.readAssets,readScans:input.readScans,selectedSkillIds:[...input.selectedSkillIds],providerDisclosureAccepted:input.providerDisclosureAccepted,revision:value.revision+1});
+        if(input.providerDisclosureAccepted){value.acceptedProvider=input.providerIdentity;value.acceptedSkills=Object.fromEntries(value.selectedSkillIds.map(id=>[id,qa.skillVersions[id]??1]));}
       }
       if(cmd==='grant_conversation_directory'){
         if(active)throw Error('conversation_reply_active');if(!input.providerDisclosureAccepted)throw Error('conversation_provider_disclosure_required');
-        value.directories.push({id:`synthetic-grant-${value.revision}`,label:input.path.split('/').at(-1),path:input.path});value.providerDisclosureAccepted=true;value.revision++;
+        value.directories.push({id:`synthetic-grant-${value.revision}`,label:input.path.split('/').at(-1),path:input.path});value.providerDisclosureAccepted=true;value.acceptedProvider=input.providerIdentity;value.revision++;
       }
       if(cmd==='revoke_conversation_directory'){value.directories=value.directories.filter(item=>item.id!==input.grantId);value.revision++;}
-      return clone(value);
+      return accessSnapshot(value);
     }
     if(cmd==='plugin:opener|open_url'){qa.calls.push({cmd,args:clone(args)});qa.openedLinks.push(args.url);return;}
 
