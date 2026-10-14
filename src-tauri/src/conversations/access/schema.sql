@@ -7,7 +7,9 @@ CREATE TABLE IF NOT EXISTS conversation_access (
     read_assets INTEGER NOT NULL DEFAULT 0 CHECK(read_assets IN (0,1)),
     read_scans INTEGER NOT NULL DEFAULT 0 CHECK(read_scans IN (0,1)),
     selected_skill_ids TEXT NOT NULL DEFAULT '[]' CHECK(json_valid(selected_skill_ids)),
-    provider_disclosure_accepted INTEGER NOT NULL DEFAULT 0 CHECK(provider_disclosure_accepted IN (0,1))
+    provider_disclosure_accepted INTEGER NOT NULL DEFAULT 0 CHECK(provider_disclosure_accepted IN (0,1)),
+    provider_identity TEXT NOT NULL DEFAULT '',
+    selected_skill_fingerprints TEXT NOT NULL DEFAULT '{}' CHECK(json_valid(selected_skill_fingerprints))
 );
 CREATE TABLE IF NOT EXISTS conversation_directory_grants (
     id TEXT PRIMARY KEY,

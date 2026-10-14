@@ -25,7 +25,7 @@ export function useConversationAccess(deps: {
   const canRevoke = computed(() => Boolean(scope.value && access.value && deps.writable() && !loading.value && !busy.value && freshAccess.value));
   const current = (generation: number, input: ConversationScope) => !disposed && generation === epoch && scope.value?.projectId === input.projectId && scope.value?.conversationId === input.conversationId;
   function validate(value: ConversationAccess, input: ConversationScope) {
-    if (!value || value.projectId !== input.projectId || value.conversationId !== input.conversationId || typeof value.directorySupported !== "boolean" || typeof value.agentEnabled !== "boolean" || value.version !== 1 || !Number.isSafeInteger(value.revision) || value.revision < 1 || typeof value.readAssets !== "boolean" || typeof value.readScans !== "boolean" || typeof value.providerDisclosureAccepted !== "boolean" || !Array.isArray(value.selectedSkillIds) || value.selectedSkillIds.some(id => !Number.isSafeInteger(id) || id < 1) || !Array.isArray(value.directories) || value.directories.some(item => !item || typeof item.id !== "string" || !item.id || typeof item.path !== "string" || typeof item.label !== "string")) throw Error("Invalid conversation access response; permissions have not been assumed");
+    if (!value || value.projectId !== input.projectId || value.conversationId !== input.conversationId || typeof value.directorySupported !== "boolean" || typeof value.agentEnabled !== "boolean" || value.version !== 1 || !Number.isSafeInteger(value.revision) || value.revision < 1 || typeof value.readAssets !== "boolean" || typeof value.readScans !== "boolean" || typeof value.providerDisclosureAccepted !== "boolean" || typeof value.skillsRequireReview !== "boolean" || typeof value.skillRevision !== "string" || !value.skillRevision || (value.providerIdentity !== null && typeof value.providerIdentity !== "string") || (value.providerLabel !== null && typeof value.providerLabel !== "string") || !Array.isArray(value.selectedSkillIds) || value.selectedSkillIds.some(id => !Number.isSafeInteger(id) || id < 1) || !Array.isArray(value.directories) || value.directories.some(item => !item || typeof item.id !== "string" || !item.id || typeof item.path !== "string" || typeof item.label !== "string")) throw Error("Invalid conversation access response; permissions have not been assumed");
   }
   async function refresh() {
     const input = scope.value;
@@ -35,7 +35,10 @@ export function useConversationAccess(deps: {
     try {
       const value = await deps.api.getConversationAccess({ ...input });
       if (!current(generation, input) || read !== request) return;
-      validate(value, input); freshAccess.value = true; access.value = value; disclosureAccepted.value = value.providerDisclosureAccepted || disclosureAccepted.value; error.value = "";
+      validate(value, input);
+      const sameConsent = access.value?.providerIdentity === value.providerIdentity && access.value?.skillRevision === value.skillRevision;
+      disclosureAccepted.value = value.providerDisclosureAccepted || sameConsent && disclosureAccepted.value;
+      freshAccess.value = true; access.value = value; error.value = "";
     } catch (failure) { if (current(generation, input) && read === request) { freshAccess.value = false; error.value = String(failure); } }
     finally { if (current(generation, input) && read === request) loading.value = false; }
   }
@@ -73,11 +76,11 @@ export function useConversationAccess(deps: {
     const value = access.value;
     if (!value) return;
     const desired = { agentEnabled: value.agentEnabled, readAssets: value.readAssets, readScans: value.readScans, selectedSkillIds: [...value.selectedSkillIds], ...change };
-    const expanding = desired.agentEnabled && !value.agentEnabled || desired.readAssets && !value.readAssets || desired.readScans && !value.readScans || desired.selectedSkillIds.some(id => !value.selectedSkillIds.includes(id));
+    const expanding = desired.agentEnabled && !value.agentEnabled || desired.readAssets && !value.readAssets || desired.readScans && !value.readScans || desired.selectedSkillIds.some(id => !value.selectedSkillIds.includes(id)) || disclosureAccepted.value && !value.providerDisclosureAccepted;
     if (expanding ? !canExpand.value : !canRevoke.value) return;
-    if (expanding && !disclosureAccepted.value) { error.value = "Confirm that your configured model provider may receive the selected tool results before enabling access"; return; }
+    if (expanding && (!disclosureAccepted.value || !value.providerIdentity)) { error.value = "Confirm that your configured model provider may receive the selected tool results before enabling access"; return; }
     await mutate((input, fresh) => {
-      const payload: ConversationAccessInput = { ...input, expectedRevision: fresh.revision, ...desired, providerDisclosureAccepted: expanding ? disclosureAccepted.value : fresh.providerDisclosureAccepted };
+      const payload: ConversationAccessInput = { ...input, expectedRevision: fresh.revision, ...desired, providerDisclosureAccepted: expanding ? disclosureAccepted.value : fresh.providerDisclosureAccepted, providerIdentity: fresh.providerIdentity, expectedSkillRevision: fresh.skillRevision };
       return deps.api.setConversationAccess(payload);
     });
   }
@@ -103,7 +106,7 @@ export function useConversationAccess(deps: {
     if (!canExpand.value || !access.value?.directorySupported || !stagedDirectory.value) return;
     if (!disclosureAccepted.value) { error.value = "Confirm that files read from this directory may be sent to your configured model provider"; return; }
     const path = stagedDirectory.value;
-    await mutate((input, value) => deps.api.grantConversationDirectory({ ...input, expectedRevision: value.revision, path, providerDisclosureAccepted: true }));
+    await mutate((input, value) => deps.api.grantConversationDirectory({ ...input, expectedRevision: value.revision, path, providerDisclosureAccepted: true, providerIdentity: value.providerIdentity, expectedSkillRevision: value.skillRevision }));
   }
   async function revokeDirectory(grantId: string) {
     if (!canRevoke.value || !access.value?.directories.some(item => item.id === grantId)) return;

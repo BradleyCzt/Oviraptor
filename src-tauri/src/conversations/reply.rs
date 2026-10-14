@@ -99,7 +99,11 @@ pub(super) fn receipt(db: &Connection, input: &SendInput) -> Result<Option<SendR
         reply,
     }))
 }
-fn request(db: &Connection, item: &Conversation, profile: &GatewayProfile) -> Result<(ModelRequest, i64), String> {
+fn request(
+    db: &Connection,
+    item: &Conversation,
+    profile: &GatewayProfile,
+) -> Result<(ModelRequest, super::access::FlightScope), String> {
     let id = &item.id;
     let mut history: Vec<Value> = {
         let mut stmt=db.prepare("SELECT role,content FROM conversation_messages WHERE conversation_id=?1 ORDER BY sequence DESC LIMIT 64").map_err(err)?;
@@ -123,29 +127,45 @@ fn request(db: &Connection, item: &Conversation, profile: &GatewayProfile) -> Re
             "investigations":"explicit readScans grant and provider disclosure required; saved summaries only",
             "skills":"only explicitly selected Skills after disclosure","directories":"only explicitly granted directory roots after disclosure",
             "liveScans":"available through the visible investigation configuration and authorization UI, not through chat tools"}});
-    let mut messages = vec![json!({"role":"system","content":SYSTEM}),json!({"role":"user","content":context.to_string()})];
+    let mut messages = vec![
+        json!({"role":"system","content":SYSTEM}),
+        json!({"role":"user","content":context.to_string()}),
+    ];
     messages.extend(history);
-    let mut request = ModelRequest::new(messages, super::tools::specs(db,item)?);
+    let mut request = ModelRequest::new(messages, super::tools::specs(db, item)?);
     let budget = CONTEXT_BYTES.min(profile.request_budget_bytes());
     // Drop only older ordinary messages; reserve room for bounded tool results
     // where possible without dropping the current user message or project data.
-    let history_budget = if request.tools.is_empty() {budget} else {budget.saturating_sub(8192)};
-    while super::agent::request_bytes(profile,&request)>history_budget && request.messages.len()>3 {
+    let history_budget = if request.tools.is_empty() {
+        budget
+    } else {
+        budget.saturating_sub(8192)
+    };
+    while super::agent::request_bytes(profile, &request) > history_budget
+        && request.messages.len() > 3
+    {
         request.messages.remove(2);
     }
-    if super::agent::request_bytes(profile,&request)>budget {return Err("conversation_context_too_large".into());}
+    if super::agent::request_bytes(profile, &request) > budget {
+        return Err("conversation_context_too_large".into());
+    }
     request.request_timeout = Some(REPLY_TIMEOUT);
     request.reject_redirects = true;
     request.strict_tool_calls = true;
     request.max_response_bytes = Some(1_048_576);
-    Ok((request,grants.revision))
+    // Capture the permission lease in the same transaction as the exact request.
+    // Re-snapshotting after commit could silently downgrade a stale granted
+    // request into an ungranted flight and miss a provider/content change.
+    let scope = super::access::flight_scope(db, item.project_id, id, grants.revision, profile)?;
+    Ok((request, scope))
 }
 
 /// The lock is acquired before publishing queued and survives through the
 /// bounded provider loop and final commit. Replays observe receipts, not jobs.
 pub(super) fn send(path: &Path, input: SendInput) -> Result<SendReceipt, String> {
     send_with(path, input, resolve_profile, |profile, request, cancel| {
-        OpenAiCompatibleGateway::new(profile, &request.tools).complete_once_observed(request, cancel)
+        OpenAiCompatibleGateway::new(profile, &request.tools)
+            .complete_once_observed(request, cancel)
     })
 }
 fn send_with<F, G>(
@@ -215,7 +235,7 @@ where
         if tx.execute("INSERT INTO conversation_replies(id,conversation_id,user_message_id,base_revision,status,code,message,model,created_at,updated_at) VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?9)",params![id,item.id,user,item.revision+1,status,code,message,model,now]).map_err(err)?!=1{return Err("conversation_write_not_persisted".into());}
         if let Some(profile) = profile {
             match request(&tx, &item, &profile) {
-                Ok((request, access_revision)) => {
+                Ok((request, access_scope)) => {
                     let context_hash = format!(
                         "{:x}",
                         Sha256::digest(
@@ -228,7 +248,7 @@ where
                         params![id, context_hash],
                     )
                     .map_err(err)?;
-                    model_request = Some((id, profile, request, access_revision));
+                    model_request = Some((id, profile, request, access_scope));
                 }
                 Err(code) => {
                     tx.execute("UPDATE conversation_replies SET status='failed',code=?2,message='消息超出当前模型的上下文限制，未发送模型请求。' WHERE id=?1",params![id,code]).map_err(err)?;
@@ -245,7 +265,7 @@ where
     }
     tx.commit()
         .map_err(|_| "conversation_send_commit_unconfirmed".to_string())?;
-    let Some((reply_id, profile, request, access_revision)) = model_request else {
+    let Some((reply_id, profile, request, access_scope)) = model_request else {
         return Ok(saved);
     };
     // Publishing running occurs while the same OS lock is already held.
@@ -285,7 +305,17 @@ where
     });
     let mut scoped_item = item.clone();
     scoped_item.revision = expected;
-    let result = super::agent::run(path, scoped_item, &reply_id, access_revision, profile, request, &cancel, started, complete);
+    let result = super::agent::run(
+        path,
+        scoped_item,
+        &reply_id,
+        access_scope,
+        profile,
+        request,
+        &cancel,
+        started,
+        complete,
+    );
     finish(
         &mut db,
         &input,
@@ -371,14 +401,22 @@ fn finish(
                     "回复等待超时。不会自动重发；模型端结果及费用可能未知。".into()
                 } else if cancelled {
                     "回复已停止；模型端结果及费用可能未知。".into()
-                } else if matches!(error, crate::agent_runtime::model::ModelError::UnsupportedCapability(_)) {
+                } else if matches!(
+                    error,
+                    crate::agent_runtime::model::ModelError::UnsupportedCapability(_)
+                ) {
                     "当前模型不支持工具调用。可在对话权限中切换为纯文字模式，或选择支持工具的模型后发送新消息；不会自动重发。".into()
                 } else {
                     "模型请求失败。不会自动重试，请检查配置或连接；模型端结果及费用可能未知。"
                         .into()
                 },
                 unknown,
-                tx.query_row("SELECT usage_json FROM conversation_replies WHERE id=?1",[id],|r|r.get::<_,String>(0)).map_err(err)?,
+                tx.query_row(
+                    "SELECT usage_json FROM conversation_replies WHERE id=?1",
+                    [id],
+                    |r| r.get::<_, String>(0),
+                )
+                .map_err(err)?,
                 None,
             )
         }

@@ -36,14 +36,15 @@ export interface ConversationToolActivity {
 export interface ConversationAccess extends ConversationScope {
   directorySupported: boolean; agentEnabled: boolean; version: 1; revision: number; readAssets: boolean; readScans: boolean;
   selectedSkillIds: number[]; directories: { id: string; label: string; path: string }[];
-  providerDisclosureAccepted: boolean;
+  providerDisclosureAccepted: boolean; providerIdentity: string | null; providerLabel: string | null;
+  skillsRequireReview: boolean; skillRevision: string;
 }
 export interface ConversationAccessSkill { id: number; name: string; description: string; enabled: boolean }
 export interface ConversationAccessInput extends ConversationScope {
   expectedRevision: number; agentEnabled: boolean; readAssets: boolean; readScans: boolean;
-  selectedSkillIds: number[]; providerDisclosureAccepted: boolean;
+  selectedSkillIds: number[]; providerDisclosureAccepted: boolean; providerIdentity: string | null; expectedSkillRevision: string;
 }
 export interface ConversationDirectoryGrantInput extends ConversationScope {
-  expectedRevision: number; path: string; providerDisclosureAccepted: true;
+  expectedRevision: number; path: string; providerDisclosureAccepted: true; providerIdentity: string | null; expectedSkillRevision: string;
 }
 export interface ConversationDirectoryRevokeInput extends ConversationScope { expectedRevision: number; grantId: string }
