@@ -103,3 +103,25 @@ The design checkpoint's numerical limits are stale: source at `d61454c`
 already permits 128 selected skills and a 24 KiB serialized tool result.
 These values alone do not prove pagination, revocation, content fingerprints
 or provider binding are correct.
+
+### Exact WIP baseline results
+
+All runs below use the independent `d61454c` archive, not the changing
+integration working tree. Counts overlap between suites and must not be added.
+
+| Command | Actual result | Cloud log |
+| --- | --- | --- |
+| `npm run build` | Passed Vue/TypeScript and Vite production build | `/workspace/validation/baseline-build.log` |
+| `npm run test:application-shell` | 107 passed, 0 failed | `/workspace/validation/baseline-shell.log` |
+| `node --test tools/test_conversation_access.cjs` | 16 passed, 0 failed | `/workspace/validation/baseline-access.log` |
+| `npm run test:ui` | 1,120 passed, 0 failed | `/workspace/validation/baseline-ui.log` |
+| `npm run test:exposure` | 118 passed, 0 failed | `/workspace/validation/baseline-exposure.log` |
+| `npm run test:plugins` | 66 passed, 0 failed | `/workspace/validation/baseline-plugins.log` |
+| `npm run test:release-bundle` | 11 passed, 12 platform skips, 0 failed | `/workspace/validation/baseline-release-bundle.log` |
+| `cargo test --manifest-path src-tauri/Cargo.toml --locked --lib --no-run --jobs 2` before private system dependencies | Failed, exit 101: missing `glib-2.0.pc` | `/workspace/validation/rust-baseline-initial.log` |
+
+Dependency installation attempts are also retained: the first `npm ci` failed
+because the default home cache was not writable; retry using the workspace
+cache and official registry succeeded. Its incidental `yarn.lock` rewrite was
+reverted before commits. The Library transfer attempts failed without creating
+archive bytes. No failed or skipped check is represented as a passing test.
