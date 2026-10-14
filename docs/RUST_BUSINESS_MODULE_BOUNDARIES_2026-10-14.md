@@ -24,8 +24,8 @@ Tauri command names, input/output types and database behavior.
 `lib.rs` registers migrated commands using their actual module paths. Frontend
 IPC strings are unchanged. Each migrated module has its own imports and cannot
 implicitly access the private functions/imports of the legacy scan/Agent scope.
-Ownership review has one explicit `assets::asset_filter` dependency; CSV export
-has three explicit asset query dependencies. No wildcard parent import restores
+Ownership regression fixtures have one explicit test-only `assets::asset_filter`
+dependency; CSV export has three explicit production asset query dependencies. No wildcard parent import restores
 the old shared namespace.
 
 ## Migration limits and next cut

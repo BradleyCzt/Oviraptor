@@ -36,8 +36,8 @@ for (const [owner, commands] of Object.entries(owners)) {
     }
   });
 }
-test('asset exports and ownership share the asset selection predicate explicitly', () => {
+test('asset exports share the inventory predicate and ownership fixtures verify it', () => {
   assert.match(read('src-tauri/src/commands/asset_export.rs'), /use super::assets::\{asset_filter, asset_from_row, ASSET_SELECT\}/);
-  assert.match(legacy, /use assets::asset_filter;/);
+  assert.match(legacy, /#\[cfg\(test\)\]\s*use assets::asset_filter;/);
   assert.match(read('src-tauri/src/commands/asset_ownership.rs'), /asset_filter\(&query, true\)/);
 });

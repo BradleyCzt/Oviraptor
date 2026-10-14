@@ -399,7 +399,8 @@ pub(super) fn asset_from_row(row: &Row<'_>) -> rusqlite::Result<Asset> {
         first_seen: row.get(26)?,
         last_seen: row.get(27)?,
         last_alive: row.get(28)?,
-        extra: json(row.get(29)?),
+        extra: serde_json::from_str(&row.get::<_, String>(29)?)
+            .unwrap_or_else(|_| serde_json::json!({})),
         sentinel_status: row.get(30)?,
         sentinel_scan_count: row.get(31)?,
         sentinel_sent_at: row.get(32)?,

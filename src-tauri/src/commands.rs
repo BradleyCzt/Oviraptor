@@ -56,7 +56,8 @@ pub(crate) mod assets;
 #[path = "commands/asset_export.rs"]
 pub(crate) mod asset_export;
 
-// Ownership review intentionally reuses the asset selection predicate.
+// Ownership regression fixtures compare against the asset selection predicate.
+#[cfg(test)]
 use assets::asset_filter;
 #[cfg(test)]
 use assets::detect_target;
