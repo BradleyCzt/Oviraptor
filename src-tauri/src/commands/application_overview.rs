@@ -23,7 +23,7 @@ pub async fn dashboard_stats(
             |row| row.get(0),
         )
         .map_err(|error| error.to_string())?;
-    let (asset_count, alive_count, pending_count, blocked_count) = connection
+    let (asset_count, alive_count, pending_count, blocked_count): (i64, i64, i64, i64) = connection
         .query_row(
             r#"SELECT COUNT(*),
                       COALESCE(SUM(CASE WHEN a.probe_outcome IN ('web_alive','web_restricted','browser_render_required','virtual_host_required') AND COALESCE(a.content_category,'') NOT IN ('gambling','porn','custom_rule') THEN 1 ELSE 0 END),0),
@@ -35,6 +35,17 @@ pub async fn dashboard_stats(
             |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
         )
         .map_err(|error| error.to_string())?;
+    let page_blocked: i64 = connection
+        .query_row(
+            &format!(
+                "SELECT COUNT(*) FROM project_assets pa WHERE (?1 IS NULL OR pa.project_id=?1) AND {}",
+                crate::page_isolation::owned_isolation_sql()
+            ),
+            [project_id],
+            |row| row.get(0),
+        )
+        .map_err(|error| error.to_string())?;
+    let blocked_count = blocked_count + page_blocked;
     let (new_count, changed_count) = connection
         .query_row(
             r#"SELECT COALESCE(SUM(CASE WHEN event_type='new' THEN 1 ELSE 0 END),0),

@@ -211,6 +211,11 @@ pub struct AssetQuery {
     pub sort_by: String,
     #[serde(default)]
     pub sort_direction: String,
+    /// Presentation only. Consumers of raw assets retain every member by default.
+    #[serde(default)]
+    pub collapse_identical_responses: bool,
+    #[serde(default)]
+    pub response_fingerprint: String,
 }
 
 fn default_page() -> i64 {
@@ -241,6 +246,8 @@ fn default_join() -> String {
 pub struct AssetPage {
     pub items: Vec<Asset>,
     pub total: i64,
+    /// Original members matching all filters, before presentation folding.
+    pub member_total: i64,
     pub page: i64,
     pub page_size: i64,
     pub summary: AssetSummary,

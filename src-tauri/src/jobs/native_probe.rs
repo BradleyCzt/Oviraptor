@@ -23,6 +23,13 @@ const PROBE_FIELDS: &[&str] = &[
     "probe_tls_verified",
     "probe_attempts",
     "probe_body_truncated",
+    "probe_body_complete",
+    "probe_body_limit",
+    "probe_content_encoding",
+    "probe_content_range",
+    "probe_response_fingerprint",
+    "probe_network_elapsed_ms",
+    "probe_total_timeout_ms",
     "probe_error",
     "content_category",
     "content_risk_score",
@@ -39,6 +46,7 @@ const PROBE_FIELDS: &[&str] = &[
 pub struct ProbeOptions {
     pub workers: usize,
     pub timeout: Duration,
+    pub total_timeout: Duration,
     pub retries: usize,
     pub max_body_bytes: usize,
     pub include_other: bool,
@@ -58,36 +66,13 @@ pub struct ProbeOptions {
 }
 
 fn build_probe_url(row: &Record) -> Option<String> {
-    let mut raw = text(row, &["link", "host", "ip"]);
-    if raw.is_empty() {
-        return None;
-    }
-    let protocol = text(row, &["protocol"]).to_ascii_lowercase();
-    let port = number(row, &["port"]);
-    if !raw.contains("://") {
-        let scheme = if protocol.contains("https")
-            || [443, 4443, 6443, 7443, 8443, 9443, 10443].contains(&port)
-        {
-            "https"
-        } else if protocol.contains("http") {
-            "http"
-        } else if port > 0 {
-            "tcp+web"
-        } else {
-            return None;
-        };
-        let needs_port =
-            port > 0 && !((scheme == "http" && port == 80) || (scheme == "https" && port == 443));
-        raw = format!(
-            "{scheme}://{raw}{}",
-            if needs_port {
-                format!(":{port}")
-            } else {
-                String::new()
-            }
-        );
-    }
-    Some(raw)
+    super::asset_identity::endpoint_url(
+        &text(row, &["link"]),
+        &text(row, &["host"]),
+        &text(row, &["protocol"]),
+        &text(row, &["ip"]),
+        &text(row, &["port"]),
+    )
 }
 
 fn non_public_literal(url: &str) -> bool {
@@ -195,7 +180,12 @@ fn cached_probe_is_current(row: &Record) -> bool {
     }
     let login = text(row, &["has_login"]);
     let register = text(row, &["has_register"]);
-    matches!(login.as_str(), "0" | "1") && matches!(register.as_str(), "0" | "1")
+    matches!(login.as_str(), "0" | "1")
+        && matches!(register.as_str(), "0" | "1")
+        && matches!(
+            text(row, &["probe_body_complete"]).as_str(),
+            "true" | "false"
+        )
 }
 
 fn note_portal_url(login: &mut bool, register: &mut bool, raw: &str) {
@@ -272,7 +262,12 @@ fn path_has_login(path: &str) -> bool {
 
 fn path_has_register(path: &str) -> bool {
     const NEEDLES: &[&str] = &[
-        "/register", "register.", "signup", "sign-up", "sign_up", "/regist",
+        "/register",
+        "register.",
+        "signup",
+        "sign-up",
+        "sign_up",
+        "/regist",
     ];
     NEEDLES.iter().any(|needle| path.contains(needle))
         || path_segments(path)
@@ -280,7 +275,7 @@ fn path_has_register(path: &str) -> bool {
 }
 
 fn path_segments(path: &str) -> impl Iterator<Item = &str> {
-    path.split(|character: char| matches!(character, '/' | '.' | '-' | '_' | ';'))
+    path.split(['/', '.', '-', '_', ';'])
         .filter(|segment| !segment.is_empty())
 }
 
@@ -314,7 +309,11 @@ fn scan_portal_markup(body: &str, login: &mut bool, register: &mut bool) {
             index += close + 1;
             continue;
         }
-        index += rest.chars().next().map(|character| character.len_utf8()).unwrap_or(1);
+        index += rest
+            .chars()
+            .next()
+            .map(|character| character.len_utf8())
+            .unwrap_or(1);
     }
 }
 
@@ -326,24 +325,27 @@ fn starts_tag(rest: &str, name: &str) -> bool {
 fn tag_boundary(rest: &str, at: usize) -> bool {
     match rest[at..].chars().next() {
         None => true,
-        Some(character) => !character.is_ascii_alphanumeric() && character != '-' && character != '_',
+        Some(character) => {
+            !character.is_ascii_alphanumeric() && character != '-' && character != '_'
+        }
     }
 }
 
 fn control_tag_name(rest: &str) -> Option<&'static str> {
-    for name in ["button", "input", "form", "label", "a"] {
-        if starts_tag(rest, name) {
-            return Some(name);
-        }
-    }
-    None
+    ["button", "input", "form", "label", "a"]
+        .into_iter()
+        .find(|name| starts_tag(rest, name))
 }
 
 fn panic_message(payload: Box<dyn std::any::Any + Send>) -> String {
     payload
         .downcast_ref::<String>()
         .cloned()
-        .or_else(|| payload.downcast_ref::<&str>().map(|message| (*message).to_string()))
+        .or_else(|| {
+            payload
+                .downcast_ref::<&str>()
+                .map(|message| (*message).to_string())
+        })
         .unwrap_or_else(|| "未提供异常说明".into())
 }
 
@@ -449,7 +451,7 @@ fn javascript_shell(body: &str, content_type: &str) -> bool {
     visible.chars().count() < 40 && scripts > 0 && (root || scripts >= 2)
 }
 
-fn tcp_alive(url: &str, timeout: Duration) -> bool {
+fn tcp_alive(url: &str, source_ip: &str, timeout: Duration, allow_private: bool) -> bool {
     let Ok(parsed) = reqwest::Url::parse(
         url.replace("tcp+web://", "http://")
             .replace("tcp+tls://", "https://")
@@ -464,13 +466,38 @@ fn tcp_alive(url: &str, timeout: Duration) -> bool {
     let Some(port) = parsed.port_or_known_default() else {
         return false;
     };
-    (host, port)
-        .to_socket_addrs()
+    // Never perform another blocking system DNS lookup after HTTP failed.
+    // reqwest's own request deadline already covers its resolution; this
+    // fallback uses only an observed FOFA IP or an explicitly literal URL IP.
+    let ip = host
+        .trim_matches(['[', ']'])
+        .parse::<IpAddr>()
         .ok()
-        .and_then(|mut addresses| {
-            addresses.find(|address| TcpStream::connect_timeout(address, timeout).is_ok())
-        })
-        .is_some()
+        .or_else(|| source_ip.parse::<IpAddr>().ok());
+    ip.is_some_and(|ip| {
+        let address = std::net::SocketAddr::new(ip, port);
+        (allow_private || !non_public_literal(&format!("http://{address}")))
+            && TcpStream::connect_timeout(&address, timeout).is_ok()
+    })
+}
+
+fn deadline_probe(input_url: &str, spent: Duration, budget: Duration, attempts: usize) -> Record {
+    let mut result = empty_probe(
+        input_url,
+        "unreachable",
+        "单个入口的总网络时间预算已耗尽，已停止重试和协议回退",
+    );
+    result.insert("probe_entry_state".into(), "deadline_exceeded".into());
+    result.insert(
+        "probe_network_elapsed_ms".into(),
+        spent.as_millis().to_string(),
+    );
+    result.insert(
+        "probe_total_timeout_ms".into(),
+        budget.as_millis().to_string(),
+    );
+    result.insert("probe_attempts".into(), attempts.to_string());
+    result
 }
 
 fn probe_one(
@@ -502,6 +529,10 @@ fn probe_one(
         });
     }
     let mut attempts = 0usize;
+    // Deliberate rate/per-host queue waits do not count as slow target response.
+    // All actual network work, including body streaming and fallback, shares
+    // this one budget rather than granting a fresh timeout to every retry.
+    let mut network_spent = Duration::ZERO;
     let mut last_error = String::new();
     let mut abnormal = None;
     for candidate in candidates {
@@ -513,10 +544,15 @@ fn probe_one(
             if !pacing.wait(&host, rate, options.per_host_interval, cancel) {
                 return empty_probe(&input_url, "skipped", "__CANCELLED__");
             }
+            let remaining = options.total_timeout.saturating_sub(network_spent);
+            if remaining.is_zero() {
+                return deadline_probe(&input_url, network_spent, options.total_timeout, attempts);
+            }
             attempts += 1;
             let started = Instant::now();
             match client
                 .get(&candidate)
+                .timeout(options.timeout.min(remaining))
                 .header(
                     "User-Agent",
                     "Mozilla/5.0 (compatible; AuthorizedAssetVerifier/2.0)",
@@ -539,16 +575,45 @@ fn probe_one(
                         .and_then(|v| v.to_str().ok())
                         .unwrap_or_default()
                         .to_string();
+                    let content_encoding = response
+                        .headers()
+                        .get(reqwest::header::CONTENT_ENCODING)
+                        .and_then(|v| v.to_str().ok())
+                        .unwrap_or_default()
+                        .to_string();
+                    let content_range = response
+                        .headers()
+                        .get(reqwest::header::CONTENT_RANGE)
+                        .and_then(|v| v.to_str().ok())
+                        .unwrap_or_default()
+                        .to_string();
                     let mut bytes = Vec::new();
-                    if let Err(error) = std::io::Read::by_ref(&mut response)
-                        .take((options.max_body_bytes + 1) as u64)
-                        .read_to_end(&mut bytes)
-                    {
+                    let read_result = std::io::Read::by_ref(&mut response)
+                        .take(options.max_body_bytes.saturating_add(1) as u64)
+                        .read_to_end(&mut bytes);
+                    network_spent = network_spent.saturating_add(started.elapsed());
+                    if let Err(error) = read_result {
+                        if network_spent >= options.total_timeout {
+                            return deadline_probe(
+                                &input_url,
+                                network_spent,
+                                options.total_timeout,
+                                attempts,
+                            );
+                        }
                         last_error = error.to_string();
                         continue;
                     }
                     let truncated = bytes.len() > options.max_body_bytes;
                     bytes.truncate(options.max_body_bytes);
+                    let body_hash = format!("{:x}", Sha256::digest(&bytes));
+                    // A limit-sized response is complete only after the extra
+                    // byte read reaches EOF. A shared prefix is never equality.
+                    let response_fingerprint = if !truncated && !bytes.is_empty() {
+                        full_response_fingerprint(status, bytes.len(), &body_hash, &content_type)
+                    } else {
+                        String::new()
+                    };
                     let body = String::from_utf8_lossy(&bytes);
                     let title = html_title(&body);
                     let (has_login, has_register) = portal_flags(&final_url, &title, &body);
@@ -599,10 +664,23 @@ fn probe_one(
                         ),
                         ("probe_attempts", attempts.to_string()),
                         ("probe_body_truncated", truncated.to_string()),
+                        ("probe_body_complete", (!truncated).to_string()),
+                        ("probe_body_limit", options.max_body_bytes.to_string()),
+                        ("probe_content_encoding", content_encoding),
+                        ("probe_content_range", content_range),
+                        ("probe_response_fingerprint", response_fingerprint),
+                        (
+                            "probe_network_elapsed_ms",
+                            network_spent.as_millis().to_string(),
+                        ),
+                        (
+                            "probe_total_timeout_ms",
+                            options.total_timeout.as_millis().to_string(),
+                        ),
                         ("content_category", content_category),
                         ("content_risk_score", content_score.to_string()),
                         ("content_matches", content_matches),
-                        ("body_sha256", format!("{:x}", Sha256::digest(&bytes))),
+                        ("body_sha256", body_hash),
                         ("probe_body_bytes", bytes.len().to_string()),
                         ("has_login", has_login.into()),
                         ("has_register", has_register.into()),
@@ -614,7 +692,18 @@ fn probe_one(
                     }
                     abnormal = Some(result);
                 }
-                Err(error) => last_error = error.to_string(),
+                Err(error) => {
+                    network_spent = network_spent.saturating_add(started.elapsed());
+                    if network_spent >= options.total_timeout {
+                        return deadline_probe(
+                            &input_url,
+                            network_spent,
+                            options.total_timeout,
+                            attempts,
+                        );
+                    }
+                    last_error = error.to_string();
+                }
             }
         }
     }
@@ -625,7 +714,19 @@ fn probe_one(
     if cancel.load(Ordering::Relaxed) {
         return empty_probe(&input_url, "skipped", "__CANCELLED__");
     }
-    if tcp_alive(&input_url, options.timeout) {
+    let remaining = options.total_timeout.saturating_sub(network_spent);
+    if remaining.is_zero() {
+        return deadline_probe(&input_url, network_spent, options.total_timeout, attempts);
+    }
+    let tcp_started = Instant::now();
+    let tcp_success = tcp_alive(
+        &input_url,
+        &text(row, &["ip"]),
+        options.timeout.min(remaining),
+        options.allow_private,
+    );
+    network_spent = network_spent.saturating_add(tcp_started.elapsed());
+    if tcp_success {
         let mut result = empty_probe(
             &input_url,
             "tcp_alive_non_http",
@@ -634,10 +735,34 @@ fn probe_one(
         result.insert("probe_entry_state".into(), "tcp_alive_non_http".into());
         result.insert("probe_attempts".into(), (attempts + 1).to_string());
         result.insert("content_category".into(), "not_applicable".into());
+        result.insert(
+            "probe_network_elapsed_ms".into(),
+            network_spent.as_millis().to_string(),
+        );
+        result.insert(
+            "probe_total_timeout_ms".into(),
+            options.total_timeout.as_millis().to_string(),
+        );
         return result;
+    }
+    if network_spent >= options.total_timeout {
+        return deadline_probe(
+            &input_url,
+            network_spent,
+            options.total_timeout,
+            attempts + 1,
+        );
     }
     let mut result = empty_probe(&input_url, "unreachable", &last_error);
     result.insert("probe_attempts".into(), (attempts + 1).to_string());
+    result.insert(
+        "probe_network_elapsed_ms".into(),
+        network_spent.as_millis().to_string(),
+    );
+    result.insert(
+        "probe_total_timeout_ms".into(),
+        options.total_timeout.as_millis().to_string(),
+    );
     result
 }
 
@@ -713,12 +838,13 @@ pub fn probe_assets(
             ));
         }
     }
+    let merged_duplicates = merge_probe_stages(&mut stages);
     let total = stages.iter().map(|(_, _, rows)| rows.len()).sum::<usize>();
     // Cache identity includes the full selected input and all effective probe
     // options. Changing a rule, URL, retry policy or TLS policy starts a new
     // journal instead of reusing incompatible historical outcomes.
     let mut digest = Sha256::new();
-    digest.update(format!("native-probe-v5|{options:?}"));
+    digest.update(format!("native-probe-v7-full-response-proof|{options:?}"));
     for (stage, fields, rows) in &stages {
         digest.update(stage.as_bytes());
         digest.update(serde_json::to_vec(fields).map_err(|error| error.to_string())?);
@@ -797,23 +923,43 @@ pub fn probe_assets(
         } else {
             options.other_rate
         };
-        for batch in pending.chunks(options.workers.max(1)) {
+        if !pending.is_empty() {
             if cancel.load(Ordering::Relaxed) {
                 return Err("__CANCELLED__".into());
             }
+            let completed_before_pending = completed;
+            let next = std::sync::atomic::AtomicUsize::new(0);
             std::thread::scope(|scope| -> Result<(), String> {
-                let (sender, receiver) = std::sync::mpsc::channel();
+                let worker_count = options.workers.clamp(1, 256).min(pending.len());
+                let (sender, receiver) = std::sync::mpsc::sync_channel(worker_count * 2);
                 let mut handles = Vec::new();
-                for row in batch {
+                for _ in 0..worker_count {
                     let sender = sender.clone();
                     let client = &client;
                     let options = &options;
                     let content_rules = &content_rules;
                     let pacing = &pacing;
+                    let pending = &pending;
+                    let next = &next;
                     handles.push(scope.spawn(move || {
-                        let result =
-                            probe_one(row, options, client, content_rules, pacing, rate, cancel);
-                        let _ = sender.send((row.clone(), result));
+                        // Refill each available worker immediately. A single
+                        // slow URL no longer stalls the next batch of fast URLs.
+                        while !cancel.load(Ordering::Relaxed) {
+                            let index = next.fetch_add(1, Ordering::Relaxed);
+                            let Some(row) = pending.get(index) else { break };
+                            let result = probe_one(
+                                row,
+                                options,
+                                client,
+                                content_rules,
+                                pacing,
+                                rate,
+                                cancel,
+                            );
+                            if sender.send((row.clone(), result)).is_err() {
+                                break;
+                            }
+                        }
                     }));
                 }
                 drop(sender);
@@ -845,16 +991,16 @@ pub fn probe_assets(
                 }
                 for handle in handles {
                     handle.join().map_err(|payload| {
-                        format!(
-                            "Rust 探测工作线程异常退出：{}",
-                            panic_message(payload)
-                        )
+                        format!("Rust 探测工作线程异常退出：{}", panic_message(payload))
                     })?;
                 }
                 Ok(())
             })?;
             if cancel.load(Ordering::Relaxed) {
                 return Err("__CANCELLED__".into());
+            }
+            if completed - completed_before_pending != pending.len() {
+                return Err("Rust 探测结果不完整，已保留检查点；请续跑补齐缺失入口".into());
             }
         }
         let mut counts = serde_json::Map::new();
@@ -872,7 +1018,7 @@ pub fn probe_assets(
             json!({"complete": true, "selected_rows": rows.len(), "counts": counts}),
         );
     }
-    let checkpoint = json!({"version": 2, "probe_version": 6, "native": true, "fingerprint":fingerprint,"reused_results":reused,"stage_order": stage_summary.keys().collect::<Vec<_>>(), "stages": stage_summary});
+    let checkpoint = json!({"version": 2, "probe_version": 7, "native": true, "fingerprint":fingerprint,"reused_results":reused,"merged_duplicates":merged_duplicates,"stage_order": stage_summary.keys().collect::<Vec<_>>(), "stages": stage_summary});
     fs::write(
         output.join("checkpoint.json"),
         serde_json::to_vec_pretty(&checkpoint).map_err(|error| error.to_string())?,
@@ -899,11 +1045,8 @@ mod portal_flag_tests {
         );
         assert_eq!((login, register), ("1", "1"));
 
-        let (login, register) = portal_flags(
-            "http://127.0.0.1/login.jsp",
-            "首页",
-            "<html>hello</html>",
-        );
+        let (login, register) =
+            portal_flags("http://127.0.0.1/login.jsp", "首页", "<html>hello</html>");
         assert_eq!((login, register), ("1", "0"));
 
         let (login, register) = portal_flags(

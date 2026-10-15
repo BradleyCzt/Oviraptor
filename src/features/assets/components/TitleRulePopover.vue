@@ -16,14 +16,14 @@ onMounted(() => nextTick(() => input.value?.focus()));
 <template>
   <aside class="title-rule-popover" :style="{ left: `${x}px`, top: `${y}px` }" @pointerdown.stop>
     <header>
-      <div><strong>{{tr('加入内容规则','Add content rule')}}</strong><small>{{tr('全局规则 · 当前和后续资产','Global · existing and future assets')}}</small></div>
+      <div><strong>{{tr('页面隔离规则','Page isolation rule')}}</strong><small>{{tr('仅当前项目 · 先预览命中','Current project · preview first')}}</small></div>
       <button :aria-label="tr('关闭','Close')" @click="emit('close')"><X :size="14" /></button>
     </header>
     <input ref="input" v-model="keyword" maxlength="200" @keyup.enter="keyword.trim().length >= 2 && emit('apply',keyword)" />
-    <p>{{tr('确认后只执行一次数据库重分类；匹配标题的资产会进入内容隔离区。','The database is reclassified once; matching titles move to content quarantine.')}}</p>
+    <p>{{tr('先查看全部命中和受保护记录，再决定是否隔离这类页面。','Preview all matches and protected records before isolating this page type.')}}</p>
     <footer>
       <button class="button ghost compact" :disabled="busy" @click="emit('close')">{{tr('取消','Cancel')}}</button>
-      <button class="button primary compact" :disabled="busy || keyword.trim().length < 2" @click="emit('apply',keyword)"><Plus :size="14" /> {{busy?tr('应用中…','Applying…'):tr('确认添加','Add rule')}}</button>
+      <button class="button primary compact" :disabled="busy || keyword.trim().length < 2" @click="emit('apply',keyword)"><Plus :size="14" /> {{tr('预览规则','Preview rule')}}</button>
     </footer>
   </aside>
 </template>

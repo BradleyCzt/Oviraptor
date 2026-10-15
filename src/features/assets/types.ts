@@ -96,6 +96,8 @@ export interface AssetQuery {
   entrySeenView?: string;
   sortBy?: string;
   sortDirection?: "asc" | "desc" | string;
+  collapseIdenticalResponses?: boolean;
+  responseFingerprint?: string;
 }
 
 export interface AssetSummary {
@@ -111,6 +113,7 @@ export interface AssetSummary {
 export interface AssetPage {
   items: Asset[];
   total: number;
+  memberTotal?: number;
   page: number;
   pageSize: number;
   summary: AssetSummary;
@@ -158,6 +161,46 @@ export interface ContentRuleApplyResult {
   keyword: string;
   matchedAssets: number;
   matchedProjectAssets: number;
+}
+
+export interface SavedContentRule {
+  id: number;
+  keyword: string;
+  enabled: boolean;
+  createdAt: string;
+  exampleTitle: string;
+  exampleUrl: string;
+}
+
+export interface AssetRuleCatalog {
+  projectRules: PageIsolationRule[];
+  legacyRules: SavedContentRule[];
+}
+
+export interface PageIsolationRuleInput {
+  projectId: number;
+  sourceAssetId: number;
+  kind: "title_contains" | "body_sha256";
+  value: string;
+}
+
+export interface PageIsolationRule {
+  id: number;
+  projectId: number;
+  kind: "title_contains" | "body_sha256";
+  value: string;
+  enabled: boolean;
+  exampleTitle: string;
+}
+
+export interface PageIsolationPreview {
+  rule: PageIsolationRuleInput;
+  matched: number;
+  eligible: number;
+  protected: number;
+  alreadyIsolated: number;
+  sample: { assetId: number; title: string; link: string; eligible: boolean; alreadyIsolated: boolean }[];
+  previewToken: string;
 }
 
 export interface JobRun {

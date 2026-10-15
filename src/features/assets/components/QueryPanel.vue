@@ -60,7 +60,7 @@ async function start() {
 <template>
   <div class="query-layout">
     <section class="panel query-builder-panel">
-      <div class="panel-heading"><div><span class="eyebrow">COLLECTION</span><h2>{{tr('创建资产查询','Create asset query')}}</h2><p>{{tr('单条输入或批量导入，每行一个公司名、域名、IP或CIDR；已有目标会去重，重复资产只更新 last_seen，新增与变化进入 CHANGE FEED。','Enter one target or import a batch; existing targets are deduplicated, repeated assets update last_seen, and only new/changed assets enter CHANGE FEED.')}}</p></div></div>
+      <div class="panel-heading"><div><span class="eyebrow">COLLECTION</span><h2>{{tr('创建资产查询','Create asset query')}}</h2><p>{{tr('每行一个公司名、域名、IP或CIDR。公司与域名查询命中同一访问入口时，合并发现证据后探测一次；新任务仍复查历史入口，保留人工结论和已看记录。','One company, domain, IP or CIDR per line. Shared endpoints merge discovery evidence before one probe; new jobs recheck historical endpoints while preserving manual decisions and opened-entry records.')}}</p></div></div>
       <div class="form-grid two">
         <div class="project-field-with-action"><label class="field"><span>{{tr('归属工作空间','Workspace')}}</span><select v-model="projectId"><option v-for="p in projects.filter(item=>item.status!=='archived')" :key="p.id" :value="p.id">{{ p.name }}</option></select></label><button class="button ghost" type="button" @click="$emit('createProject')"><Plus :size="14" />{{tr('新建','New')}}</button></div>
         <label class="field"><span>{{tr('配置方案','Profile')}}</span><select v-model="profileId"><option v-for="p in profiles" :key="p.id" :value="p.id">{{ p.name }}</option></select></label>

@@ -10,6 +10,13 @@ use serde_json::Value as JsonValue;
 use std::collections::HashSet;
 use tauri::State;
 
+#[path = "asset_response_groups.rs"]
+mod response_groups;
+use response_groups::{
+    asset_response_fingerprint_sql, asset_response_group_cte, asset_response_list_sql,
+    validate_asset_response_query,
+};
+
 pub(super) fn detect_target(value: &str) -> &'static str {
     let value = value.trim();
     if value.starts_with("http://") || value.starts_with("https://") {
@@ -138,8 +145,8 @@ fn field_sql(field: &str) -> Option<&'static str> {
         "entrySeen" => "CASE WHEN COALESCE(pa.entry_opened_at,'')<>'' THEN '1' ELSE '0' END",
         "entryOpenedAt" => "pa.entry_opened_at",
         "sentinelStatus" => "COALESCE((SELECT COALESCE(ss.status,st.status,'sent') FROM sentinel_targets st LEFT JOIN sentinel_scans ss ON ss.id=st.scan_id WHERE st.project_id=pa.project_id AND (st.asset_id=a.id OR (st.asset_id IS NULL AND st.url=COALESCE(NULLIF(a.link,''),a.host))) ORDER BY st.updated_at DESC LIMIT 1),'not_sent')",
-        "sentinelScanCount" => "(SELECT COUNT(DISTINCT st.scan_id) FROM sentinel_targets st WHERE st.project_id=pa.project_id AND (st.asset_id=a.id OR (st.asset_id IS NULL AND st.url=COALESCE(NULLIF(a.link,''),a.host)))",
-        "sentinelSentAt" => "(SELECT MAX(st.updated_at) FROM sentinel_targets st WHERE st.project_id=pa.project_id AND (st.asset_id=a.id OR (st.asset_id IS NULL AND st.url=COALESCE(NULLIF(a.link,''),a.host)))",
+        "sentinelScanCount" => "(SELECT COUNT(DISTINCT st.scan_id) FROM sentinel_targets st WHERE st.project_id=pa.project_id AND (st.asset_id=a.id OR (st.asset_id IS NULL AND st.url=COALESCE(NULLIF(a.link,''),a.host))))",
+        "sentinelSentAt" => "(SELECT MAX(st.updated_at) FROM sentinel_targets st WHERE st.project_id=pa.project_id AND (st.asset_id=a.id OR (st.asset_id IS NULL AND st.url=COALESCE(NULLIF(a.link,''),a.host))))",
         _ => return None,
     })
 }
@@ -185,13 +192,17 @@ pub(super) fn asset_filter(query: &AssetQuery, apply_decision_view: bool) -> (St
         where_parts.push("pa.project_id=?".into());
         values.push(SqlValue::Integer(id));
     }
+    if !query.response_fingerprint.trim().is_empty() {
+        where_parts.push(format!("({})=?", asset_response_fingerprint_sql()));
+        values.push(SqlValue::Text(query.response_fingerprint.trim().to_string()));
+    }
     match query.probe_view.as_str() {
         "browser_review" => where_parts.push("COALESCE(a.probe_outcome,'') IN ('','alive_clean','web_alive','web_restricted','browser_render_required','virtual_host_required') AND COALESCE(a.content_category,'') NOT IN ('gambling','porn','custom_rule')".into()),
         "browser_accessible" => where_parts.push("a.probe_outcome IN ('alive_clean','web_alive','web_restricted','browser_render_required','virtual_host_required') AND COALESCE(a.content_category,'') NOT IN ('gambling','porn','custom_rule')".into()),
         "restricted" => where_parts.push("a.probe_outcome IN ('web_restricted','browser_render_required','virtual_host_required') AND COALESCE(a.content_category,'') NOT IN ('gambling','porn','custom_rule')".into()),
         "service" => where_parts.push("a.probe_outcome='tcp_alive_non_http'".into()),
         "abnormal" => where_parts.push("a.probe_outcome IN ('web_abnormal','unreachable','skipped')".into()),
-        "blocked" => where_parts.push("(a.probe_outcome='blocked_content' OR a.content_category IN ('gambling','porn','custom_rule'))".into()),
+        "blocked" => where_parts.push(format!("(a.probe_outcome='blocked_content' OR a.content_category IN ('gambling','porn','custom_rule') OR {})",crate::page_isolation::owned_isolation_sql())),
         _ => {}
     }
     if matches!(
@@ -268,8 +279,9 @@ pub(super) fn asset_filter(query: &AssetQuery, apply_decision_view: bool) -> (St
             values.push(SqlValue::Text(pattern.clone()));
         }
     }
+    let mut combined: Option<String> = None;
     for condition in &query.conditions {
-        let Some(column) = field_sql(&condition.field) else {
+        let Some(mut column) = field_sql(&condition.field) else {
             continue;
         };
         if condition.value.trim().is_empty()
@@ -277,14 +289,30 @@ pub(super) fn asset_filter(query: &AssetQuery, apply_decision_view: bool) -> (St
         {
             continue;
         }
+        // The UI selects tier families; stored values also carry a description.
+        // Keep unknown tiers distinct (P10 must never become P1).
+        if condition.field == "reviewTier"
+            && matches!(condition.value.as_str(), "P1" | "P2" | "P3")
+            && matches!(condition.operator.as_str(), "equals" | "notEquals")
+        {
+            column = "CASE WHEN a.review_tier IN ('P1','P2','P3') THEN a.review_tier WHEN substr(a.review_tier,1,3) IN ('P1_','P2_','P3_') THEN substr(a.review_tier,1,2) ELSE COALESCE(a.review_tier,'') END";
+        }
         let expression = match condition.operator.as_str() {
             "equals" => {
                 values.push(SqlValue::Text(condition.value.clone()));
-                format!("{column}=?")
+                if numeric_asset_field(&condition.field) {
+                    format!("CAST({column} AS REAL)=CAST(? AS REAL)")
+                } else {
+                    format!("{column}=?")
+                }
             }
             "notEquals" => {
                 values.push(SqlValue::Text(condition.value.clone()));
-                format!("{column}<>?")
+                if numeric_asset_field(&condition.field) {
+                    format!("CAST({column} AS REAL)<>CAST(? AS REAL)")
+                } else {
+                    format!("{column}<>?")
+                }
             }
             "startsWith" => {
                 values.push(SqlValue::Text(format!("{}%", condition.value)));
@@ -330,12 +358,15 @@ pub(super) fn asset_filter(query: &AssetQuery, apply_decision_view: bool) -> (St
         } else {
             " AND "
         };
-        if join == " OR " && where_parts.len() > 1 {
-            let previous = where_parts.pop().unwrap();
-            where_parts.push(format!("({previous} OR {expression})"));
-        } else {
-            where_parts.push(expression);
-        }
+        // Advanced conditions form a left-to-right group; OR may not bypass
+        // the project, trash, search or primary queue boundaries.
+        combined = Some(match combined {
+            Some(previous) => format!("({previous}{join}{expression})"),
+            None => expression,
+        });
+    }
+    if let Some(combined) = combined {
+        where_parts.push(format!("({combined})"));
     }
     (where_parts.join(" AND "), values)
 }
@@ -456,17 +487,61 @@ pub async fn list_assets(
     state: State<'_, AppState>,
     query: AssetQuery,
 ) -> Result<AssetPage, String> {
-    let connection = db::open(&state.db_path)?;
-    let (filter, values) = asset_filter(&query, true);
-    let (summary_filter, summary_values) = asset_filter(&query, false);
-    let count_sql = format!(
+    let db_path = state.db_path.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let connection = db::open(&db_path)?;
+        list_assets_on(&connection, &query)
+    })
+    .await
+    .map_err(|error| format!("资产列表查询线程异常：{error}"))?
+}
+
+fn list_assets_on(
+    connection: &rusqlite::Connection,
+    query: &AssetQuery,
+) -> Result<AssetPage, String> {
+    validate_asset_response_query(query)?;
+    if !connection.is_autocommit() {
+        return list_assets_on_read_snapshot(connection, query);
+    }
+    // A background probe can change a group between COUNT and pagination.
+    // Read all counts, summaries and representatives from one SQLite snapshot.
+    let transaction = connection
+        .unchecked_transaction()
+        .map_err(|error| error.to_string())?;
+    let page = list_assets_on_read_snapshot(&transaction, query)?;
+    transaction.commit().map_err(|error| error.to_string())?;
+    Ok(page)
+}
+
+fn list_assets_on_read_snapshot(
+    connection: &rusqlite::Connection,
+    query: &AssetQuery,
+) -> Result<AssetPage, String> {
+    let (filter, values) = asset_filter(query, true);
+    let (summary_filter, summary_values) = asset_filter(query, false);
+    let member_count_sql = format!(
         "SELECT COUNT(*) FROM assets a JOIN project_assets pa ON pa.asset_id=a.id JOIN projects p ON p.id=pa.project_id LEFT JOIN asset_ownership_decisions o ON o.project_id=pa.project_id AND o.asset_id=a.id WHERE {filter}"
     );
-    let total: i64 = connection
-        .query_row(&count_sql, params_from_iter(values.iter()), |row| {
+    let member_total: i64 = connection
+        .query_row(&member_count_sql, params_from_iter(values.iter()), |row| {
             row.get(0)
         })
         .map_err(|error| error.to_string())?;
+    let total = if query.collapse_identical_responses {
+        connection
+            .query_row(
+                &format!(
+                    "{} SELECT COUNT(*) FROM response_ranked WHERE response_display_rank=1",
+                    asset_response_group_cte(&filter)
+                ),
+                params_from_iter(values.iter()),
+                |row| row.get(0),
+            )
+            .map_err(|error| error.to_string())?
+    } else {
+        member_total
+    };
     let sentinel_exists = "EXISTS (SELECT 1 FROM sentinel_targets st WHERE st.project_id=pa.project_id AND (st.asset_id=a.id OR (st.asset_id IS NULL AND st.url=COALESCE(NULLIF(a.link,''),a.host))))";
     let summary_sql = format!(
         "SELECT COUNT(*),COALESCE(SUM(CASE WHEN COALESCE(pa.decision,'') IN ('','pending') THEN 1 ELSE 0 END),0),COALESCE(SUM(CASE WHEN pa.decision='uncertain' THEN 1 ELSE 0 END),0),COALESCE(SUM(CASE WHEN pa.decision='confirmed' THEN 1 ELSE 0 END),0),COALESCE(SUM(CASE WHEN pa.decision='rejected' THEN 1 ELSE 0 END),0),COALESCE(SUM(CASE WHEN pa.decision='not_applicable' THEN 1 ELSE 0 END),0),COALESCE(SUM(CASE WHEN {sentinel_exists} THEN 1 ELSE 0 END),0) FROM assets a JOIN project_assets pa ON pa.asset_id=a.id JOIN projects p ON p.id=pa.project_id LEFT JOIN asset_ownership_decisions o ON o.project_id=pa.project_id AND o.asset_id=a.id WHERE {summary_filter}"
@@ -492,9 +567,10 @@ pub async fn list_assets(
     // The table is not virtualised.  Rendering 500-1000 rows creates tens of
     // thousands of Vue bindings and can trigger the macOS busy cursor.
     let page_size = query.page_size.clamp(10, 200);
-    let sql = format!(
-        "{ASSET_SELECT} WHERE {filter} ORDER BY {} LIMIT ? OFFSET ?",
-        asset_order(&query)
+    let sql = asset_response_list_sql(
+        &filter,
+        &asset_order(query),
+        query.collapse_identical_responses,
     );
     let mut list_values = values;
     list_values.push(SqlValue::Integer(page_size));
@@ -503,13 +579,23 @@ pub async fn list_assets(
         .prepare(&sql)
         .map_err(|error| error.to_string())?;
     let rows = statement
-        .query_map(params_from_iter(list_values.iter()), asset_from_row)
+        .query_map(params_from_iter(list_values.iter()), |row| {
+            let mut asset = asset_from_row(row)?;
+            if let Some(extra) = asset.extra.as_object_mut() {
+                extra.insert(
+                    "response_display_group_count".into(),
+                    JsonValue::from(row.get::<_, i64>(41)?),
+                );
+            }
+            Ok(asset)
+        })
         .map_err(|error| error.to_string())?;
     Ok(AssetPage {
         items: rows
             .collect::<Result<Vec<_>, _>>()
             .map_err(|error| error.to_string())?,
         total,
+        member_total,
         page,
         page_size,
         summary,
@@ -717,9 +803,10 @@ pub fn soft_delete_assets(
 ) -> Result<(), String> {
     let mut connection = db::open(&state.db_path)?;
     let transaction = connection
-        .transaction()
+        .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
         .map_err(|error| error.to_string())?;
     for asset_id in asset_ids {
+        if !deleted { crate::page_isolation::restore_manual_on(&transaction,project_id,asset_id)?; }
         transaction.execute(
             "UPDATE project_assets SET is_deleted=?1,deleted_at=CASE WHEN ?1=1 THEN datetime('now','localtime') ELSE NULL END WHERE project_id=?2 AND asset_id=?3",
             params![deleted as i64, project_id, asset_id],
@@ -748,10 +835,11 @@ pub fn soft_delete_asset_selections(
         .collect::<Vec<_>>();
     let mut connection = db::open(&state.db_path)?;
     let transaction = connection
-        .transaction()
+        .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
         .map_err(|error| error.to_string())?;
     let mut changed = 0i64;
     for item in selections {
+        if !input.deleted { crate::page_isolation::restore_manual_on(&transaction,item.project_id,item.asset_id)?; }
         let updated = transaction.execute(
             "UPDATE project_assets SET is_deleted=?1,deleted_at=CASE WHEN ?1=1 THEN datetime('now','localtime') ELSE NULL END WHERE project_id=?2 AND asset_id=?3",
             params![input.deleted as i64, item.project_id, item.asset_id],
@@ -973,3 +1061,7 @@ pub(crate) mod test_support {
         super::detect_target(value)
     }
 }
+
+#[cfg(test)]
+#[path = "asset_query_rule_tests.rs"]
+mod asset_query_rule_tests;

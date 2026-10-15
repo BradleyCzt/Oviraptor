@@ -1,5 +1,25 @@
 import { invoke } from "@tauri-apps/api/core";
-import type { AssetEvent, AssetPage, AssetQuery, AssetSelection, AssetOwnershipProfile, AssetOwnershipSummary, AssetOwnershipAssessmentResult, ExposureFinding, ExposureSummary, ExposureRun, ExposureSourceResult, ContentRuleApplyResult, JobRun, LogEntry, Target } from "./types";
+import type {
+  AssetEvent,
+  AssetPage,
+  AssetQuery,
+  AssetSelection,
+  AssetOwnershipProfile,
+  AssetOwnershipSummary,
+  AssetOwnershipAssessmentResult,
+  ExposureFinding,
+  ExposureSummary,
+  ExposureRun,
+  ExposureSourceResult,
+  ContentRuleApplyResult,
+  AssetRuleCatalog,
+  PageIsolationRuleInput,
+  PageIsolationRule,
+  PageIsolationPreview,
+  JobRun,
+  LogEntry,
+  Target,
+} from "./types";
 
 /** O0：页面加载该行时看到的归属结论（与 list_assets 返回的 ownership* 字段一一对应）。 */
 export interface AssetOwnershipDecisionExpectation {
@@ -24,6 +44,13 @@ export const assetApi = {
     invoke<string>("mark_asset_entry_opened", { projectId, assetId }),
   addContentRule: (keyword: string, sourceAssetId?: number) =>
     invoke<ContentRuleApplyResult>("add_content_rule", { input: { keyword, sourceAssetId } }),
+  previewPageRule: (input: PageIsolationRuleInput) => invoke<PageIsolationPreview>("preview_page_rule", { input }),
+  applyPageRule: (rule: PageIsolationRuleInput, previewToken: string) =>
+    invoke<{ ruleId: number; isolated: number; protected: number; backupPath: string }>("apply_page_rule", { input: { rule, previewToken } }),
+  listPageRules: (projectId: number) => invoke<PageIsolationRule[]>("list_page_rules", { projectId }),
+  getAssetRuleCatalog: () => invoke<AssetRuleCatalog>("get_asset_rule_catalog"),
+  disablePageRule: (projectId: number, ruleId: number) =>
+    invoke<{ restored: number; retained: number; backupPath: string }>("disable_page_rule", { projectId, ruleId }),
   updateDecision: (projectId: number, assetIds: number[], decision: string, note = "") =>
     invoke<void>("update_decision", { input: { projectId, assetIds, decision, note } }),
   updateAssetDecisions: (selections: AssetSelection[], decision: string, note = "") =>

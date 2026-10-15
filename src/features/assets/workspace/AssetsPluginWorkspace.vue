@@ -51,6 +51,7 @@ async function refresh() {
   const results = await Promise.allSettled(reads);
   if (current()) { const failed=results.find(result => result.status === "rejected"); if(failed?.status === "rejected") readError.value=String(failed.reason); }
 }
+function assetDataChanged() { emit("projectsChanged"); void refresh(); }
 async function quickStartProject(projectId:number, profileId?:number, name?:string, pipeline="full") {
   const project=projects.value.find(item=>item.id===projectId);
   if (!project || project.status !== "active" || starting.value) return;
@@ -82,7 +83,7 @@ async function resumeInterrupted(job:InterruptedJob, fromIntent=false) {
   const contextProject=props.projectId, action=++actionGeneration;
   starting.value=true;actionError.value="";
   try {
-    if(admitted.pipeline==="reprobe") await api.resumeJob(admitted.runId);
+    if(["full","collect","reprobe"].includes(admitted.pipeline)) await api.resumeJob(admitted.runId);
     else {
       const profile=profiles.value.find(item=>item.id===admitted.profileId)||profiles.value.find(item=>item.isDefault)||profiles.value[0];
       if(!profile)throw Error(tr("请先创建执行配置","Create an execution profile first"));
@@ -157,13 +158,13 @@ function eventLabel(type:string){ const zh=({new:"新增",changed:"变化",missi
         </template>
 
         <QueryPanel :key="selectedProjectId??'all'" v-else-if="activeView==='query'" :projects="projects" :profiles="profiles" :selected-project-id="selectedProjectId" @create-project="openProject()" @project-change="selectProject" @started="navigate('tasks')" @notify="notify" />
-        <AssetWorkspace v-else-if="activeView==='assets'" :key="`${selectedProjectId??'all'}:${assetSearchKey}`" :scanning-enabled="props.scanningEnabled" :projects="projects" :selected-project-id="selectedProjectId" :initial-search="globalSearch" @reprobe="quickStartProject($event,undefined,undefined,'reprobe')" @notify="notify" />
+        <AssetWorkspace v-else-if="activeView==='assets'" :key="`${selectedProjectId??'all'}:${assetSearchKey}`" :scanning-enabled="props.scanningEnabled" :projects="projects" :selected-project-id="selectedProjectId" :initial-search="globalSearch" @reprobe="quickStartProject($event,undefined,undefined,'reprobe')" @notify="notify" @changed="assetDataChanged" />
         <AssetOwnershipGate :key="selectedProjectId??'all'" v-else-if="activeView==='ownership'" :projects="projects" :selected-project-id="selectedProjectId" @notify="notify" />
         <ExposureSurface :key="selectedProjectId??'all'" v-else-if="activeView==='exposure'" :projects="projects" :selected-project-id="selectedProjectId" @notify="notify" />
 
         <template v-else-if="activeView==='quarantine'">
-          <div class="section-toolbar"><div><span class="eyebrow">QUARANTINE</span><h2>{{tr('内容隔离区','Content quarantine')}}</h2><p>{{tr('集中查看自动规则隔离的赌博、色情和自定义命中；数据不会被物理删除。','Review gambling, adult and custom-rule matches; quarantined data is never physically deleted.')}}</p></div><button class="button ghost" @click="refresh"><RefreshCw :size="16" /> {{t.refresh}}</button></div>
-          <AssetWorkspace :key="selectedProjectId??'all'" :scanning-enabled="props.scanningEnabled" :projects="projects" :selected-project-id="selectedProjectId" quarantine-only @notify="notify" />
+          <div class="section-toolbar"><div><span class="eyebrow">QUARANTINE</span><h2>{{tr('内容隔离区','Content quarantine')}}</h2><p>{{tr('查看内容分类及页面规则隔离项；原资产与 URL 保留。页面规则可停用，隔离项可恢复。','Review content and page-rule exclusions. Original assets and URLs remain; page rules can be disabled and their assets restored.')}}</p></div><button class="button ghost" @click="refresh"><RefreshCw :size="16" /> {{t.refresh}}</button></div>
+          <AssetWorkspace :key="selectedProjectId??'all'" :scanning-enabled="props.scanningEnabled" :projects="projects" :selected-project-id="selectedProjectId" quarantine-only @notify="notify" @changed="assetDataChanged" />
         </template>
 
         <template v-else-if="activeView==='changes'">
@@ -173,7 +174,7 @@ function eventLabel(type:string){ const zh=({new:"新增",changed:"变化",missi
 
         <template v-else-if="activeView==='tasks'">
           <div class="section-toolbar"><div><span class="eyebrow">JOB CENTER</span><h2>{{tr('任务中心','Job center')}}</h2><p>{{tr('长时间任务可独立运行、查看结构化日志并安全取消。','Long jobs run independently with structured logs and safe cancellation.')}}</p></div><div><button class="button ghost" @click="refresh"><RefreshCw :size="16" /> {{t.refresh}}</button><button class="button primary" @click="navigate('query')"><Plus :size="16" /> {{tr('新建任务','New job')}}</button></div></div>
-          <div class="run-list"><article v-for="run in runs" :key="run.id" class="run-card panel"><div class="run-status-mark" :class="statusTone(run.status)"><component :is="run.status==='completed'?CheckCircle2:['failed','interrupted'].includes(run.status)?CircleAlert:Clock3" :size="20" /></div><div class="run-main"><div class="run-title"><strong>{{run.name}}</strong><span class="run-id">#{{run.id}}</span><span class="run-stage">{{stageLabel(run.stage)}}</span></div><p>{{run.projectName}} · {{tr('创建于','created')}} {{run.createdAt}}</p><div class="run-progress"><div class="progress-track"><i :style="{width:`${run.progress}%`}"></i></div><span>{{Math.round(run.progress)}}%</span></div><small v-if="runLiveMessages[run.id]&&['running','queued','cancel_requested'].includes(run.status)" class="run-live-message">{{runLiveMessages[run.id]}}</small><small v-if="run.error" class="run-error">{{run.error}}</small></div><div class="run-side"><span class="status-chip" :class="statusTone(run.status)">{{stageLabel(run.status)}}</span><button v-if="run.status==='interrupted'||(run.pipeline==='reprobe'&&['failed','cancelled'].includes(run.status))" class="button secondary compact" @click="resumeInterrupted({runId:run.id,projectId:run.projectId,projectName:run.projectName,profileId:run.profileId,name:run.name,pipeline:run.pipeline,createdAt:run.createdAt})">{{tr('从断点继续','Resume checkpoint')}}</button><button v-if="['running','queued','cancel_requested'].includes(run.status)" class="button danger compact" @click="cancelJob(run.id)">{{tr('取消','Cancel')}}</button><button class="button ghost compact" @click="navigate('logs')">{{tr('日志','Logs')}}</button></div></article><div v-if="!runs.length" class="empty-state panel">{{tr('暂无任务','No jobs')}}</div></div>
+          <div class="run-list"><article v-for="run in runs" :key="run.id" class="run-card panel"><div class="run-status-mark" :class="statusTone(run.status)"><component :is="run.status==='completed'?CheckCircle2:['failed','interrupted'].includes(run.status)?CircleAlert:Clock3" :size="20" /></div><div class="run-main"><div class="run-title"><strong>{{run.name}}</strong><span class="run-id">#{{run.id}}</span><span class="run-stage">{{stageLabel(run.stage)}}</span></div><p>{{run.projectName}} · {{tr('创建于','created')}} {{run.createdAt}}</p><div class="run-progress"><div class="progress-track"><i :style="{width:`${run.progress}%`}"></i></div><span>{{Math.round(run.progress)}}%</span></div><small v-if="runLiveMessages[run.id]&&['running','queued','cancel_requested'].includes(run.status)" class="run-live-message">{{runLiveMessages[run.id]}}</small><small v-if="run.error" class="run-error">{{run.error}}</small></div><div class="run-side"><span class="status-chip" :class="statusTone(run.status)">{{stageLabel(run.status)}}</span><button v-if="['full','collect','reprobe'].includes(run.pipeline)&&['interrupted','failed','cancelled'].includes(run.status)" class="button secondary compact" @click="resumeInterrupted({runId:run.id,projectId:run.projectId,projectName:run.projectName,profileId:run.profileId,name:run.name,pipeline:run.pipeline,createdAt:run.createdAt})">{{tr('从断点继续','Resume checkpoint')}}</button><button v-if="['running','queued','cancel_requested'].includes(run.status)" class="button danger compact" @click="cancelJob(run.id)">{{tr('取消','Cancel')}}</button><button class="button ghost compact" @click="navigate('logs')">{{tr('日志','Logs')}}</button></div></article><div v-if="!runs.length" class="empty-state panel">{{tr('暂无任务','No jobs')}}</div></div>
         </template>
 
         <template v-else-if="activeView==='logs'">
