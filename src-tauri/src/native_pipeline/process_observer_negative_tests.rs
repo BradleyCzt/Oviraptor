@@ -175,6 +175,7 @@ fn native_process_stop_of_exited_unreaped_leader_is_not_a_cleanup_failure() {
 
 /// Killed orphans linger as zombies until launchd reaps them; meanwhile Darwin
 /// answers the group kill with EPERM. The sweep must wait them out, not fail.
+#[cfg(target_os = "macos")]
 #[test]
 fn native_process_group_sweep_waits_out_a_zombie_only_group() {
     use std::os::unix::process::CommandExt;
