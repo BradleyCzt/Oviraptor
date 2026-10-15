@@ -84,6 +84,56 @@ the original command names and data contracts. Remaining scan/Agent `include!`
 groups are documented technical debt; they are not rewritten as a generic
 Agent or claimed to be isolated by directory changes alone.
 
+Independent contract comparison against `d61454c` confirms that all 289
+Tauri IPC registration names and their order are unchanged; only 33 owner paths
+move. The configuration dialog is byte-equivalent after removing changed
+imports, `db.rs` and `models.rs` are unchanged, and all six configuration-profile
+functions retain equivalent tokens after visibility/helper normalization. All
+128 original root type declarations match their nine destinations using the
+TypeScript AST printer. Default Chat routing, both builtin module descriptors,
+project props and the standalone Skills import control remain present. This
+structural review supplements the executed regressions; it is not a claim of
+live model/scan or packaged desktop acceptance.
+
+## Project-aware Chat and Skill contracts
+
+- Plain Chat scope/revision validation does not require `agent_enabled`. Without
+  Agent mode it sends no tools; missing provider configuration does not create
+  tool consent or block ordinary history/access operations.
+- Consent binds the complete endpoint (including path/query), model and local
+  deployment identity. Request construction and its permission lease are
+  captured in one transaction; subsequent rounds and final reply commitment
+  recheck the lease. UI labels expose only scheme/host/port.
+- Selected Skill identity includes full content, package provenance and actual
+  accessible-resource fingerprints. Persistent monotonic generations and
+  deletion tombstones invalidate consent across disable/enable, edit/restore
+  and delete/recreate, including equal timestamps and identical final content.
+- The WIP already allowed 128 selected Skills. The final catalog can list all
+  36 builtin Skills over bounded pages; this is not a promise that one reply
+  can consume all their contents. Skill scripts remain inert text.
+- Model instruction/resource pages use UTF-8 byte offsets, default/maximum
+  4,096-byte bodies and explicit continuation. Catalog/resource listings use
+  at most 12 items. The complete serialized tool envelope is bounded at 32 KiB;
+  the request context is bounded at 64 KiB and further constrained by the model
+  budget. Replies permit at most four model rounds, eight tool calls, four
+  calls per round and a 90-second deadline.
+- Directory reads validate the full bounded file before returning any page,
+  including credential detection after the output boundary. Directory bodies
+  are at most 4,096 bytes; full file inspection is limited to 1 MiB and there
+  are at most eight directory grants. The standalone Skills browser has a
+  4,096-byte default and 8,192-byte maximum page.
+- Incremental migrations retain old directory/Skill selections. Old boolean
+  consent does not silently become new recipient/content-bound consent;
+  explicit acknowledgement is required again. Version-1 clients may revoke
+  permissions, while enlargement without current acknowledgement is refused.
+
+The formerly missing native modules now exist:
+`conversations/access/tests.rs` (14 cases) and `skill_packages/tests.rs`
+(16 cases). Focused native Chat tests pass 57/57 and package tests 16/16,
+including the disabled-Agent case, endpoint changes during a paid reply,
+same-timestamp Skill revocation, 36-Skill pagination, UTF-8 boundaries and
+credential detection outside the first page.
+
 ## Batches and verification
 
 1. Owner contracts: `e4a6199` moves 128 declarations into nine owner contracts,
@@ -100,9 +150,13 @@ Agent or claimed to be isolated by directory changes alone.
    compilation. See [Rust boundaries](RUST_BUSINESS_MODULE_BOUNDARIES_2026-10-14.md).
 4. Package source/integrity/import boundaries: `306d0fd`; scope/provider/Skill
    consent and paged resources: `b8636ae`; pending-consent revocation fix:
-   `8247b74`. Access UI tests pass 20/20. Native tests await actual execution.
-5. Browser QA expansion: `1c4c3a7`; final all-Node, production build, native
-   compilation/tests and actual Chromium verification are in progress.
+   `8247b74`; persistent revocation generations: `c480363`. Native conversations
+   57/57 and Skill packages 16/16 passed in focused runs. Access plus real
+   activation/race UI cases pass 27/27.
+5. Browser QA: `1c4c3a7`, `227ff45`, `379b097`; actual Chromium acceptance
+   passes 18/18. The complete frozen-source Node command passes 1,512 with
+   12 platform skips. Production build and native production/test compilation
+   pass; full Rust execution continues with failures recorded below.
    The independent branch has been pushed; it has not been merged.
 
 Exact WIP baseline was archived to `/workspace/baseline-d61454c` for independent
@@ -172,9 +226,9 @@ archive bytes. No failed or skipped check is represented as a passing test.
   unknown IPC or external requests. It used synthetic IPC and retained 29
   screenshots plus stable source manifests in `/workspace/validation/browser`.
   A later independent UI review reproduced stale consent labels when returning
-  to the permanently mounted Chat page; that navigation/configuration path is
-  being corrected and will be rerun before final acceptance. The initial pass
-  alone is not claimed to cover that newly identified path.
+  to the permanently mounted Chat page; `5c921a5` and `1504dcb` correct that
+  navigation/configuration path and its stale response race. The final 18-case
+  run covers the real return/save paths; the initial pass alone did not.
 
 ### Follow-up corrections and native execution
 
@@ -207,7 +261,7 @@ archive bytes. No failed or skipped check is represented as a passing test.
   run passed both unchanged fork-storm tests (2/2) and reaped 994 orphaned
   descendants. `a798012` adds `tools/run_with_subreaper.py` as a reproducible
   outer test runner. It changes no application cleanup logic or test assertion.
-  Complete native testing is run under this wrapper with two test threads.
+  Complete native testing is run under this wrapper with four test threads.
 
 Final all-suite results and source identities are recorded below only after
 the frozen-source runs finish. This work continued into 2026-10-15 UTC.
@@ -237,10 +291,21 @@ hanging the test indefinitely.
 Broader Source/human-directive tests exposed a separate production boundary:
 Source plans have an owner-specific canonical hash that omits attempt identity,
 whereas homogeneous Web execution inspected their raw JSON hash before deciding
-whether it owned the plan. The proposed correction is being independently
-reviewed with Source/Web positive cases and corrupted mode/hash negative cases;
-Source fixture hashes and production financial/lease semantics are not changed
-to accommodate the Web validator.
+whether it owned the plan. `bc65ad1` corrects the owner dispatch in
+`homogeneous/{execution_policy,model_worker,material_policy}.rs` and
+`native_pipeline/mod.rs`. Source ownership requires the immutable scope receipt,
+strict canonical JSON, the Source hash, and matching row identity. Web policy
+checks its original immutable receipt before inspecting mutable plan JSON, so
+replacing and rehashing both Web plan representations cannot impersonate Source.
+Historical Source reads do not depend on a live repository or current attempt.
+Recognizing Source only closes Web capabilities and retains redaction; original
+Source material validation remains mandatory. Eight added tests cover valid
+owners, corruption, missing owner proof, historical reads, protocol replacement
+and the distinction between ownership and execution authority. An independent
+review approved this boundary. Source fixture hashes and production
+financial/lease semantics were not changed to accommodate the Web validator.
+The corrected production library and whole native test target compile; all
+52 selected regression cases pass. Full-suite execution is recorded separately.
 
 Actual final Chromium acceptance is now 18/18, with zero runtime errors, unknown
 IPC and external fetches. The 225-file browser source manifest is unchanged
@@ -248,3 +313,31 @@ before build, after build and after browser execution. The final app bundle
 includes `1504dcb`; QA commit is `379b097`. The earlier UI refresh failures and
 late-response race are retained as real browser red-test evidence. Screenshots
 remain local test evidence; they are not in Git or the Library evidence archive.
+
+### Full-suite contract corrections
+
+The next complete run of the compiled `cc45f2e` source exposed further old
+fixtures and expectations. Its binary and 1,779 tracked native inputs are
+identified in `rust-final-full-input-manifest.json`; later test-only edits do
+not change that already loaded binary. The old run remains separate from final
+acceptance.
+
+- `aa87cb2` migrates two budget-transport positive cases and two fault-injection
+  negative cases to authenticated real HTTP birth fixtures. Negative tests now
+  require the precise claim/budget persistence error, retaining the original
+  deadline, cost, rollback and zero-network assertions. The remaining 45 old
+  fixture calls are documented individually in the call-site audit as direct
+  claim/receipt/accounting, static artifact or deliberately invalid history.
+- `03b280b` corrects two old paid-resume expectations. The production startup
+  financial gate and related six files are unchanged from `d61454c`: paid
+  history requires an explicit financial continuation contract that ordinary
+  Resume/Retry does not implement. Real tests retain two provider calls and one
+  target request before pause, then require both refusals to leave all database
+  rows, total changes, work-file hashes and request counts unchanged. A separate
+  real fresh Root retains inherited/skipped/zero-round admission checks.
+  The existing unpaid-resume positive tests remain in place.
+
+This paid-resume restriction is a pre-existing product limitation, not a new
+successful continuation feature. It remains visible to the caller and must be
+considered before using scanning pause/resume in production. Implementing the
+missing financial continuation contract is outside this module migration.
