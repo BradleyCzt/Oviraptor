@@ -1,3 +1,5 @@
+> Historical first-round record. Current module ownership, second-round regression and local-handoff blocker: [2026-10-15 report](BUSINESS_MODULE_BOUNDARIES_2026-10-15.md).
+
 # Business module integration — 2026-10-14
 
 This is an integration and verification record, not a release announcement.
