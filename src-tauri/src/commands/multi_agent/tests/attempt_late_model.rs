@@ -191,7 +191,7 @@ fn assignment_attempt_real_model_takeover_keeps_original_cost_but_returns_no_exe
         replace_target_cost_coordinator(&db, &old, false);
         (200, "application/json", model_round(&[], 10))
     }));
-    let (root, mut context, _, _) = http_journal_fixture("http://127.0.0.1:9/", 0);
+    let (root, mut context, _, _) = real_http_transport_fixture("http://127.0.0.1:9/", 0);
     context.environment.api_base = format!("http://127.0.0.1:{port}/v1");
     let db = db::open(&context.db_path).unwrap();
     let tx = db.unchecked_transaction().unwrap();
@@ -204,18 +204,25 @@ fn assignment_attempt_real_model_takeover_keeps_original_cost_but_returns_no_exe
         agent_model_profile(&context.environment, None).unwrap(),
         &[],
     );
-    assert!(
-        native_model_transport(
+    let result = native_model_transport(
             &context,
             &client,
             vec![serde_json::json!({"role":"user","content":"bounded local fixture"})],
             &[],
             1
-        )
-        .is_err(),
+        );
+    assert!(
+        result.is_err(),
         "known late model result escaped transport under a replaced Coordinator"
     );
-    assert_eq!(seen.lock().unwrap().len(), 1);
+    let diagnostic = match &result {
+        Err(NativeModelRoundFailure::Model(error)) => error.code().to_string(),
+        Err(NativeModelRoundFailure::Outcome(outcome)) => {
+            format!("{}: {}", outcome.terminal_code(), outcome.detail())
+        }
+        Ok(_) => "unexpected executable result".into(),
+    };
+    assert_eq!(seen.lock().unwrap().len(), 1, "transport result: {diagnostic}");
     let b = budget::balance(&db, &old.root_run_id, Some(&assignment), "model_requests").unwrap();
     assert_eq!(b.reserved, 0);
     assert_eq!(b.consumed + b.indeterminate, 1);

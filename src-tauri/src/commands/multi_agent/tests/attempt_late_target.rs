@@ -32,6 +32,48 @@ pub(super) fn replace_target_cost_coordinator(
     new
 }
 
+// Actual transport needs an authenticated original Web birth. Keep the old
+// journal-only fixture for direct receipt and damaged-history tests; create this
+// transport fixture through the existing creator/start/HMAC path instead.
+fn real_http_transport_fixture(
+    target: &str,
+    baseline: i64,
+) -> (PathBuf, AgentRunContext, AgentToolRuntime, AgentHttpRequest) {
+    use crate::agent_runtime::{
+        contract::{AgentLane, AgentRole},
+        multi_agent::scheduler,
+    };
+    let (root, path, run_id, lease) = multi_agent_task_root_for_target_protocol(
+        "http-real-transport", 60_000, 20, target, false,
+    );
+    let mut context = test_context(&path, target, vec![AgentIdentity::anonymous()]);
+    context.scan_id = lease.scan_id.clone();
+    context.external_surface = true;
+    context.run = Some(AgentRunLedger { db_path: path.clone(), run_id });
+    let db = db::open(&path).unwrap();
+    let child = scheduler::schedule_child(
+        &db, &lease, AgentRole::WebExecutor, AgentLane::TargetTouching,
+        "http-journal", &serde_json::json!({}), 1, &["replay_http".into()], 100, 1,
+    ).unwrap();
+    scheduler::mark_child_running(&db, &lease, &child).unwrap();
+    context.run.as_mut().unwrap().run_id = child.run_id;
+    accounting_native(&context, baseline);
+    let mut runtime = AgentToolRuntime {
+        target_requests: baseline as usize,
+        ..Default::default()
+    };
+    let invocation = runtime.begin_invocation(1);
+    context.run.as_ref().unwrap()
+        .begin_tool("replay_http", &serde_json::json!({}), &invocation).unwrap();
+    let request = AgentHttpRequest {
+        identity: AgentIdentity::anonymous(), method: "GET".into(), url: target.into(),
+        extra_headers: vec![], body: None, content_type: None, contract_key: String::new(),
+        family: "authorization".into(), source: ScopeSource::IdentityComparison,
+        tool: "replay_http".into(), timeout_seconds: 5,
+    };
+    (root, context, runtime, request)
+}
+
 #[test]
 fn assignment_attempt_late_headers_after_takeover_charge_only_original_worker() {
     use crate::agent_runtime::multi_agent::{attempts, budget};
@@ -274,7 +316,7 @@ fn assignment_attempt_real_http_takeover_records_original_bill_without_publishin
         )
     }));
     let (root, context, mut runtime, request) =
-        http_journal_fixture(&format!("http://127.0.0.1:{port}/"), 0);
+        real_http_transport_fixture(&format!("http://127.0.0.1:{port}/"), 0);
     let db = db::open(&context.db_path).unwrap();
     let tx = db.unchecked_transaction().unwrap();
     let (old, assignment) = budget::target::child_owner(&tx, &context.run.as_ref().unwrap().run_id)
@@ -283,11 +325,12 @@ fn assignment_attempt_real_http_takeover_records_original_bill_without_publishin
     tx.rollback().unwrap();
     *owner.lock().unwrap() = Some((context.db_path.clone(), old.clone()));
     let before = super::tests::application_table_snapshot(&db);
+    let result = agent_http_exchange(&context, &mut runtime, &request);
     assert!(
-        agent_http_exchange(&context, &mut runtime, &request).is_err(),
+        result.is_err(),
         "stale worker published a live HTTP result"
     );
-    assert_eq!(seen.lock().unwrap().len(), 1);
+    assert_eq!(seen.lock().unwrap().len(), 1, "transport result: {result:?}");
     assert_eq!(
         db.query_row(
             "SELECT response_status FROM agent_http_request_claims",
