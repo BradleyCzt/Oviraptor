@@ -123,6 +123,46 @@ impl NativeSourcePlan {
         stable_hash(&row.to_string())
     }
 
+    /// Identify this protocol in the shared frozen-plan table without applying
+    /// the Web wire hash to Source's continuation-stable hash. The immutable
+    /// scope receipt selects the owner; mutable JSON selectors cannot do so.
+    /// This historical read grants no runtime or plaintext capability.
+    pub(crate) fn verifies_source_owner(
+        connection: &Connection,
+        scan_id: &str,
+        attempt_number: i64,
+        value: &JsonValue,
+        hash: &str,
+    ) -> Result<bool, String> {
+        let (scan_type, backend, source_type): (String, String, Option<String>) = connection
+            .query_row(
+                "SELECT p.scan_type,p.backend,s.scan_type FROM native_scan_plans p
+                 LEFT JOIN source_scope_contracts s ON s.scan_id=p.scan_id AND s.attempt_number=p.attempt_number
+                 WHERE p.scan_id=?1 AND p.attempt_number=?2",
+                params![scan_id, attempt_number],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )
+            .map_err(|error| format!("source_plan_owner_lookup:{error}"))?;
+        let source_shape = value["owner"] == "oviraptor" || value.get("snapshot").is_some();
+        if source_type.is_none() && !source_shape {
+            return Ok(false);
+        }
+        let invalid = "source_plan_owner_invalid";
+        let plan = Self::from_json(value).ok_or(invalid)?;
+        if plan.as_json() != *value
+            || plan.scan_id != scan_id
+            || plan.attempt_number != attempt_number
+            || plan.scan_type != scan_type
+            || plan.backend != backend
+            || backend != "native"
+            || source_type.as_deref() != Some(plan.scan_type.as_str())
+            || plan.hash() != hash
+        {
+            return Err(invalid.into());
+        }
+        Ok(true)
+    }
+
     pub fn from_json(value: &JsonValue) -> Option<Self> {
         let text = |keys: &[&str]| -> String {
             keys.iter()

@@ -71,6 +71,7 @@ mod tests {
     include!("tests_native_source_regressions.rs");
     include!("tests_source_ci_policy.rs");
     include!("tests_source_scope_contract.rs");
+    include!("tests_source_plan_owner.rs");
     include!("tests_source_analysis_view.rs");
     include!("tests_source_broker_scope.rs");
     include!("tests_source_dependency_declarations.rs");

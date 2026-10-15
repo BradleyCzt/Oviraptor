@@ -385,6 +385,7 @@ include!("agent_tests_frozen_tool_supply_birth.rs");
 include!("agent_tests_tool_selection_policy_source.rs");
 include!("agent_tests_tool_selection_deleted_archive.rs");
 include!("agent_tests_tool_execution_readiness.rs");
+include!("agent_tests_native_plan_owner.rs");
 include!("agent_tests_homogeneous_parser.rs");
 include!("agent_tests_human_recovery_source.rs");
 }

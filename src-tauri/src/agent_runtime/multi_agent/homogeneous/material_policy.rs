@@ -20,8 +20,14 @@ pub(crate) fn for_root(db: &Connection, root: &str) -> Result<bool, String> {
         [root], |row| Ok((row.get(0)?, row.get(1)?)),
     ).optional().map_err(|e| e.to_string())?;
     match scope { Some((scan, attempt)) => {
+        // A Web birth receipt seals the original Root plan even if mutable
+        // Root JSON has lost the execution discriminator entirely.
+        let _original_web_mode = crate::agent_runtime::web_mode::root::read(db,root)?;
+        // Verify an original execution binding before considering a different
+        // current protocol. A rehashed Source-shaped row cannot erase birth.
+        let original_execution = super::execution_policy::read_original_on(db,root)?.is_some();
         if super::execution_policy::Binding::capture(db,&scan,attempt)?.is_some()
-            && super::execution_policy::read_original_on(db,root)?.is_none(){return Ok(false);}
+            && !original_execution{return Ok(false);}
         plaintext(db,&scan,attempt)
     }, None => Ok(false) }
 }
