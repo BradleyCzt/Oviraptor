@@ -128,3 +128,35 @@ CREATE TABLE IF NOT EXISTS sentinel_targets (
     updated_at TEXT NOT NULL DEFAULT (datetime('now','localtime')),
     UNIQUE(project_id,scan_id,url)
 );
+
+-- Complete the historical FK parent closure before inserting synthetic rows.
+-- Both parent definitions are copied verbatim from the same 525f128 schema blob.
+
+CREATE TABLE IF NOT EXISTS config_profiles (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL UNIQUE,
+    description TEXT NOT NULL DEFAULT '',
+    is_default INTEGER NOT NULL DEFAULT 0,
+    settings_json TEXT NOT NULL DEFAULT '{}',
+    created_at TEXT NOT NULL DEFAULT (datetime('now','localtime')),
+    updated_at TEXT NOT NULL DEFAULT (datetime('now','localtime'))
+);
+
+CREATE TABLE IF NOT EXISTS runs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+    profile_id INTEGER REFERENCES config_profiles(id) ON DELETE SET NULL,
+    name TEXT NOT NULL,
+    pipeline TEXT NOT NULL DEFAULT 'collect',
+    status TEXT NOT NULL DEFAULT 'queued',
+    stage TEXT NOT NULL DEFAULT 'queued',
+    progress REAL NOT NULL DEFAULT 0,
+    processed INTEGER NOT NULL DEFAULT 0,
+    total INTEGER NOT NULL DEFAULT 0,
+    config_snapshot TEXT NOT NULL DEFAULT '{}',
+    output_dir TEXT NOT NULL DEFAULT '',
+    error TEXT NOT NULL DEFAULT '',
+    created_at TEXT NOT NULL DEFAULT (datetime('now','localtime')),
+    started_at TEXT,
+    finished_at TEXT
+);
