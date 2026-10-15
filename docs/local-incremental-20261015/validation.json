@@ -1,0 +1,275 @@
+{
+  "tested_code_commit": "b2492bb94ce7aca1b102ffefc7b047dee819a2fe",
+  "base_snapshot": "525f1283adae79a13bcf0e07cf50772841911fb0",
+  "publication_task_did_not_rerun_build_or_tests": true,
+  "frontend_build": {
+    "command": "npm run build",
+    "result": "passed vue-tsc --noEmit and Vite build"
+  },
+  "node_suites": [
+    {
+      "suite": "frontend-module-workspace",
+      "command": "node --test --test-concurrency=1 tools/test_asset_workspace_review.cjs tools/test_module_navigation.cjs tools/test_builtin_plugins.cjs tools/test_plugin_workspaces.cjs",
+      "passed": 73,
+      "failed": 0,
+      "captured_log_sha256": "0524f3c1809ad8ce10c330fdfa8b86802a3df616260867aeb1d5b866f704e430"
+    },
+    {
+      "suite": "asset-history-import",
+      "command": "node --test --test-concurrency=1 tools/test_asset_ownership_gate.cjs tools/test_asset_log_panel.cjs tools/test_historical_json_import.cjs",
+      "passed": 36,
+      "failed": 0,
+      "captured_log_sha256": "4e03a287a7a156193cb62a4db9ffd755b79001c4d295d9f1a88c21354e1c8e18"
+    },
+    {
+      "suite": "boundaries-exposure",
+      "command": "node --test --test-concurrency=1 tools/test_module_boundaries.cjs tools/test_api_owner_contracts.cjs tools/test_asset_exposure_surface.cjs tools/test_asset_exposure_page.cjs tools/test_asset_exposure_evidence.cjs tools/test_asset_exposure_entry.cjs tools/test_asset_exposure_settings.cjs tools/test_asset_exposure_clusters.cjs tools/test_asset_exposure_review.cjs",
+      "passed": 84,
+      "failed": 0,
+      "captured_log_sha256": "b24960ad9e0473cc4b3517cb411c08df349c6cfc78d53924993c55f64e7d44af"
+    },
+    {
+      "suite": "rust-business-boundary-source-guard",
+      "command": "node --test tools/test_rust_business_boundaries.cjs",
+      "passed": 21,
+      "failed": 0,
+      "evidence": "Captured successful output from the original validation stage; no repeat run in publication task."
+    }
+  ],
+  "node_passed": 214,
+  "rust_lightweight_suites": [
+    {
+      "suite": "backend-lightweight",
+      "passed": 20,
+      "failed": 0,
+      "captured_log_sha256": "5e67349d478e28bc4de1031214f252e8350258b296f645f8f42565f189c4c081"
+    },
+    {
+      "suite": "jobs-lightweight",
+      "passed": 90,
+      "failed": 0,
+      "captured_log_sha256": "b141376122e4c4a0c71d7a4d644ffc498f62b85eb18145cc4cc0f2a1f07b778e"
+    }
+  ],
+  "rust_suite_overlap": {
+    "shared_page_isolation_tests": 9,
+    "unique_tests_across_rust_suites": 101
+  },
+  "rust_changed_files_syntax_parsed": 33,
+  "rust_constructor_literals_statically_audited": 15,
+  "harness_source_inputs": [
+    {
+      "path": "src-tauri/src/jobs.rs",
+      "sha256": "d8b0042d12d559f6e2e56809304e90be9c16affe899bd7f56de5080a7344345e",
+      "suites": [
+        "jobs-lightweight"
+      ],
+      "hash_matches_tested_commit": true
+    },
+    {
+      "path": "src-tauri/src/db.rs",
+      "sha256": "1a84832f4af56f9509a3d6a34b00516b74983e972a3ccf185733177ff1f05634",
+      "suites": [
+        "jobs-lightweight"
+      ],
+      "hash_matches_tested_commit": true
+    },
+    {
+      "path": "src-tauri/src/db_schema.rs",
+      "sha256": "1a32d477c78cac8d299d7bf58eb83351b76d52ec8a8c4566a40c3ab0e7fcf692",
+      "suites": [
+        "jobs-lightweight"
+      ],
+      "hash_matches_tested_commit": true
+    },
+    {
+      "path": "src-tauri/src/assets/model.rs",
+      "sha256": "b8d38c0263239b0152b5903811bac4d9d3a146bea91889fd51a0fde5fd7d17a4",
+      "suites": [
+        "jobs-lightweight"
+      ],
+      "hash_matches_tested_commit": true
+    },
+    {
+      "path": "src-tauri/src/page_isolation.rs",
+      "sha256": "06af0f7d76bc2d4a5ec43c00d8c08f0f94f7b01305dcf52930ee9b013c5ad1a7",
+      "suites": [
+        "jobs-lightweight"
+      ],
+      "hash_matches_tested_commit": true
+    },
+    {
+      "path": "src-tauri/src/jobs/asset_identity.rs",
+      "sha256": "4ac5cc2af3b3c5024b1221651dc691d5c78631d9bfba5a2e9ce1d8c765cfa52d",
+      "suites": [
+        "jobs-lightweight"
+      ],
+      "hash_matches_tested_commit": true
+    },
+    {
+      "path": "src-tauri/src/jobs/asset_import_lock_tests.rs",
+      "sha256": "eb89b84ec6f5166fbd6fb3db7c4e43fcee84b9a1ec8c2f761a30ae3a38668cf0",
+      "suites": [
+        "jobs-lightweight"
+      ],
+      "hash_matches_tested_commit": true
+    },
+    {
+      "path": "src-tauri/src/jobs/asset_import_tests.rs",
+      "sha256": "43fa0ddd5ad2bc24de2a66adab2cd923f3d233a6d0c592974edae5e3169bc029",
+      "suites": [
+        "jobs-lightweight"
+      ],
+      "hash_matches_tested_commit": true
+    },
+    {
+      "path": "src-tauri/src/jobs/job_resume.rs",
+      "sha256": "d49f7987cf02c4fb17897df5bf2c08cc2584066fd6d8fbde6f4b934fdeaf2edc",
+      "suites": [
+        "jobs-lightweight"
+      ],
+      "hash_matches_tested_commit": true
+    },
+    {
+      "path": "src-tauri/src/jobs/job_resume_tests.rs",
+      "sha256": "ad8e37a7cebf8af78f32008fca539655bf375ce76db9e2d805a213cbcbcdcf15",
+      "suites": [
+        "jobs-lightweight"
+      ],
+      "hash_matches_tested_commit": true
+    },
+    {
+      "path": "src-tauri/src/jobs/native_collection_resume.rs",
+      "sha256": "8bf2f4ab122fa82e6c0fefdcef0377f4cde453e4eff73deaac27e0dfe4238117",
+      "suites": [
+        "jobs-lightweight"
+      ],
+      "hash_matches_tested_commit": true
+    },
+    {
+      "path": "src-tauri/src/jobs/native_collection_resume_tests.rs",
+      "sha256": "71b241929a8113ee0f6ad858f199bcf9bf3d536fabe8cd05f601de70132a8e9b",
+      "suites": [
+        "jobs-lightweight"
+      ],
+      "hash_matches_tested_commit": true
+    },
+    {
+      "path": "src-tauri/src/jobs/native_collection_resume_transport.rs",
+      "sha256": "d875db9ef3710263b89b4e96e10c8eb834f65bba98eb31dd12421ad5ebc48e22",
+      "suites": [
+        "jobs-lightweight"
+      ],
+      "hash_matches_tested_commit": true
+    },
+    {
+      "path": "src-tauri/src/jobs/native_config.rs",
+      "sha256": "8cc3dcbd7ac3762a9b476c6fdaa473562adf873aa3f4b770c02c69792468fd81",
+      "suites": [
+        "jobs-lightweight"
+      ],
+      "hash_matches_tested_commit": true
+    },
+    {
+      "path": "src-tauri/src/jobs/native_content.rs",
+      "sha256": "0c196059458a9a6a5823540d20df0f151e1fb7d5d1c9ad0fe01c785280fdc15a",
+      "suites": [
+        "jobs-lightweight"
+      ],
+      "hash_matches_tested_commit": true
+    },
+    {
+      "path": "src-tauri/src/jobs/native_discovery.rs",
+      "sha256": "f8f37a17f562982965b45118756e1774f0f7625006983ec4be43db72582db4a3",
+      "suites": [
+        "jobs-lightweight"
+      ],
+      "hash_matches_tested_commit": true
+    },
+    {
+      "path": "src-tauri/src/jobs/native_discovery_tests.rs",
+      "sha256": "0c450fed2362f0696e092b7fddab8983da7024ebec03ef48068614bec787065b",
+      "suites": [
+        "jobs-lightweight"
+      ],
+      "hash_matches_tested_commit": true
+    },
+    {
+      "path": "src-tauri/src/jobs/native_fofa.rs",
+      "sha256": "aacb51989b0a7955e22d4a92793a4624676b8f3589ed64ddcfec8adebb8b05fb",
+      "suites": [
+        "jobs-lightweight"
+      ],
+      "hash_matches_tested_commit": true
+    },
+    {
+      "path": "src-tauri/src/jobs/native_probe.rs",
+      "sha256": "7ad43bb1d057b883d1896b37bc5af7b3e53be38d58edc2e4befa614a5ede9658",
+      "suites": [
+        "jobs-lightweight"
+      ],
+      "hash_matches_tested_commit": true
+    },
+    {
+      "path": "src-tauri/src/jobs/native_probe_control.rs",
+      "sha256": "0f9800d4502f772ea44e2910ecac071b56197108af993e0cb078015167fa2204",
+      "suites": [
+        "jobs-lightweight"
+      ],
+      "hash_matches_tested_commit": true
+    },
+    {
+      "path": "src-tauri/src/jobs/native_refinement.rs",
+      "sha256": "ca5ac0ec311697668892670597f0f6e9369548d7a69489f07f18cbcff95379bb",
+      "suites": [
+        "jobs-lightweight"
+      ],
+      "hash_matches_tested_commit": true
+    },
+    {
+      "path": "src-tauri/src/jobs/native_response_identity.rs",
+      "sha256": "757b2b9212fe69fbf13e7e1bfc5cf070724d063b74e7fbb50a857cf402bba3d1",
+      "suites": [
+        "jobs-lightweight"
+      ],
+      "hash_matches_tested_commit": true
+    },
+    {
+      "path": "src-tauri/src/jobs/native_response_identity_tests.rs",
+      "sha256": "70bed09b7c8803d33ba3b5ab045d10a63e07baea9120e809c5c8cb09351fd962",
+      "suites": [
+        "jobs-lightweight"
+      ],
+      "hash_matches_tested_commit": true
+    },
+    {
+      "path": "src-tauri/src/jobs/native_workers.rs",
+      "sha256": "221497b8f46b935cdc5e1b5b0a12cec9900357cc97794a7cd75220f06d1d3aab",
+      "suites": [
+        "jobs-lightweight"
+      ],
+      "hash_matches_tested_commit": true
+    },
+    {
+      "path": "src-tauri/src/jobs/tray_activity.rs",
+      "sha256": "b790f3650f6bc15b52a41b96b6297aefb7762b89abd9a720ef083bade65c2092",
+      "suites": [
+        "jobs-lightweight"
+      ],
+      "hash_matches_tested_commit": true
+    }
+  ],
+  "full_native_build": {
+    "command": "cargo test --lib --no-run --locked -j 2",
+    "result": "blocked before application crate type checking",
+    "missing_system_dependency": "glib-2.0 >= 2.70 / glib-2.0.pc"
+  },
+  "not_covered": [
+    "full application compilation/linking",
+    "historical database migrations and normal seeding",
+    "native Tauri IPC/runtime/worker launching",
+    "real notification hooks",
+    "GUI tray and platform power APIs"
+  ],
+  "harness_reproduction_limit": "Temporary extraction/generation harnesses and build outputs were retained in the cloud task workspace, not added to this branch. Repository source/test input hashes are included; use original native tests when desktop system dependencies are available."
+}

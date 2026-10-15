@@ -1,0 +1,951 @@
+{
+  "commit": "b2492bb94ce7aca1b102ffefc7b047dee819a2fe",
+  "parent": "525f1283adae79a13bcf0e07cf50772841911fb0",
+  "changed_file_count": 55,
+  "scope": "All changed commit blobs plus their added-line intersections; unchanged excluded tests and fixtures were not read.",
+  "rules": [
+    "aws_access_key",
+    "github_token",
+    "provider_api_key",
+    "slack_token",
+    "private_key_block",
+    "jwt_literal",
+    "credential_url",
+    "credential_query_literal",
+    "credential_assignment",
+    "extended_credential_literal_assignment"
+  ],
+  "findings": [
+    {
+      "path": "src-tauri/src/db_initialize_budgets.rs",
+      "category": "high_entropy_credential_assignment",
+      "line": 11,
+      "end_line": 11,
+      "sha256": "4f6ab2891144e608d0f2b7f52e234ff72b7eaf25dae8b8933c4b2408bbc351ce",
+      "entropy": 3.767,
+      "in_added_diff": false,
+      "same_match_in_parent_blob": true,
+      "classification": "false_positive_sql_settings_key_name",
+      "classification_evidence": [
+        "Match occurs inside SQL for an application settings key; it is a storage identifier, not a credential value."
+      ]
+    },
+    {
+      "path": "src-tauri/src/db_initialize_budgets.rs",
+      "category": "high_entropy_credential_assignment",
+      "line": 41,
+      "end_line": 41,
+      "sha256": "6c65831e1d744a8ca601ed250ce29f73ea65439a75dd8f49a0ae4f8f79a8bb77",
+      "entropy": 3.753,
+      "in_added_diff": false,
+      "same_match_in_parent_blob": true,
+      "classification": "false_positive_sql_settings_key_name",
+      "classification_evidence": [
+        "Match occurs inside SQL for an application settings key; it is a storage identifier, not a credential value."
+      ]
+    },
+    {
+      "path": "src-tauri/src/jobs/native_collection_resume_tests.rs",
+      "category": "credential_url",
+      "line": 736,
+      "end_line": 736,
+      "sha256": "8389d90bee4cd709c9d7e6984f9d58ca8e11e87dd95a1a6642cc89bfa87dc343",
+      "entropy": 4.624,
+      "in_added_diff": true,
+      "same_match_in_parent_blob": false,
+      "classification": "reviewed_synthetic_reserved_domain_credential_uri",
+      "classification_evidence": [
+        "Exact reviewed substring SHA256 b3ca39319dd51c1a8e5d2b1fe29bd5fc92097e47d60ef943556c56be10891ad9 matches package review; surrounding URL uses a reserved test domain.",
+        "Only this exact occurrence is classified; no whole-file exception is used."
+      ]
+    },
+    {
+      "path": "src-tauri/src/jobs/native_collection_resume_tests.rs",
+      "category": "high_entropy_credential_assignment",
+      "line": 174,
+      "end_line": 174,
+      "sha256": "ee35bce203a45a97c5c27246d0d1c28aaeb76b85ed4056a967337b98047a70f1",
+      "entropy": 3.866,
+      "in_added_diff": true,
+      "same_match_in_parent_blob": false,
+      "classification": "synthetic_mock_transport_credential",
+      "classification_evidence": [
+        "Literal appears in the mock collection options helper with an explicit fixture marker.",
+        "No token-shaped provider credential was found; test scope alone was not used as an exemption."
+      ]
+    },
+    {
+      "path": "src-tauri/src/jobs/native_collection_resume_tests.rs",
+      "category": "high_entropy_credential_assignment",
+      "line": 387,
+      "end_line": 387,
+      "sha256": "5b2c7ba8f89c5fc6e2b327a9cf96a24489587f93f591e9c6e1bd029d0c026dd1",
+      "entropy": 3.825,
+      "in_added_diff": true,
+      "same_match_in_parent_blob": false,
+      "classification": "synthetic_key_rotation_canary",
+      "classification_evidence": [
+        "Descriptive lowercase key rotation canary is constructed by the named resume rejection test to verify changed credentials are rejected.",
+        "No token-shaped provider credential was found; test scope alone was not used as an exemption."
+      ]
+    },
+    {
+      "path": "src-tauri/src/jobs/native_collection_resume_tests.rs",
+      "category": "high_entropy_credential_assignment",
+      "line": 481,
+      "end_line": 481,
+      "sha256": "474b2e28e782bd9d291546dbd91ced63d5c9e303efda86f08d786a63f150a0a5",
+      "entropy": 3.534,
+      "in_added_diff": true,
+      "same_match_in_parent_blob": false,
+      "classification": "synthetic_key_rotation_canary",
+      "classification_evidence": [
+        "Descriptive lowercase key rotation canary is constructed by the named resume rejection test to verify changed credentials are rejected.",
+        "No token-shaped provider credential was found; test scope alone was not used as an exemption."
+      ]
+    },
+    {
+      "path": "src-tauri/src/jobs/native_discovery_tests.rs",
+      "category": "high_entropy_credential_assignment",
+      "line": 339,
+      "end_line": 339,
+      "sha256": "d36e7c13664c36e831478be9ca8aaa1f3806ce40c31ed68b8de4438d835c32ab",
+      "entropy": 3.654,
+      "in_added_diff": true,
+      "same_match_in_parent_blob": false,
+      "classification": "synthetic_mock_transport_credential",
+      "classification_evidence": [
+        "Descriptive fixture-marker literal is constructed by the local discovery transport test."
+      ]
+    },
+    {
+      "path": "src/features/assets/components/AssetWorkspace.vue",
+      "category": "high_entropy_credential_assignment",
+      "line": 687,
+      "end_line": 687,
+      "sha256": "bf95c99703d4d76bf7378cf475109fd8082de8a3f4a9fcb057c69317fd65de88",
+      "entropy": 4.015,
+      "in_added_diff": true,
+      "same_match_in_parent_blob": true,
+      "classification": "false_positive_vue_binding_expression",
+      "classification_evidence": [
+        "Matched attribute is a Vue key/refresh-key render binding expression, not a stored credential."
+      ]
+    },
+    {
+      "path": "src/features/assets/workspace/AssetsPluginWorkspace.vue",
+      "category": "high_entropy_credential_assignment",
+      "line": 161,
+      "end_line": 161,
+      "sha256": "ff5011bb7d826827fbd4a1b9e5771a9e15bd162c7ffb05b636228164db017203",
+      "entropy": 3.732,
+      "in_added_diff": true,
+      "same_match_in_parent_blob": true,
+      "classification": "false_positive_vue_binding_expression",
+      "classification_evidence": [
+        "Matched attribute is a Vue key/refresh-key render binding expression, not a stored credential."
+      ]
+    },
+    {
+      "path": "src/features/configuration/components/ConfigDialog.vue",
+      "category": "high_entropy_credential_assignment",
+      "line": 196,
+      "end_line": 196,
+      "sha256": "4f2ecf7656239f09ecc97b73b4c7e93cc254c461810e64ed11f6473abbc5a688",
+      "entropy": 3.535,
+      "in_added_diff": false,
+      "same_match_in_parent_blob": true,
+      "classification": "false_positive_configuration_property_selector",
+      "classification_evidence": [
+        "repositoryKey/referenceKey are UI metadata selectors whose literal values name configuration properties."
+      ]
+    },
+    {
+      "path": "src/features/configuration/components/ConfigDialog.vue",
+      "category": "high_entropy_credential_assignment",
+      "line": 206,
+      "end_line": 206,
+      "sha256": "0237e8bb508868c24d0515a8c27b205abed043dbee72138d0d56f9a3134a0a99",
+      "entropy": 3.646,
+      "in_added_diff": false,
+      "same_match_in_parent_blob": true,
+      "classification": "false_positive_configuration_property_selector",
+      "classification_evidence": [
+        "repositoryKey/referenceKey are UI metadata selectors whose literal values name configuration properties."
+      ]
+    },
+    {
+      "path": "src/features/configuration/components/ConfigDialog.vue",
+      "category": "high_entropy_credential_assignment",
+      "line": 216,
+      "end_line": 216,
+      "sha256": "5fe56732c41a47ec6ceb91e6d72fcee9ea184f068de1d9a63c7fa42eec5d00a3",
+      "entropy": 3.97,
+      "in_added_diff": false,
+      "same_match_in_parent_blob": true,
+      "classification": "false_positive_configuration_property_selector",
+      "classification_evidence": [
+        "repositoryKey/referenceKey are UI metadata selectors whose literal values name configuration properties."
+      ]
+    },
+    {
+      "path": "src/features/configuration/components/ConfigDialog.vue",
+      "category": "high_entropy_credential_assignment",
+      "line": 217,
+      "end_line": 217,
+      "sha256": "acf5859b84fdd65d57cb1fb5ffcd4e2df8c69843929ea095b9c9f040886118b3",
+      "entropy": 3.671,
+      "in_added_diff": false,
+      "same_match_in_parent_blob": true,
+      "classification": "false_positive_configuration_property_selector",
+      "classification_evidence": [
+        "repositoryKey/referenceKey are UI metadata selectors whose literal values name configuration properties."
+      ]
+    },
+    {
+      "path": "src/features/configuration/components/ConfigDialog.vue",
+      "category": "high_entropy_credential_assignment",
+      "line": 1207,
+      "end_line": 1207,
+      "sha256": "2e99a2d12d2c41ff1e2c1be0542023aedd6b941a346df3b932cdd6fbc09e7255",
+      "entropy": 3.908,
+      "in_added_diff": false,
+      "same_match_in_parent_blob": true,
+      "classification": "false_positive_vue_binding_expression",
+      "classification_evidence": [
+        "Matched attribute is a Vue key/refresh-key render binding expression, not a stored credential."
+      ]
+    },
+    {
+      "path": "src-tauri/src/jobs.rs",
+      "category": "extended_credential_literal_assignment",
+      "line": 481,
+      "end_line": 481,
+      "sha256": "ef2e62c70eafffab7adebb3a97c0f89d44fd4c539575e573f994c3ad7e478a2c",
+      "entropy": 3.548,
+      "classification": "false_positive_csv_metadata_column_array",
+      "classification_evidence": [
+        "String belongs to an array of response-group CSV column identifiers."
+      ],
+      "in_added_diff": true
+    },
+    {
+      "path": "src-tauri/src/jobs.rs",
+      "category": "extended_credential_literal_assignment",
+      "line": 483,
+      "end_line": 483,
+      "sha256": "d82d0369e319633e119aa43e0faaaa553c5ad2b9829ae4e64bc49d145ea807a5",
+      "entropy": 3.56,
+      "classification": "false_positive_csv_metadata_column_array",
+      "classification_evidence": [
+        "String belongs to an array of response-group CSV column identifiers."
+      ],
+      "in_added_diff": true
+    },
+    {
+      "path": "src-tauri/src/jobs/job_resume.rs",
+      "category": "extended_credential_literal_assignment",
+      "line": 16,
+      "end_line": 16,
+      "sha256": "05b296a9f3515a597a8d77f3375432afd45a1dedc29792cd79ea50ae44867ba4",
+      "entropy": 3.156,
+      "classification": "false_positive_frozen_rule_metadata_array",
+      "classification_evidence": [
+        "String belongs to the pair of frozen content/title-rule metadata key identifiers."
+      ],
+      "in_added_diff": true
+    },
+    {
+      "path": "src-tauri/src/jobs/job_resume.rs",
+      "category": "extended_credential_literal_assignment",
+      "line": 52,
+      "end_line": 52,
+      "sha256": "05b296a9f3515a597a8d77f3375432afd45a1dedc29792cd79ea50ae44867ba4",
+      "entropy": 3.156,
+      "classification": "false_positive_frozen_rule_metadata_array",
+      "classification_evidence": [
+        "String belongs to the pair of frozen content/title-rule metadata key identifiers."
+      ],
+      "in_added_diff": true
+    },
+    {
+      "path": "src-tauri/src/jobs/native_collection_resume_tests.rs",
+      "category": "extended_credential_literal_assignment",
+      "line": 387,
+      "end_line": 387,
+      "sha256": "05940bab95f854f5caa3d560b66372b0f257094b348dd26974707bd471271813",
+      "entropy": 3.825,
+      "classification": "synthetic_key_rotation_canary",
+      "classification_evidence": [
+        "Descriptive lowercase key rotation canary is constructed by the named resume rejection test to verify changed credentials are rejected.",
+        "No token-shaped provider credential was found; test scope alone was not used as an exemption."
+      ],
+      "in_added_diff": true
+    },
+    {
+      "path": "src-tauri/src/jobs/native_collection_resume_tests.rs",
+      "category": "extended_credential_literal_assignment",
+      "line": 481,
+      "end_line": 481,
+      "sha256": "3466ff0dd3a283859e16ca37696588d73e99a9bcf6c6e82a26da5440cf6fe616",
+      "entropy": 3.534,
+      "classification": "synthetic_key_rotation_canary",
+      "classification_evidence": [
+        "Descriptive lowercase key rotation canary is constructed by the named resume rejection test to verify changed credentials are rejected.",
+        "No token-shaped provider credential was found; test scope alone was not used as an exemption."
+      ],
+      "in_added_diff": true
+    },
+    {
+      "path": "src-tauri/src/jobs/native_response_identity.rs",
+      "category": "extended_credential_literal_assignment",
+      "line": 4,
+      "end_line": 4,
+      "sha256": "5371a79d6813fb9521c057e6e34be8ab10c567aef9c1f3bba4a7352240f13d6e",
+      "entropy": 3.548,
+      "classification": "false_positive_csv_metadata_column_array",
+      "classification_evidence": [
+        "String belongs to an array of response-group CSV column identifiers."
+      ],
+      "in_added_diff": true
+    },
+    {
+      "path": "src-tauri/src/jobs/native_response_identity.rs",
+      "category": "extended_credential_literal_assignment",
+      "line": 6,
+      "end_line": 6,
+      "sha256": "1b21a0225bdcb0e125b3771290357a4005a2201d7d6b5bc96f738bcef733aa31",
+      "entropy": 3.56,
+      "classification": "false_positive_csv_metadata_column_array",
+      "classification_evidence": [
+        "String belongs to an array of response-group CSV column identifiers."
+      ],
+      "in_added_diff": true
+    },
+    {
+      "path": "src/App.vue",
+      "category": "extended_credential_literal_assignment",
+      "line": 509,
+      "end_line": 509,
+      "sha256": "11994272e3158537e17888035d43e0050257bb595e9d001046a75914acf4312f",
+      "entropy": 3.795,
+      "classification": "false_positive_vue_binding_expression",
+      "classification_evidence": [
+        "Matched attribute is a Vue key/refresh-key render binding expression, not a stored credential."
+      ],
+      "in_added_diff": false
+    },
+    {
+      "path": "src/features/configuration/components/ConfigDialog.vue",
+      "category": "extended_credential_literal_assignment",
+      "line": 196,
+      "end_line": 196,
+      "sha256": "357b82b8ad7764db5f3c33cc854709964f667c0ed4349bc16e1ec29055449af3",
+      "entropy": 3.535,
+      "classification": "false_positive_configuration_property_selector",
+      "classification_evidence": [
+        "repositoryKey/referenceKey are UI metadata selectors whose literal values name configuration properties."
+      ],
+      "in_added_diff": false
+    },
+    {
+      "path": "src/features/configuration/components/ConfigDialog.vue",
+      "category": "extended_credential_literal_assignment",
+      "line": 197,
+      "end_line": 197,
+      "sha256": "b4a39ae4585d4c4b0e729695f84ffe1e85e20129447558c388a25a5ba90b030a",
+      "entropy": 3.139,
+      "classification": "false_positive_configuration_property_selector",
+      "classification_evidence": [
+        "repositoryKey/referenceKey are UI metadata selectors whose literal values name configuration properties."
+      ],
+      "in_added_diff": false
+    },
+    {
+      "path": "src/features/configuration/components/ConfigDialog.vue",
+      "category": "extended_credential_literal_assignment",
+      "line": 206,
+      "end_line": 206,
+      "sha256": "1bbaf1ec3c79213007be94d9e142667ccfe3a795e65814aaf9f05e90a16820d0",
+      "entropy": 3.646,
+      "classification": "false_positive_configuration_property_selector",
+      "classification_evidence": [
+        "repositoryKey/referenceKey are UI metadata selectors whose literal values name configuration properties."
+      ],
+      "in_added_diff": false
+    },
+    {
+      "path": "src/features/configuration/components/ConfigDialog.vue",
+      "category": "extended_credential_literal_assignment",
+      "line": 207,
+      "end_line": 207,
+      "sha256": "847f2e9ebde4e4e0c3f460c580221707e77f1d0298f234155d70bc3add7733ad",
+      "entropy": 3.116,
+      "classification": "false_positive_configuration_property_selector",
+      "classification_evidence": [
+        "repositoryKey/referenceKey are UI metadata selectors whose literal values name configuration properties."
+      ],
+      "in_added_diff": false
+    },
+    {
+      "path": "src/features/configuration/components/ConfigDialog.vue",
+      "category": "extended_credential_literal_assignment",
+      "line": 216,
+      "end_line": 216,
+      "sha256": "2a6ab7cd9258e21a7552d7eb7a9602cadace4a535ce9045bb19004424cf1fce3",
+      "entropy": 3.97,
+      "classification": "false_positive_configuration_property_selector",
+      "classification_evidence": [
+        "repositoryKey/referenceKey are UI metadata selectors whose literal values name configuration properties."
+      ],
+      "in_added_diff": false
+    },
+    {
+      "path": "src/features/configuration/components/ConfigDialog.vue",
+      "category": "extended_credential_literal_assignment",
+      "line": 217,
+      "end_line": 217,
+      "sha256": "28a0fbedfbc9d31eafad1187161d60a197401d423bd84ee24630eaafd3078a53",
+      "entropy": 3.671,
+      "classification": "false_positive_configuration_property_selector",
+      "classification_evidence": [
+        "repositoryKey/referenceKey are UI metadata selectors whose literal values name configuration properties."
+      ],
+      "in_added_diff": false
+    },
+    {
+      "path": "tools/test_rust_business_boundaries.cjs",
+      "category": "extended_credential_literal_assignment",
+      "line": 84,
+      "end_line": 84,
+      "sha256": "d8a14fd2c4704f12c0f28418d8eda8637ba22dfa43f80a0351653301d1a281f4",
+      "entropy": 3.781,
+      "classification": "false_positive_expected_module_or_command_identifier",
+      "classification_evidence": [
+        "String is an expected Rust module/command path identifier in a boundary contract test."
+      ],
+      "in_added_diff": false
+    },
+    {
+      "path": "tools/test_rust_business_boundaries.cjs",
+      "category": "extended_credential_literal_assignment",
+      "line": 165,
+      "end_line": 165,
+      "sha256": "b54887f4f038fe8f933f1c400001096c5c0aa470ac25510eed6025894f60bf6f",
+      "entropy": 3.771,
+      "classification": "false_positive_expected_module_or_command_identifier",
+      "classification_evidence": [
+        "String is an expected Rust module/command path identifier in a boundary contract test."
+      ],
+      "in_added_diff": false
+    },
+    {
+      "path": "tools/test_rust_business_boundaries.cjs",
+      "category": "extended_credential_literal_assignment",
+      "line": 175,
+      "end_line": 175,
+      "sha256": "933bde95868e3cff803c0d10fcc8570ec8a8feaa7935842077210ddd9fa10a70",
+      "entropy": 3.795,
+      "classification": "false_positive_expected_module_or_command_identifier",
+      "classification_evidence": [
+        "String is an expected Rust module/command path identifier in a boundary contract test."
+      ],
+      "in_added_diff": false
+    }
+  ],
+  "files": [
+    {
+      "path": "package-lock.json",
+      "status": "M",
+      "size_bytes": 65515,
+      "sha256": "5c0d6c470f43b9e2b31ebd120a4a76f19fb6cbd187fa712f455585da51c22ed5",
+      "nul_bytes": 0
+    },
+    {
+      "path": "package.json",
+      "status": "M",
+      "size_bytes": 6719,
+      "sha256": "8956e50004dbbaed7442875790f52966427e38ebf84b080d7492ed31c332363d",
+      "nul_bytes": 0
+    },
+    {
+      "path": "src-tauri/Cargo.lock",
+      "status": "M",
+      "size_bytes": 138190,
+      "sha256": "eaa60a1baec8b30a1997d4bf726ea9930d96de344098af711d3b182833e89dfc",
+      "nul_bytes": 0
+    },
+    {
+      "path": "src-tauri/Cargo.toml",
+      "status": "M",
+      "size_bytes": 2733,
+      "sha256": "96702e7ef0290c445d6332a86f1f188ee8d75c6e0b022324589083ac0442e68f",
+      "nul_bytes": 0
+    },
+    {
+      "path": "src-tauri/src/assets/model.rs",
+      "status": "M",
+      "size_bytes": 11107,
+      "sha256": "b8d38c0263239b0152b5903811bac4d9d3a146bea91889fd51a0fde5fd7d17a4",
+      "nul_bytes": 0
+    },
+    {
+      "path": "src-tauri/src/commands.rs",
+      "status": "M",
+      "size_bytes": 1188,
+      "sha256": "c9fbb5b89f16d5d3d66572a19070b2a7f85372f2256d97b99e304c2828de09a7",
+      "nul_bytes": 0
+    },
+    {
+      "path": "src-tauri/src/commands/application_overview.rs",
+      "status": "M",
+      "size_bytes": 2998,
+      "sha256": "aebc15d1dd18b29c854ec792946204caefd841cdda784ddf6b2f25c18f29168c",
+      "nul_bytes": 0
+    },
+    {
+      "path": "src-tauri/src/commands/asset_query_rule_tests.rs",
+      "status": "A",
+      "size_bytes": 4837,
+      "sha256": "0ace90d314c85ccab6806960cc97c623efbc467b1182f787fefc96734bb1fe0f",
+      "nul_bytes": 0
+    },
+    {
+      "path": "src-tauri/src/commands/asset_response_groups.rs",
+      "status": "A",
+      "size_bytes": 6135,
+      "sha256": "74a433ed6ed63d0feda7ac261e40eff5ea6717c3b500cc0f022f8f7be6e53e47",
+      "nul_bytes": 0
+    },
+    {
+      "path": "src-tauri/src/commands/asset_response_groups_tests.rs",
+      "status": "A",
+      "size_bytes": 13286,
+      "sha256": "653695b88db05b4613bc878080fafffddea066d70b0c3bd18a88b928a233ec76",
+      "nul_bytes": 0
+    },
+    {
+      "path": "src-tauri/src/commands/asset_rule_catalog.rs",
+      "status": "A",
+      "size_bytes": 4858,
+      "sha256": "85b73a70e83401c2dfcb04c4cc36fa916fd40a032a35e32cea9effac7ad20d98",
+      "nul_bytes": 0
+    },
+    {
+      "path": "src-tauri/src/commands/assets.rs",
+      "status": "M",
+      "size_bytes": 46506,
+      "sha256": "91a58a1ec7b25f6de24ee6f9a086d5109bb4bf563bd977757ca4c0f28ed84c69",
+      "nul_bytes": 0
+    },
+    {
+      "path": "src-tauri/src/commands/page_isolation.rs",
+      "status": "A",
+      "size_bytes": 1690,
+      "sha256": "a5f2a985597f945ea404d1828ea15e93118d34b6da1731305d0aac168bc584e1",
+      "nul_bytes": 0
+    },
+    {
+      "path": "src-tauri/src/db_initialize_budgets.rs",
+      "status": "M",
+      "size_bytes": 22979,
+      "sha256": "423a34b20b2bb0a5d1840817c74417d838c749635e1b41fcea7ceb72c66b511f",
+      "nul_bytes": 0
+    },
+    {
+      "path": "src-tauri/src/db_schema.rs",
+      "status": "M",
+      "size_bytes": 119731,
+      "sha256": "1a32d477c78cac8d299d7bf58eb83351b76d52ec8a8c4566a40c3ab0e7fcf692",
+      "nul_bytes": 0
+    },
+    {
+      "path": "src-tauri/src/jobs.rs",
+      "status": "M",
+      "size_bytes": 57515,
+      "sha256": "d8b0042d12d559f6e2e56809304e90be9c16affe899bd7f56de5080a7344345e",
+      "nul_bytes": 0
+    },
+    {
+      "path": "src-tauri/src/jobs/asset_identity.rs",
+      "status": "A",
+      "size_bytes": 3596,
+      "sha256": "4ac5cc2af3b3c5024b1221651dc691d5c78631d9bfba5a2e9ce1d8c765cfa52d",
+      "nul_bytes": 0
+    },
+    {
+      "path": "src-tauri/src/jobs/asset_import_lock_tests.rs",
+      "status": "A",
+      "size_bytes": 8682,
+      "sha256": "eb89b84ec6f5166fbd6fb3db7c4e43fcee84b9a1ec8c2f761a30ae3a38668cf0",
+      "nul_bytes": 0
+    },
+    {
+      "path": "src-tauri/src/jobs/asset_import_tests.rs",
+      "status": "A",
+      "size_bytes": 19400,
+      "sha256": "43fa0ddd5ad2bc24de2a66adab2cd923f3d233a6d0c592974edae5e3169bc029",
+      "nul_bytes": 0
+    },
+    {
+      "path": "src-tauri/src/jobs/job_resume.rs",
+      "status": "A",
+      "size_bytes": 9013,
+      "sha256": "d49f7987cf02c4fb17897df5bf2c08cc2584066fd6d8fbde6f4b934fdeaf2edc",
+      "nul_bytes": 0
+    },
+    {
+      "path": "src-tauri/src/jobs/job_resume_tests.rs",
+      "status": "A",
+      "size_bytes": 9010,
+      "sha256": "ad8e37a7cebf8af78f32008fca539655bf375ce76db9e2d805a213cbcbcdcf15",
+      "nul_bytes": 0
+    },
+    {
+      "path": "src-tauri/src/jobs/native_collection_resume.rs",
+      "status": "A",
+      "size_bytes": 8351,
+      "sha256": "8bf2f4ab122fa82e6c0fefdcef0377f4cde453e4eff73deaac27e0dfe4238117",
+      "nul_bytes": 0
+    },
+    {
+      "path": "src-tauri/src/jobs/native_collection_resume_tests.rs",
+      "status": "A",
+      "size_bytes": 29447,
+      "sha256": "71b241929a8113ee0f6ad858f199bcf9bf3d536fabe8cd05f601de70132a8e9b",
+      "nul_bytes": 0
+    },
+    {
+      "path": "src-tauri/src/jobs/native_collection_resume_transport.rs",
+      "status": "A",
+      "size_bytes": 12182,
+      "sha256": "d875db9ef3710263b89b4e96e10c8eb834f65bba98eb31dd12421ad5ebc48e22",
+      "nul_bytes": 0
+    },
+    {
+      "path": "src-tauri/src/jobs/native_config.rs",
+      "status": "M",
+      "size_bytes": 2705,
+      "sha256": "8cc3dcbd7ac3762a9b476c6fdaa473562adf873aa3f4b770c02c69792468fd81",
+      "nul_bytes": 0
+    },
+    {
+      "path": "src-tauri/src/jobs/native_content.rs",
+      "status": "M",
+      "size_bytes": 9383,
+      "sha256": "0c196059458a9a6a5823540d20df0f151e1fb7d5d1c9ad0fe01c785280fdc15a",
+      "nul_bytes": 0
+    },
+    {
+      "path": "src-tauri/src/jobs/native_discovery.rs",
+      "status": "A",
+      "size_bytes": 7724,
+      "sha256": "f8f37a17f562982965b45118756e1774f0f7625006983ec4be43db72582db4a3",
+      "nul_bytes": 0
+    },
+    {
+      "path": "src-tauri/src/jobs/native_discovery_tests.rs",
+      "status": "A",
+      "size_bytes": 14339,
+      "sha256": "0c450fed2362f0696e092b7fddab8983da7024ebec03ef48068614bec787065b",
+      "nul_bytes": 0
+    },
+    {
+      "path": "src-tauri/src/jobs/native_fofa.rs",
+      "status": "M",
+      "size_bytes": 37171,
+      "sha256": "aacb51989b0a7955e22d4a92793a4624676b8f3589ed64ddcfec8adebb8b05fb",
+      "nul_bytes": 0
+    },
+    {
+      "path": "src-tauri/src/jobs/native_probe.rs",
+      "status": "M",
+      "size_bytes": 40662,
+      "sha256": "7ad43bb1d057b883d1896b37bc5af7b3e53be38d58edc2e4befa614a5ede9658",
+      "nul_bytes": 0
+    },
+    {
+      "path": "src-tauri/src/jobs/native_response_identity.rs",
+      "status": "A",
+      "size_bytes": 5869,
+      "sha256": "757b2b9212fe69fbf13e7e1bfc5cf070724d063b74e7fbb50a857cf402bba3d1",
+      "nul_bytes": 0
+    },
+    {
+      "path": "src-tauri/src/jobs/native_response_identity_tests.rs",
+      "status": "A",
+      "size_bytes": 24855,
+      "sha256": "70bed09b7c8803d33ba3b5ab045d10a63e07baea9120e809c5c8cb09351fd962",
+      "nul_bytes": 0
+    },
+    {
+      "path": "src-tauri/src/jobs/native_workers.rs",
+      "status": "M",
+      "size_bytes": 27860,
+      "sha256": "221497b8f46b935cdc5e1b5b0a12cec9900357cc97794a7cd75220f06d1d3aab",
+      "nul_bytes": 0
+    },
+    {
+      "path": "src-tauri/src/jobs/tray_activity.rs",
+      "status": "A",
+      "size_bytes": 13526,
+      "sha256": "b790f3650f6bc15b52a41b96b6297aefb7762b89abd9a720ef083bade65c2092",
+      "nul_bytes": 0
+    },
+    {
+      "path": "src-tauri/src/lib.rs",
+      "status": "M",
+      "size_bytes": 31769,
+      "sha256": "1d9df56da3a00d06e9e0a36c454687f498a0dffc051567c7f54fe784d371abd7",
+      "nul_bytes": 0
+    },
+    {
+      "path": "src-tauri/src/page_isolation.rs",
+      "status": "A",
+      "size_bytes": 20354,
+      "sha256": "06af0f7d76bc2d4a5ec43c00d8c08f0f94f7b01305dcf52930ee9b013c5ad1a7",
+      "nul_bytes": 0
+    },
+    {
+      "path": "src-tauri/src/page_isolation.schema.sql",
+      "status": "A",
+      "size_bytes": 1112,
+      "sha256": "4d9e5de8f676f0b5a5f096b9f70c798a7170d86c914efd58365f85fdc5fc8fcd",
+      "nul_bytes": 0
+    },
+    {
+      "path": "src-tauri/src/page_isolation_tests.rs",
+      "status": "A",
+      "size_bytes": 13353,
+      "sha256": "aea03b641c4b1fb23aad30197c27d9cb5bd2093d197fe616daa77df24662185f",
+      "nul_bytes": 0
+    },
+    {
+      "path": "src-tauri/tauri.conf.json",
+      "status": "M",
+      "size_bytes": 1195,
+      "sha256": "7cc39de209d12e9eae2d2aff78fc51ccd54e5d4716ab6902ec9d41cc3adeecd4",
+      "nul_bytes": 0
+    },
+    {
+      "path": "src/App.vue",
+      "status": "M",
+      "size_bytes": 56274,
+      "sha256": "665ea9ba9c77187e9ba3569377ab9398b955bdec0db9042b617cd3b29ae21ea8",
+      "nul_bytes": 0
+    },
+    {
+      "path": "src/features/assets/api.ts",
+      "status": "M",
+      "size_bytes": 7955,
+      "sha256": "5bfe830382f582c8bce3901e6de629982cc570daa97c3932fdd3c47899c077db",
+      "nul_bytes": 0
+    },
+    {
+      "path": "src/features/assets/components/AssetRuleSettings.vue",
+      "status": "A",
+      "size_bytes": 7845,
+      "sha256": "36cdd671f37bb4223456f1a3db8624f820765c330124a75b2240d849beb30e2f",
+      "nul_bytes": 0
+    },
+    {
+      "path": "src/features/assets/components/AssetWorkspace.vue",
+      "status": "M",
+      "size_bytes": 55461,
+      "sha256": "06737146e36950d8384ae28b9d734d64b51533aae2d4eb81e7753e57da8c5a8f",
+      "nul_bytes": 0
+    },
+    {
+      "path": "src/features/assets/components/PageIsolationDialog.vue",
+      "status": "A",
+      "size_bytes": 11373,
+      "sha256": "290e46964269a539fd0737f8ef402015143a66a423a5d529b5343923a1106b29",
+      "nul_bytes": 0
+    },
+    {
+      "path": "src/features/assets/components/QueryPanel.vue",
+      "status": "M",
+      "size_bytes": 7645,
+      "sha256": "247e2c7225f5674c9402ead6761f74c1f8b866d14e7f2e03d8958121b84f8c95",
+      "nul_bytes": 0
+    },
+    {
+      "path": "src/features/assets/components/TitleRulePopover.vue",
+      "status": "M",
+      "size_bytes": 1615,
+      "sha256": "5ef075c9af9c2c3696554092f7f99cbf51ac4ad6d8a06887995d007930d71425",
+      "nul_bytes": 0
+    },
+    {
+      "path": "src/features/assets/types.ts",
+      "status": "M",
+      "size_bytes": 5941,
+      "sha256": "3711c2a9e2c17992775a701f04cea2ac32c4084294566d8c2eeb9b6544089c82",
+      "nul_bytes": 0
+    },
+    {
+      "path": "src/features/assets/workspace/AssetsPluginWorkspace.vue",
+      "status": "M",
+      "size_bytes": 23353,
+      "sha256": "721326ef71cfb33154e26e46b7faa8deaad20d7eade9932b99cb4cf15ece792a",
+      "nul_bytes": 0
+    },
+    {
+      "path": "src/features/configuration/components/ConfigDialog.vue",
+      "status": "M",
+      "size_bytes": 53816,
+      "sha256": "1f575d5537c44147cf3161f67e3864290884849f4cbd94f5cbbe0f82b1eac304",
+      "nul_bytes": 0
+    },
+    {
+      "path": "src/features/configuration/styles/navigation.css",
+      "status": "M",
+      "size_bytes": 1299,
+      "sha256": "014b241ccb2d4aac248d237a81c520b7cf9dc5d047763876ef7413f3f892ef02",
+      "nul_bytes": 0
+    },
+    {
+      "path": "src/shell/components/ReleaseNotesDialog.vue",
+      "status": "M",
+      "size_bytes": 6043,
+      "sha256": "b01c26228f8c21a8db716b3c30fdfbb78fb72b3ae0f7ce19c91261daaf22d95f",
+      "nul_bytes": 0
+    },
+    {
+      "path": "tools/plugin_workspace_harness.cjs",
+      "status": "M",
+      "size_bytes": 6758,
+      "sha256": "d67de00f085a225db4f3f05824a6ec830f9cfcdc0532038e09a9968dfbd986d0",
+      "nul_bytes": 0
+    },
+    {
+      "path": "tools/test_asset_workspace_review.cjs",
+      "status": "A",
+      "size_bytes": 9092,
+      "sha256": "75601c14269654f9e6f7f63d2139727ac2ded19bb39b9c216e0234797e94fd87",
+      "nul_bytes": 0
+    },
+    {
+      "path": "tools/test_plugin_workspaces.cjs",
+      "status": "M",
+      "size_bytes": 13211,
+      "sha256": "ca194f01efef0cac90904390065eb27ff91ed124b2b7a834f9c6e4f713b9ed57",
+      "nul_bytes": 0
+    },
+    {
+      "path": "tools/test_rust_business_boundaries.cjs",
+      "status": "M",
+      "size_bytes": 22675,
+      "sha256": "9565f69a5878fcd44137b5f1921bf689ca48a9e4275e585433629db4efe49b4e",
+      "nul_bytes": 0
+    }
+  ],
+  "limitations": [
+    "Heuristic scanning is not proof that all secrets are absent.",
+    "Manual classification is limited to the exact occurrences recorded; no file-wide exception is granted.",
+    "No token-like value was tested against any external service.",
+    "Only this tested commit diff and the named handoff documents are in scope; unrelated historical content and unchanged excluded tests or fixtures were not scanned."
+  ],
+  "schema_version": 1,
+  "status": "complete",
+  "scan_time_utc": "2026-10-15T04:47:53.112469+00:00",
+  "unresolved_findings": 0,
+  "scope_validation": {
+    "changed_files": 55,
+    "mapped_original_increment_paths": 51,
+    "mapped_candidate_paths": 52,
+    "additional_required_test_paths": [
+      "tools/plugin_workspace_harness.cjs",
+      "tools/test_plugin_workspaces.cjs",
+      "tools/test_rust_business_boundaries.cjs"
+    ],
+    "all_changed_paths_accounted_for": true,
+    "all_mapping_target_hashes_match_tested_commit": true,
+    "file_statuses_add_or_modify_only": true,
+    "all_changed_blobs_utf8_text_without_nul": true,
+    "local_data_or_generated_artifact_paths": [],
+    "unchanged_excluded_test_or_fixture_blobs_read": false,
+    "whole_file_secret_exemptions": false
+  },
+  "scan_method": {
+    "token_families": [
+      "AWS access identifiers",
+      "GitHub tokens",
+      "provider API keys",
+      "Slack tokens",
+      "JWT literals",
+      "private-key markers",
+      "credential-bearing URLs",
+      "credential query values"
+    ],
+    "credential_assignments": "Quoted assignment heuristics including JSON/map forms, with length and Shannon entropy filters; every hit reviewed separately.",
+    "primary_entropy_filter": {
+      "minimum_length": 20,
+      "minimum_shannon_entropy": 3.3
+    },
+    "extended_entropy_filter": {
+      "minimum_length": 16,
+      "minimum_shannon_entropy": 2.8
+    },
+    "match_hash_definition": "SHA256 of the complete matched substring encoded as UTF-8; no match values or raw source lines are included.",
+    "added_diff_scan": "All changed blobs scanned and each finding intersected with added-line ranges from zero-context commit diffs.",
+    "prior_review_usage": "Only one exact reviewed synthetic URL substring was used; no entire file was exempted."
+  },
+  "summary": {
+    "reviewed_findings": 32,
+    "unknown_findings": 0,
+    "by_classification": {
+      "false_positive_sql_settings_key_name": 2,
+      "reviewed_synthetic_reserved_domain_credential_uri": 1,
+      "synthetic_mock_transport_credential": 2,
+      "synthetic_key_rotation_canary": 4,
+      "false_positive_vue_binding_expression": 4,
+      "false_positive_configuration_property_selector": 10,
+      "false_positive_csv_metadata_column_array": 4,
+      "false_positive_frozen_rule_metadata_array": 2,
+      "false_positive_expected_module_or_command_identifier": 3
+    },
+    "high_confidence_secret_format_findings": 0
+  },
+  "docs_scanned_paths": [
+    "docs/LOCAL_INCREMENTAL_CANDIDATE_HANDOFF_2026-10-15.md",
+    "docs/local-incremental-20261015/mapping.json",
+    "docs/local-incremental-20261015/validation.json",
+    "docs/local-incremental-20261015/scope-audit.json"
+  ],
+  "documentation_files": [
+    {
+      "path": "docs/LOCAL_INCREMENTAL_CANDIDATE_HANDOFF_2026-10-15.md",
+      "sha256": "247b82630341fc70da63242b10447213272006ae2e84e52ce3d43dd2d776e7f6",
+      "size_bytes": 12101
+    },
+    {
+      "path": "docs/local-incremental-20261015/mapping.json",
+      "sha256": "c6ba8e32ea50281643fd5218f84de81e8806d02bde456056fae9beaeb1dddb08",
+      "size_bytes": 19485
+    },
+    {
+      "path": "docs/local-incremental-20261015/validation.json",
+      "sha256": "7474fe92469917abd7489a17381ac6c1a1cbbcea1aed7ac9809969b1d629fc7e",
+      "size_bytes": 9527
+    },
+    {
+      "path": "docs/local-incremental-20261015/scope-audit.json",
+      "sha256": "0cb74a671bd3bb349706bd2acc9094cc8803631a3081ff58e5a076bdc8d709da",
+      "size_bytes": 519
+    }
+  ],
+  "documentation_audit": {
+    "sensitive_findings": 0,
+    "unclassified_findings": 0,
+    "expected_hashes_match": true,
+    "json_files_parse": true,
+    "repo_relative_path_false_positive": {
+      "path": "docs/LOCAL_INCREMENTAL_CANDIDATE_HANDOFF_2026-10-15.md",
+      "line": 55,
+      "category": "repo_relative_source_path",
+      "sha256": "943ff49de0635a5fc7d037b6040f167a879019eca23063d6e525c98ca6696333",
+      "classification": "Slash-root substring lies inside a complete repository-relative backtick source path; full token is non-absolute, resolves inside src-tauri/src, and exists."
+    }
+  }
+}
