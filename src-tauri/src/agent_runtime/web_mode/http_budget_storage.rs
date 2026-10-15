@@ -31,7 +31,7 @@ pub(crate) fn insert_fresh_on(
     require_snapshot(db)?;
     verify_schema_on(db)?;
     let (value, signature) = fresh.sealed()?;
-    crate::commands::http_budget_receipt::verify_saved_on(db, actor, &value, &signature)?;
+    crate::scanning::http_budget_receipt::verify_saved_on(db, actor, &value, &signature)?;
     let source = text(&value, "sourceId")?;
     let raw = value.to_string();
     let hash = crate::agent_runtime::store::stable_hash(&raw);
@@ -167,7 +167,7 @@ pub(crate) fn read_original_on(
     {
         return Err("http_budget_receipt_stored_binding_changed".into());
     }
-    crate::commands::http_budget_receipt::verify_saved_on(db, actor, &value, &signature)?;
+    crate::scanning::http_budget_receipt::verify_saved_on(db, actor, &value, &signature)?;
     Ok(Some(VerifiedHttpBudgetReceipt {
         value,
         receipt_id: id,

@@ -4,7 +4,7 @@ fn source_quiescence_actual_launcher_pause_keeps_paid_sdk_and_finishes_after_ori
     let (arrive, arrived) = mpsc::channel();
     let (release, released) = mpsc::channel();
     let released = Arc::new(Mutex::new(released));
-    let (port, seen, stop) = crate::commands::agent_tests::spawn_endpoint(Arc::new(move |_| {
+    let (port, seen, stop) = crate::scanning::agent_tests::spawn_endpoint(Arc::new(move |_| {
         arrive.send(()).unwrap();
         let _ = released
             .lock()

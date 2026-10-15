@@ -164,25 +164,25 @@ impl VerifiedMode {
 
     pub(crate) fn sign_new_recovery_approval(
         &self,
-        approved: &crate::commands::recovery_approval_signature::FreshProtectionRecoveryApproval,
+        approved: &crate::scanning::recovery_approval_signature::FreshProtectionRecoveryApproval,
     ) -> Result<Vec<u8>, String> {
         Ok(self.sign_private(&approved.message_for_original(&self.fact)?))
     }
     pub(crate) fn sign_new_recovery_draft(
         &self,
-        draft: &crate::commands::recovery_approval_signature::FreshProtectionRecoveryDraft,
+        draft: &crate::scanning::recovery_approval_signature::FreshProtectionRecoveryDraft,
     ) -> Result<Vec<u8>, String> {
         Ok(self.sign_private(&draft.message_for_original(&self.fact)?))
     }
     pub(crate) fn sign_new_recovery_cancellation(
         &self,
-        cancellation: &crate::commands::recovery_approval_signature::FreshProtectionRecoveryCancellation,
+        cancellation: &crate::scanning::recovery_approval_signature::FreshProtectionRecoveryCancellation,
     ) -> Result<Vec<u8>, String> {
         Ok(self.sign_private(&cancellation.message_for_original(&self.fact)?))
     }
     pub(crate) fn sign_new_priced_recovery_cancellation(
         &self,
-        cancellation: &crate::commands::recovery_approval_signature::FreshPricedRecoveryCancellation,
+        cancellation: &crate::scanning::recovery_approval_signature::FreshPricedRecoveryCancellation,
     ) -> Result<Vec<u8>, String> {
         Ok(self.sign_private(&cancellation.message_for_original(&self.fact)?))
     }

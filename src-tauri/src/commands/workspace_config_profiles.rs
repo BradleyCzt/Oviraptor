@@ -105,3 +105,28 @@ pub(super) fn delete_config_profile_inner(connection: &rusqlite::Connection,prof
     if changed!=1 || remains {return Err("配置删除未确认，已回滚".into());}
     tx.commit().map_err(|error|error.to_string())
 }
+
+#[cfg(test)]
+pub(crate) mod test_support {
+    use crate::configuration_models::{ConfigProfile, ConfigProfileInput};
+
+    pub(crate) fn read_config_profiles(
+        connection: &rusqlite::Connection,
+    ) -> Result<Vec<ConfigProfile>, String> {
+        super::read_config_profiles(connection)
+    }
+
+    pub(crate) fn persist_config_profile(
+        connection: &mut rusqlite::Connection,
+        input: ConfigProfileInput,
+    ) -> Result<i64, String> {
+        super::persist_config_profile(connection, input)
+    }
+
+    pub(crate) fn delete_config_profile_inner(
+        connection: &rusqlite::Connection,
+        profile_id: i64,
+    ) -> Result<(), String> {
+        super::delete_config_profile_inner(connection, profile_id)
+    }
+}

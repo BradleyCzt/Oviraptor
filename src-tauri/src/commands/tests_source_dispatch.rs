@@ -14,7 +14,7 @@ fn source_dispatch_fixture_configure(model: &ModelRuntimeEnv, dollar_limit: Opti
 
 #[test]
 fn source_dispatch_production_entry_runs_real_coverage_review_without_hiding_gaps() {
-    let (port,seen,stop)=crate::commands::agent_tests::spawn_endpoint(std::sync::Arc::new(|request| {
+    let (port,seen,stop)=crate::scanning::agent_tests::spawn_endpoint(std::sync::Arc::new(|request| {
         let body:JsonValue=serde_json::from_str(request.split("\r\n\r\n").nth(1).unwrap()).unwrap();
         assert_eq!(body["max_tokens"],2048);
         let input:JsonValue=body["messages"].as_array().unwrap().last().unwrap()["content"]
@@ -195,7 +195,7 @@ fn source_dispatch_closure_rolls_back_post_write_damage_after_real_coverage_revi
         ("root_budget","UPDATE agent_runs SET hard_token_budget=hard_token_budget+1 WHERE id=NEW.id; UPDATE agent_budget_ledger SET total_tokens=total_tokens+1;"),
         ("root_binding","UPDATE agent_runs SET evidence_hash='changed' WHERE id=NEW.id;"),
     ] {
-        let (port,seen,stop)=crate::commands::agent_tests::spawn_endpoint(std::sync::Arc::new(|request| {
+        let (port,seen,stop)=crate::scanning::agent_tests::spawn_endpoint(std::sync::Arc::new(|request| {
             let body:JsonValue=serde_json::from_str(request.split("\r\n\r\n").nth(1).unwrap()).unwrap();
             let input:JsonValue=body["messages"].as_array().unwrap().last().unwrap()["content"]
                 .as_str().and_then(|text|serde_json::from_str(text).ok()).unwrap_or(JsonValue::Null);
@@ -258,7 +258,7 @@ fn source_tool_dispatch_cancel_checks_tool_contract_not_assessment_grants() {
 #[test]
 fn source_tool_dispatch_failures_never_fake_finish_refund_or_retry() {
     for failure in ["model_http","text_only","finish_denied","mailbox_fault","settlement_fault"] {
-        let (port,seen,stop)=crate::commands::agent_tests::spawn_endpoint(std::sync::Arc::new(move |request| {
+        let (port,seen,stop)=crate::scanning::agent_tests::spawn_endpoint(std::sync::Arc::new(move |request| {
             let body:JsonValue=serde_json::from_str(request.split("\r\n\r\n").nth(1).unwrap()).unwrap();
             let tools=body.get("tools").is_some();
             if tools && failure=="model_http" {return (500,"application/json","{}".into());}
@@ -309,7 +309,7 @@ fn source_dispatch_explicit_dollar_limit_does_not_create_unfunded_runs() {
 #[test]
 fn source_dispatch_runtime_reservation_deadline_and_trigger_changes_never_reach_model() {
     use crate::agent_runtime::{contract::AgentRole,multi_agent::{source,scheduler}};
-    let (port,seen,stop)=crate::commands::agent_tests::spawn_endpoint(std::sync::Arc::new(|_|(500,"application/json","{}".into())));
+    let (port,seen,stop)=crate::scanning::agent_tests::spawn_endpoint(std::sync::Arc::new(|_|(500,"application/json","{}".into())));
     for mutation in ["credential","endpoint","proxy","reservation","deadline","insert_revocation","root_budget"] {
         let mut environment=source_specialist_test_environment(port);
         let (root,connection,record,lease)=source_specialist_fixture_model(Some(&environment));
@@ -342,7 +342,7 @@ fn source_dispatch_runtime_reservation_deadline_and_trigger_changes_never_reach_
 
 #[test]
 fn source_dispatch_provider_failure_preserves_unknown_usage_and_does_not_retry() {
-    let (port,seen,stop)=crate::commands::agent_tests::spawn_endpoint(std::sync::Arc::new(|_|(500,"application/json","{\"error\":\"unavailable\"}".into())));
+    let (port,seen,stop)=crate::scanning::agent_tests::spawn_endpoint(std::sync::Arc::new(|_|(500,"application/json","{\"error\":\"unavailable\"}".into())));
     let environment=source_specialist_test_environment(port);
     let (root,connection,record,_)=source_specialist_true_born_model_fixture(&environment);
     let invoke=||run_native_source_assessments(&root.join("oviraptor.sqlite3"),&record.scan_id,1,&root.join("attempt-0001"));
@@ -392,10 +392,10 @@ fn source_dispatch_historical_recovery_cannot_mint_original_finance_from_mutable
     assert!((479..=481).contains(&remaining));
     connection.execute("UPDATE agent_runs SET started_at='2000-01-01 00:00:00' WHERE id=?1",[&lease.root_run_id]).unwrap();
     assert_eq!(source_model_remaining_seconds(&connection,&lease.root_run_id,600).unwrap(),0);
-    let before=crate::commands::web_mode_test_rows(&connection);
+    let before=crate::scanning::web_mode_test_rows(&connection);
     let error=run_native_source_assessments(&root.join("oviraptor.sqlite3"),&record.scan_id,1,&root.join("attempt-0001")).unwrap_err();
     assert_eq!(error,"source_root_original_finance_missing");
-    crate::commands::web_mode_assert_rows(&connection,&before);
+    crate::scanning::web_mode_assert_rows(&connection,&before);
     assert_eq!(connection.query_row("SELECT count(*) FROM agent_assignments",[],|r|r.get::<_,i64>(0)).unwrap(),0);
     assert_eq!(connection.query_row("SELECT started_at FROM agent_runs WHERE id=?1",[&lease.root_run_id],|r|r.get::<_,String>(0)).unwrap(),"2000-01-01 00:00:00");
     drop(connection);fs::remove_dir_all(root).unwrap();

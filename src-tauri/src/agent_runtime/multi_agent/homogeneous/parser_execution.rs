@@ -54,7 +54,7 @@ impl FreshParserFact<'_> {
     }
 }
 fn issuer(db: &Connection, actor: &lease::CoordinatorLease) -> Result<WithdrawalIssuer, String> {
-    let mode: VerifiedMode = crate::commands::original_root_capture_mode(db, &actor.root_run_id)?;
+    let mode: VerifiedMode = crate::scanning::scope_contract::original_root_capture_mode(db, &actor.root_run_id)?;
     WithdrawalIssuer::from_verified_birth_on(db, &actor.root_run_id, mode)
 }
 

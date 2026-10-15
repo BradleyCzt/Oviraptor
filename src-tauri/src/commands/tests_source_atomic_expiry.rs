@@ -13,7 +13,7 @@ fn source_round_worker_deadline_expiry_records_only_original_fee_without_tools()
         else {
             panic!()
         };
-        crate::commands::agent_tests::expire_worker_deadline(&db, &child.run_id);
+        crate::scanning::agent_tests::expire_worker_deadline(&db, &child.run_id);
         authority::validate_coordinator_lease(&db, &lease).unwrap();
         let before = application_table_snapshot(&db);
         if uncertain {
@@ -93,7 +93,7 @@ fn source_round_worker_deadline_or_missing_worker_blocks_pending_budget_without_
             )
             .unwrap();
         } else {
-            crate::commands::agent_tests::expire_worker_deadline(&db, &child.run_id);
+            crate::scanning::agent_tests::expire_worker_deadline(&db, &child.run_id);
         }
         let before = application_table_snapshot(&db);
         assert!(

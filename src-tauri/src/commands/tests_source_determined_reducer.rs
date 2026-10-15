@@ -48,7 +48,7 @@ fn source_determined_reducer_actual_independent_gap_free_coverage_completes_once
         paid, 7,
         "seven actual independent physical provider receipts, no Root SDK added"
     );
-    let before = crate::commands::web_mode_test_rows(&db);
+    let before = crate::scanning::web_mode_test_rows(&db);
     assert!(run_native_source_assessments(
         &root.join("oviraptor.sqlite3"),
         &actor.scan_id,
@@ -56,7 +56,7 @@ fn source_determined_reducer_actual_independent_gap_free_coverage_completes_once
         &root.join("attempt-0001")
     )
     .is_err());
-    crate::commands::web_mode_assert_rows(&db, &before);
+    crate::scanning::web_mode_assert_rows(&db, &before);
     drop(db);
     fs::remove_dir_all(root).unwrap();
 }

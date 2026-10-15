@@ -34,7 +34,7 @@ fn coordinator_tick_actual_sigkill_recovers_original_decision_without_new_sdk() 
     let mut process = std::process::Command::new(std::env::current_exe().unwrap())
         .args([
             "--exact",
-            "commands::agent_tests::coordinator_tick_paid_process_probe",
+            "scanning::agent_tests::coordinator_tick_paid_process_probe",
             "--nocapture",
         ])
         .env("OVIRAPTOR_ROOT_TICK_INPUT", &input)

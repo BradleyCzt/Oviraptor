@@ -189,8 +189,8 @@ pub(super) fn authorization_probe_authority(connection: &rusqlite::Connection, c
     let homogeneous:bool=connection.query_row("SELECT scheduling_model='homogeneous_workers' FROM agent_assignments WHERE id=?1",[&child.assignment_id],|r|r.get(0)).map_err(|e|e.to_string())?;
     if homogeneous {
         let root:String=connection.query_row("SELECT coordinator_run_id FROM agent_assignments WHERE id=?1",[&child.assignment_id],|r|r.get(0)).map_err(|e|e.to_string())?;
-        let actor=crate::commands::homogeneous_execution::actor_for_root(connection,&root)?;
-        crate::commands::homogeneous_execution::check_target_scope(connection,&actor,&child.assignment_id,&control.contract_key)?;
+        let actor=crate::scanning::homogeneous_execution::actor_for_root(connection,&root)?;
+        crate::scanning::homogeneous_execution::check_target_scope(connection,&actor,&child.assignment_id,&control.contract_key)?;
     }
     connection.query_row(
         "SELECT (SELECT COUNT(*)*3 FROM agent_authorization_controls scope \

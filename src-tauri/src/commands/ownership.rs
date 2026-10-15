@@ -27,7 +27,9 @@ use crate::asset_models::AssetQuery;
 #[cfg(test)]
 use std::fs;
 #[cfg(test)]
-use super::{assets::asset_filter, authorization_control_setup_in};
+use crate::commands::assets::asset_filter;
+#[cfg(test)]
+use crate::scanning::ownership_test_support::authorization_control_setup_in;
 
 // These source units share only the cohesive ownership domain's explicit scope.
 include!("asset_ownership.rs");

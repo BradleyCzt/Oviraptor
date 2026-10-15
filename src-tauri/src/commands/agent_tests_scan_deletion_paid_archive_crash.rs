@@ -36,7 +36,7 @@ fn paid_scan_deletion_subprocess_entry() -> bool {
 fn paid_scan_deletion_child(f: &WebModeFixture, mode: &str) -> std::process::Child {
     std::process::Command::new(std::env::current_exe().unwrap())
         .args([
-            "commands::agent_tests::scan_deletion_paid_single_actual_process_death_before_commit_rolls_back_then_retries",
+            "scanning::agent_tests::scan_deletion_paid_single_actual_process_death_before_commit_rolls_back_then_retries",
             "--exact",
             "--test-threads=1",
         ])

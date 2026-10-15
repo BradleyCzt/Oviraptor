@@ -13,7 +13,7 @@
             let mut paths = vec![binary.parent().unwrap().to_path_buf()];
             paths.extend(std::env::split_paths(&std::env::var_os("PATH").unwrap_or_default()));
             let output = Command::new(std::env::current_exe().unwrap())
-                .args(["--exact", "commands::agent_tests::retired_cli_path_trap_covers_native_web_and_source_branches", "--nocapture", "--test-threads=1"])
+                .args(["--exact", "scanning::agent_tests::retired_cli_path_trap_covers_native_web_and_source_branches", "--nocapture", "--test-threads=1"])
                 .env(CHILD_ROOT, &root)
                 .env("PATH", std::env::join_paths(paths).unwrap())
                 .output().unwrap();
@@ -118,7 +118,7 @@
                 .join(format!("oviraptor-egress-canary-{}", Uuid::new_v4()));
             fs::create_dir(&root).unwrap();
             let output = Command::new(std::env::current_exe().unwrap())
-                .args(["--exact", "commands::agent_tests::neither_the_native_path_nor_the_legacy_importer_reaches_a_blocked_host", "--nocapture", "--test-threads=1"])
+                .args(["--exact", "scanning::agent_tests::neither_the_native_path_nor_the_legacy_importer_reaches_a_blocked_host", "--nocapture", "--test-threads=1"])
                 .env(CHILD_ROOT, &root).output().unwrap();
             let receipt = fs::read_to_string(root.join("completed.json"));
             fs::remove_dir_all(&root).unwrap();

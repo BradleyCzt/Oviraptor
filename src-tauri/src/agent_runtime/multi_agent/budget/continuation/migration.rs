@@ -2,7 +2,7 @@
 //! declaration is never accepted by the ordinary fresh-budget validator.
 use super::super::root_definition::NewRootBudgetDeclaration;
 use crate::agent_runtime::store;
-use crate::commands::FinancialContinuationAuthorization;
+use crate::scanning::financial_continuation::FinancialContinuationAuthorization;
 use rusqlite::{params, Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -297,7 +297,7 @@ fn read_definition(db: &Connection, root: &str) -> Result<Option<Definition>, St
     {
         return Err("migration_definition_binding_conflict".into());
     }
-    let birth = crate::commands::verify_financial_continuation_birth_on(db, root)?;
+    let birth = crate::scanning::financial_continuation::verify_financial_continuation_birth_on(db, root)?;
     if birth["approvalId"] != def.approval_id
         || birth["sourceRootRunId"] != def.source_root_run_id
         || birth["sourceReceiptId"] != def.source_receipt_id

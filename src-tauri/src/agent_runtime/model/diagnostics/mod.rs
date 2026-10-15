@@ -34,12 +34,12 @@ impl State {
         }
         match persist::append(&mut self.db, &self.owner, stage, cost, terminal) {
             Ok(hint) => {
-                let _ = crate::commands::notify_native_sdk_log(&hint);
+                let _ = crate::scanning::log_events::notify_native_sdk_log(&hint);
             }
             Err(_) => {
                 self.failed = true;
                 if let Ok(hint) = persist::gap(&mut self.db, &self.owner, stage) {
-                    let _ = crate::commands::notify_native_sdk_log(&hint);
+                    let _ = crate::scanning::log_events::notify_native_sdk_log(&hint);
                 }
             }
         }
@@ -86,7 +86,7 @@ impl ModelLog {
             let mut db = persist::connection(path)?;
             let owner = load(&db)?;
             let prepared = persist::begin(&mut db, &owner)?;
-            let _ = crate::commands::notify_native_sdk_log(&prepared);
+            let _ = crate::scanning::log_events::notify_native_sdk_log(&prepared);
             let state = State {
                 db,
                 owner,

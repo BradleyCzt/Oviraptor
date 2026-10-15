@@ -142,7 +142,7 @@ fn native_invocation_fences_processes_and_releases_on_drop() {
     let output = Command::new(std::env::current_exe().unwrap())
         .args([
             "--exact",
-            "commands::tests::native_invocation_cross_process_probe",
+            "scanning::tests::native_invocation_cross_process_probe",
             "--nocapture",
         ])
         .env("OVIRAPTOR_INVOCATION_TEST_DB", &path)

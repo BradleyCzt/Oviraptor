@@ -123,7 +123,7 @@ impl ProtectionIssuer {
     pub(crate) fn issue_new_on(
         &self,
         db: &Connection,
-        fresh: &crate::commands::http_exchange::FreshProtectionResponse,
+        fresh: &crate::scanning::http_exchange::FreshProtectionResponse,
     ) -> Result<(), String> {
         require_snapshot(db)?;
         let (actor, raw) = fresh.require_on(db)?;

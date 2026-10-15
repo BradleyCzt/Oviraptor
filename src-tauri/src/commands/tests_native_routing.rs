@@ -221,7 +221,7 @@ fn stage_4_source_tools_are_offered_only_to_a_run_with_a_frozen_snapshot() {
     let root = std::env::temp_dir().join(format!("oviraptor-native-tools-{}", Uuid::new_v4()));
     fs::create_dir_all(&root).unwrap();
     let db_path = db::initialize(&root.join("app")).unwrap();
-    let context = crate::commands::agent_tests::test_context(
+    let context = crate::scanning::agent_tests::test_context(
         &db_path,
         "https://app.example.invalid",
         Vec::new(),
@@ -256,7 +256,7 @@ fn stage_4_source_tools_are_offered_only_to_a_run_with_a_frozen_snapshot() {
         .unwrap();
     drop(connection);
     assert!(!agent_run_has_frozen_source(&context));
-    let context = crate::commands::agent_tests::test_context(
+    let context = crate::scanning::agent_tests::test_context(
         &db_path,
         "https://app.example.invalid",
         Vec::new(),

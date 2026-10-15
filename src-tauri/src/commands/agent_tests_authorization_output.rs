@@ -351,7 +351,7 @@ fn authorization_output_actual_assert(deny: Vec<bool>, expected: i64) {
     let before = super::tests::application_table_snapshot(&db);
     let sdk = f.h.model_seen.lock().unwrap().len();
     let tx = db.unchecked_transaction().unwrap();
-    let receipt = crate::commands::authorization_output_receipt::read_original_on(
+    let receipt = crate::scanning::authorization_output_receipt::read_original_on(
         &tx,
         &f.session.as_ref().unwrap().lease,
         &child,
@@ -419,7 +419,7 @@ fn authorization_output_actual_mixed_two_controls_one_paid_assessment() {
 
 #[test]
 fn authorization_output_actual_signed_source_rejects_foreign_scope_worker_and_cold_signature() {
-    use crate::commands::authorization_output_receipt;
+    use crate::scanning::authorization_output_receipt;
     let _real = RealSpecialistTransport::enter();
     let mut f = authorization_output_actual_fixture(vec![false]);
     let db = db::open(&f.h.db_path).unwrap();
@@ -513,7 +513,7 @@ fn authorization_output_actual_root_503_preserves_paid_source_and_blocks_fresh_r
         "completed"
     );
     let tx = db.unchecked_transaction().unwrap();
-    let receipt = crate::commands::authorization_output_receipt::read_original_on(
+    let receipt = crate::scanning::authorization_output_receipt::read_original_on(
         &tx,
         &f.session.as_ref().unwrap().lease,
         &child,
@@ -607,7 +607,7 @@ fn authorization_output_actual_local_tool_response_is_paid_but_never_executed() 
         let before = super::tests::application_table_snapshot(&db);
         let tx = db.unchecked_transaction().unwrap();
         assert!(
-            crate::commands::authorization_output_receipt::read_original_on(
+            crate::scanning::authorization_output_receipt::read_original_on(
                 &tx,
                 &f.session.as_ref().unwrap().lease,
                 &child
@@ -692,7 +692,7 @@ fn authorization_output_actual_scope_paused_during_paid_sdk_retains_bill_without
     let sdk = f.h.model_seen.lock().unwrap().len();
     let tx = db.unchecked_transaction().unwrap();
     assert!(
-        crate::commands::authorization_output_receipt::read_original_on(
+        crate::scanning::authorization_output_receipt::read_original_on(
             &tx,
             &f.session.as_ref().unwrap().lease,
             &child
@@ -723,7 +723,7 @@ fn authorization_output_actual_historical_reader_rejects_cold_mailbox_and_outbox
         role: crate::agent_runtime::contract::AgentRole::Authorization,
     };
     let snapshot = db.unchecked_transaction().unwrap();
-    let source = crate::commands::authorization_output_receipt::read_original_on(
+    let source = crate::scanning::authorization_output_receipt::read_original_on(
         &snapshot,
         &session.lease,
         &child,
@@ -772,7 +772,7 @@ fn authorization_output_actual_historical_reader_rejects_cold_mailbox_and_outbox
             "the original signed body/tag must remain untouched for {damage}"
         );
         let damaged = super::tests::application_table_snapshot(&tx);
-        let error = crate::commands::authorization_output_receipt::read_original_on(
+        let error = crate::scanning::authorization_output_receipt::read_original_on(
             &tx,
             &session.lease,
             &child,

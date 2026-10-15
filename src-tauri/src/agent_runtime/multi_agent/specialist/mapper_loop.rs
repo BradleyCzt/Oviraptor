@@ -13,7 +13,7 @@ use crate::agent_runtime::{
     secrets,
     store::{self, UsageDelta},
 };
-use crate::commands::mapper_loop_request::VerifiedMapperLoopRequestBounds;
+use crate::scanning::mapper_loop_request::VerifiedMapperLoopRequestBounds;
 use rusqlite::{params, Connection, OptionalExtension, Transaction, TransactionBehavior};
 use serde_json::{json, Value};
 pub(crate) mod final_seal;

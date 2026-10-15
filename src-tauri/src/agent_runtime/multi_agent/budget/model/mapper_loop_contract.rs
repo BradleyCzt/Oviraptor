@@ -58,7 +58,7 @@ pub(crate) fn require_protocol_on(db: &Connection, actor: &CoordinatorLease) -> 
         .require_original_coordinator(db, actor)?;
     let mode = web_mode::root::read(db, &actor.root_run_id)?
         .ok_or("mapper_loop_original_protocol_missing")?;
-    let proof = crate::commands::original_root_capture_mode(db, &actor.root_run_id)?;
+    let proof = crate::scanning::scope_contract::original_root_capture_mode(db, &actor.root_run_id)?;
     web_mode::root::verify_birth(db, &actor.root_run_id, &proof)?;
     let protocol = mode
         .bootstrap_dispatch()

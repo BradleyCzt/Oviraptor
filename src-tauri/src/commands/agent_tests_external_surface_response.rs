@@ -211,7 +211,7 @@ fn external_surface_response_actual_v12_get_seals_known_fee_and_pure_history() {
     let sdk = f.h.model_seen.lock().unwrap().len();
     let tx = db.unchecked_transaction().unwrap();
     let source =
-        crate::commands::external_surface_response_receipt::read_original_on(&tx, actor, &child)
+        crate::scanning::external_surface_response_receipt::read_original_on(&tx, actor, &child)
             .unwrap()
             .unwrap();
     assert!(!source.receipt_id().is_empty());
@@ -231,7 +231,7 @@ fn external_surface_response_actual_v12_get_seals_known_fee_and_pure_history() {
     assert_eq!(db.query_row("SELECT count(*) FROM agent_messages WHERE assignment_id=?1 AND kind IN ('evidence_summary','external_surface_result')",[&child.assignment_id],|r|r.get::<_,i64>(0)).unwrap(),0);
     let id = source.receipt_id().to_string();
     assert_eq!(
-        crate::commands::external_surface_response_receipt::read_original_on(&tx, actor, &child)
+        crate::scanning::external_surface_response_receipt::read_original_on(&tx, actor, &child)
             .unwrap()
             .unwrap()
             .receipt_id(),
@@ -255,13 +255,13 @@ fn external_surface_response_actual_signed_source_rejects_foreign_scope_signatur
     let mut foreign = actor.clone();
     foreign.root_run_id = Uuid::new_v4().to_string();
     assert!(
-        crate::commands::external_surface_response_receipt::read_original_on(&tx, &foreign, &child)
+        crate::scanning::external_surface_response_receipt::read_original_on(&tx, &foreign, &child)
             .is_err()
     );
     let mut foreign_child = child.clone();
     foreign_child.run_id = Uuid::new_v4().to_string();
     assert!(
-        crate::commands::external_surface_response_receipt::read_original_on(
+        crate::scanning::external_surface_response_receipt::read_original_on(
             &tx,
             actor,
             &foreign_child
@@ -291,7 +291,7 @@ fn external_surface_response_actual_signed_source_rejects_foreign_scope_signatur
             tx.execute_batch(&trigger).unwrap();
         }
         let damaged = super::tests::application_table_snapshot(&tx);
-        let error = crate::commands::external_surface_response_receipt::read_original_on(
+        let error = crate::scanning::external_surface_response_receipt::read_original_on(
             &tx, actor, &child,
         )
         .err()
@@ -320,7 +320,7 @@ fn external_surface_response_actual_retained_record_cold_change_is_not_adopted()
     let actor = &f.session.as_ref().unwrap().lease;
     let tx = db.unchecked_transaction().unwrap();
     let source =
-        crate::commands::external_surface_response_receipt::read_original_on(&tx, actor, &child)
+        crate::scanning::external_surface_response_receipt::read_original_on(&tx, actor, &child)
             .unwrap()
             .unwrap();
     let artifact = source.fact()["artifactId"].as_str().unwrap().to_string();
@@ -334,7 +334,7 @@ fn external_surface_response_actual_retained_record_cold_change_is_not_adopted()
     let sdk = f.h.model_seen.lock().unwrap().len();
     let tx = db.unchecked_transaction().unwrap();
     assert_eq!(
-        crate::commands::external_surface_response_receipt::read_original_on(&tx, actor, &child)
+        crate::scanning::external_surface_response_receipt::read_original_on(&tx, actor, &child)
             .err()
             .expect("record bytes may not be silently rehashed"),
         "public_surface_response_original_artifact_changed"
@@ -346,7 +346,7 @@ fn external_surface_response_actual_retained_record_cold_change_is_not_adopted()
     fs::write(&path, &original).unwrap();
     let tx = db.unchecked_transaction().unwrap();
     assert!(
-        crate::commands::external_surface_response_receipt::read_original_on(&tx, actor, &child)
+        crate::scanning::external_surface_response_receipt::read_original_on(&tx, actor, &child)
             .unwrap()
             .is_some()
     );
@@ -382,7 +382,7 @@ fn external_surface_response_actual_claim_trigger_side_writes_reject_before_get(
 #[test]
 fn external_surface_response_actual_issue_trigger_error_caught_then_commit_keeps_original_claim_only(
 ) {
-    use crate::commands::external_surface_response_receipt;
+    use crate::scanning::external_surface_response_receipt;
     let _real = RealSpecialistTransport::enter();
     let (f, context, child) = external_surface_response_actual_fixture_stage(false);
     let actor = &f.session.as_ref().unwrap().lease;
@@ -439,7 +439,7 @@ fn external_surface_response_actual_issue_trigger_error_caught_then_commit_keeps
 
 #[test]
 fn external_surface_response_actual_same_name_revision_trigger_cold_ddl_is_rejected() {
-    use crate::commands::external_surface_response_receipt;
+    use crate::scanning::external_surface_response_receipt;
     let _real = RealSpecialistTransport::enter();
     for attack in ["extra_write", "changed_value"] {
         let (f, context, child) = external_surface_response_actual_fixture_stage(false);
@@ -519,7 +519,7 @@ fn external_surface_response_actual_same_name_revision_trigger_cold_ddl_is_rejec
 
 #[test]
 fn external_surface_output_actual_v12_specialist_completion_seals_ack_and_free_history() {
-    use crate::commands::external_surface_output_receipt;
+    use crate::scanning::external_surface_output_receipt;
     let _real = RealSpecialistTransport::enter();
     let f = external_surface_output_actual_prepared_fixture();
     let actor = &f.session.as_ref().unwrap().lease;
@@ -713,7 +713,7 @@ fn external_surface_output_actual_root_503_preserves_closed_source_and_pending_o
     let before = super::tests::application_table_snapshot(&db);
     let tx = db.unchecked_transaction().unwrap();
     assert!(
-        crate::commands::external_surface_output_receipt::read_original_on(&tx, actor, &child)
+        crate::scanning::external_surface_output_receipt::read_original_on(&tx, actor, &child)
             .unwrap()
             .is_some()
     );
@@ -738,7 +738,7 @@ fn external_surface_output_actual_root_503_preserves_closed_source_and_pending_o
 
 #[test]
 fn external_surface_response_actual_fresh_claim_does_not_waive_other_unknown_costs() {
-    use crate::commands::external_surface_response_receipt;
+    use crate::scanning::external_surface_response_receipt;
     let _real = RealSpecialistTransport::enter();
     for dimension in ["model_requests", "target_requests"] {
         let (f, context, child) = external_surface_response_actual_fixture_stage(false);
@@ -843,7 +843,7 @@ fn external_surface_output_actual_paid_tool_calls_are_denied_without_local_steps
         assert_eq!(db.query_row("SELECT count(*) FROM agent_root_tick_receipts q JOIN agent_root_tick_receipts p ON p.call_id=q.call_id AND p.phase IN ('decision','publication') WHERE q.root_run_id=?1 AND q.phase='request' AND json_extract(q.fact_json,'$.request.basis.phase')='external-surface-output'",[&actor.root_run_id],|r|r.get::<_,i64>(0)).unwrap(),0);
         let tx = db.unchecked_transaction().unwrap();
         assert!(
-            crate::commands::external_surface_output_receipt::read_original_on(&tx, actor, &child)
+            crate::scanning::external_surface_output_receipt::read_original_on(&tx, actor, &child)
                 .unwrap()
                 .is_some()
         );

@@ -166,7 +166,7 @@ fn business_logic_output_actual_v13_sdk_normal_seal_and_pure_history() {
     let before = super::tests::application_table_snapshot(&db);
     let tx = db.unchecked_transaction().unwrap();
     let source =
-        crate::commands::business_logic_output_receipt::read_original_on(&tx, actor, &child)
+        crate::scanning::business_logic_output_receipt::read_original_on(&tx, actor, &child)
             .unwrap()
             .unwrap();
     assert_eq!(source.fact()["collection"]["payload"], output);
@@ -174,7 +174,7 @@ fn business_logic_output_actual_v13_sdk_normal_seal_and_pure_history() {
     let id = source.receipt_id().to_string();
     assert_eq!(tx.query_row("SELECT count(*) FROM agent_messages WHERE id=?1 AND kind='evidence_summary' AND correlation_id=?2 AND acknowledged_at<>''",params![source.message_id(),format!("business-logic:{}",child.assignment_id)],|r|r.get::<_,i64>(0)).unwrap(),1);
     assert_eq!(
-        crate::commands::business_logic_output_receipt::read_original_on(&tx, actor, &child)
+        crate::scanning::business_logic_output_receipt::read_original_on(&tx, actor, &child)
             .unwrap()
             .unwrap()
             .receipt_id(),
@@ -183,13 +183,13 @@ fn business_logic_output_actual_v13_sdk_normal_seal_and_pure_history() {
     let mut foreign = actor.clone();
     foreign.root_run_id = Uuid::new_v4().to_string();
     assert!(
-        crate::commands::business_logic_output_receipt::read_original_on(&tx, &foreign, &child)
+        crate::scanning::business_logic_output_receipt::read_original_on(&tx, &foreign, &child)
             .is_err()
     );
     let mut other = child.clone();
     other.run_id = Uuid::new_v4().to_string();
     assert!(
-        crate::commands::business_logic_output_receipt::read_original_on(&tx, actor, &other)
+        crate::scanning::business_logic_output_receipt::read_original_on(&tx, actor, &other)
             .is_err()
     );
     tx.rollback().unwrap();
@@ -232,12 +232,12 @@ fn business_logic_output_actual_v13_sdk_normal_seal_and_pure_history() {
         }
         let damaged = super::tests::application_table_snapshot(&tx);
         let read =
-            crate::commands::business_logic_output_receipt::read_original_on(&tx, actor, &child);
+            crate::scanning::business_logic_output_receipt::read_original_on(&tx, actor, &child);
         if damage == "missing" {
             assert!(read.unwrap().is_none());
             let mode = original_root_capture_mode(&tx, &actor.root_run_id).unwrap();
             assert_eq!(
-                crate::commands::business_logic_output_receipt::capture_before_on(
+                crate::scanning::business_logic_output_receipt::capture_before_on(
                     &tx,
                     actor,
                     &child,
@@ -368,7 +368,7 @@ fn business_logic_output_actual_full_entry_root_503_keeps_source_and_unknown_fee
     let before = super::tests::application_table_snapshot(&db);
     let tx = db.unchecked_transaction().unwrap();
     assert!(
-        crate::commands::business_logic_output_receipt::read_original_on(&tx, actor, &child)
+        crate::scanning::business_logic_output_receipt::read_original_on(&tx, actor, &child)
             .unwrap()
             .is_some()
     );

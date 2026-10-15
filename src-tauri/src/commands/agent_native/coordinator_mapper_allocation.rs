@@ -127,7 +127,7 @@ fn native_coordinator_prepare_mapper_loop_allocated(
     decision: &NativeCoordinatorTickReceipt,
     task: &JsonValue,
     original: &JsonValue,
-    bounds: &crate::commands::mapper_loop_request::VerifiedMapperLoopRequestBounds,
+    bounds: &crate::scanning::mapper_loop_request::VerifiedMapperLoopRequestBounds,
 ) -> Result<crate::agent_runtime::multi_agent::scheduler::ScheduledChild, String> {
     use crate::agent_runtime::{
         multi_agent::{budget, scheduler},

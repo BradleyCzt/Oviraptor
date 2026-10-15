@@ -45,7 +45,7 @@ fn assignment_attempt_parent_ownership_real_process_exclusion_and_sigkill_releas
         process
             .args([
                 "--exact",
-                "commands::agent_tests::assignment_attempt_parent_ownership_process_probe",
+                "scanning::agent_tests::assignment_attempt_parent_ownership_process_probe",
                 "--nocapture",
             ])
             .env("OVIRAPTOR_PARENT_OWNER_TEST_DB", &context.db_path)

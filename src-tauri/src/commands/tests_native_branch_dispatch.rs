@@ -184,7 +184,7 @@ fn native_dispatch_real_process_kill_preserves_before_and_after_claim_distinctio
         let (root,path,connection) = dispatch_fixture();
         let marker = root.join("local-effect");
         let mut child = Command::new(std::env::current_exe().unwrap())
-            .args(["--exact","commands::tests::native_dispatch_process_crash_probe","--nocapture"])
+            .args(["--exact","scanning::tests::native_dispatch_process_crash_probe","--nocapture"])
             .env("OVIRAPTOR_DISPATCH_CRASH_DB",&path)
             .env("OVIRAPTOR_DISPATCH_CRASH_PHASE",phase)
             .env("OVIRAPTOR_DISPATCH_CRASH_MARKER",&marker)

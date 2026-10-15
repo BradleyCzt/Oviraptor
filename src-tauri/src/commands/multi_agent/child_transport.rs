@@ -201,9 +201,9 @@ fn specialist_round_transport_bound(
     let homogeneous = connection.query_row("SELECT scheduling_model='homogeneous_workers' FROM agent_assignments WHERE id=?1 AND child_run_id=?2",params![child.assignment_id,child.run_id],|r|r.get::<_,bool>(0)).unwrap_or(false);
     let required_tokens = if homogeneous {
         let review=child.role==crate::agent_runtime::contract::AgentRole::EvidenceReviewer;
-        let worker = if review{crate::commands::homogeneous_execution::review_minimum(&input)}else{crate::agent_runtime::multi_agent::homogeneous::model_worker::minimum_tokens(&input)};
+        let worker = if review{crate::scanning::homogeneous_execution::review_minimum(&input)}else{crate::agent_runtime::multi_agent::homogeneous::model_worker::minimum_tokens(&input)};
         let execution=crate::agent_runtime::multi_agent::homogeneous::execution_policy::read_original_on(&connection,&lease.root_run_id)?.is_some();
-        let (expected,output)=if review && execution{(crate::commands::homogeneous_execution::REVIEW_SYSTEM,crate::commands::homogeneous_execution::REVIEW_OUTPUT)}else if execution{(crate::agent_runtime::multi_agent::homogeneous::execution_worker::SYSTEM,crate::agent_runtime::multi_agent::homogeneous::execution_worker::MAX_OUTPUT)}else{(crate::agent_runtime::multi_agent::homogeneous::model_worker::SYSTEM,crate::agent_runtime::multi_agent::homogeneous::model_worker::MAX_OUTPUT)};
+        let (expected,output)=if review && execution{(crate::scanning::homogeneous_execution::REVIEW_SYSTEM,crate::scanning::homogeneous_execution::REVIEW_OUTPUT)}else if execution{(crate::agent_runtime::multi_agent::homogeneous::execution_worker::SYSTEM,crate::agent_runtime::multi_agent::homogeneous::execution_worker::MAX_OUTPUT)}else{(crate::agent_runtime::multi_agent::homogeneous::model_worker::SYSTEM,crate::agent_runtime::multi_agent::homogeneous::model_worker::MAX_OUTPUT)};
         if system != expected {
             return Err("homogeneous_worker_system_invalid".into());
         }

@@ -44,7 +44,7 @@ pub(crate) fn original_web_grant_inventory_on(
     if db.is_autocommit() {
         return Err("executor_allocation_history_snapshot_required".into());
     }
-    let original = crate::commands::original_root_capture_mode(db, &lease.root_run_id)?;
+    let original = crate::scanning::scope_contract::original_root_capture_mode(db, &lease.root_run_id)?;
     crate::agent_runtime::web_mode::root::verify_birth(db, &lease.root_run_id, &original)?;
     let exact:bool=db.query_row("SELECT EXISTS(SELECT 1 FROM agent_assignments a JOIN agent_runs c ON c.id=a.child_run_id JOIN agent_runs r ON r.id=a.coordinator_run_id WHERE a.id=?1 AND a.coordinator_run_id=?2 AND a.role='web_executor' AND a.lane='target_touching' AND a.target_key=?3 AND a.lease_epoch=?4 AND a.fencing_token=?5 AND c.assignment_id=a.id AND c.root_run_id=r.id AND c.parent_run_id=r.id AND c.role=a.role AND c.lane=a.lane AND c.backend='native' AND c.orchestration_policy='multi' AND c.scan_id=?6 AND c.attempt_number=?7 AND c.target_url=?3 AND r.role='coordinator' AND r.backend='native' AND r.orchestration_policy='multi' AND r.scan_id=?6 AND r.attempt_number=?7 AND r.target_url=?3)",params![assignment,lease.root_run_id,lease.target_key,lease.lease_epoch,lease.fencing_token,lease.scan_id,lease.attempt_number],|r|r.get(0)).map_err(|e|e.to_string())?;
     if !exact {

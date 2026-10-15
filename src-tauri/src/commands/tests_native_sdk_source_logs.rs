@@ -8,7 +8,7 @@ fn sdk_source_gate_contract(tool_phase: bool) {
         let (arrive, arrived) = mpsc::channel();
         let (release, released) = mpsc::channel();
         let released = Arc::new(Mutex::new(released));
-        let (port, seen, stop) = crate::commands::agent_tests::spawn_endpoint(Arc::new(
+        let (port, seen, stop) = crate::scanning::agent_tests::spawn_endpoint(Arc::new(
             move |_| {
                 let _ = arrive.send(());
                 let _ = released

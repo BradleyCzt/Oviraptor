@@ -46,7 +46,7 @@ pub(crate) fn run(
         stage: format!("{}:{stage}", spec.engine.as_str()),
     };
     let mut journal = Journal::begin(Path::new(path), scope).map_err(|error| failure(&error))?;
-    let mut notify = |hint: &super::Hint| crate::commands::notify_native_process_log(hint);
+    let mut notify = |hint: &super::Hint| crate::scanning::log_events::notify_native_process_log(hint);
     let result = process::run_observed(
         &spec.program,
         args,

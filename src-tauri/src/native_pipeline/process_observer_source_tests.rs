@@ -121,7 +121,7 @@ exit 0
         let found = if via_ipc {
             // Same business read helper called by read_native_process_log IPC;
             // actual production analyzer owns writer and process observer.
-            let view = crate::commands::read_native_process_log_snapshot(
+            let view = crate::scanning::process_log_test_support::read_native_process_log_snapshot(
                 &f.db, "scan-a", 1, None, None, 0, 300,
             )
             .unwrap();

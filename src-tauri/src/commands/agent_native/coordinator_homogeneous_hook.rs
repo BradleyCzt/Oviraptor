@@ -101,7 +101,7 @@ fn native_homogeneous_basis_directives_on(
     // Supply bounded Rust-derived contract data, including deterministic new slice IDs.
     let mut drafts = decompose::deterministic_candidates(db, &task)
         .map_err(|error| error.reason_code.to_string())?;
-    drafts.extend(crate::commands::homogeneous_execution::drafts(db,&task)?);
+    drafts.extend(crate::scanning::homogeneous_execution::drafts(db,&task)?);
     let drafts: Vec<JsonValue> = drafts.into_iter().map(|draft| json!({
         "slice_id": draft.slice_id, "scope_kind": draft.scope_kind, "scope_value": draft.scope_value,
         "lane": draft.lane, "evidence_revision_base": draft.evidence_revision_base,
@@ -120,14 +120,14 @@ fn native_homogeneous_basis_directives_on(
             "retry_count": slice.retry_count, "max_retries": slice.max_retries, "next_attempt": next_attempt
         }));
         if crate::agent_runtime::multi_agent::homogeneous::model_worker::enabled(db, &actor.scan_id, actor.attempt_number)? {
-            let minimum=crate::commands::homogeneous_execution::slice_minimum(db,actor,slice)?;
+            let minimum=crate::scanning::homogeneous_execution::slice_minimum(db,actor,slice)?;
             if let Some(card) = slice_cards.last_mut() {
                 card["minimum_reserved_tokens"] = json!(minimum.0);
                 card["minimum_reserved_requests"] = json!(minimum.1);
                 card["allowed_tools"]=json!(gate::tool_allowlist_for_task(db,&task,&slice.lane).map_err(|e|e.detail)?);
                 if slice.lane=="review" {
                     let tx;let read=if db.is_autocommit(){tx=db.unchecked_transaction().map_err(|e|e.to_string())?;&*tx}else{db};
-                    let fact=crate::commands::homogeneous_execution::read_fact(read,actor,slice.scope_value.strip_prefix("review-candidate:").ok_or("homogeneous_review_scope_invalid")?)?;
+                    let fact=crate::scanning::homogeneous_execution::read_fact(read,actor,slice.scope_value.strip_prefix("review-candidate:").ok_or("homogeneous_review_scope_invalid")?)?;
                     card["excluded_worker_ids"]=json!([fact["workerId"]]);
                 }
             }
@@ -196,7 +196,7 @@ fn native_homogeneous_basis_directives_on(
             "directives": directives,
             "phase1Lane": "read_only_analysis",
             "executionMode": if crate::agent_runtime::multi_agent::homogeneous::execution_policy::read_original_on(db,&task.root_run_id)?.is_some(){"model_broker_v1"}else{"model_read_only_v1"},
-            "goalReady":crate::commands::homogeneous_execution::goal_ready(db,&task)?,
+            "goalReady":crate::scanning::homogeneous_execution::goal_ready(db,&task)?,
             "executionRule": "只有原始冻结 model_broker_v1 才允许 target_touching/review；二者与其他占用必须串行。目标任务只用 authorization_probe 且模型预算为0，复核任务只用 evidence.read/review.write 且必须排除产出 Worker。每次从 Rust 候选选择切片和 idle Worker，禁止固定角色或扩容；goalReady=false 不得 goal_reached。先完成批准解析任务，再执行登记控制组，最后独立复核。",
             "reason_code_allowlist": reason::ALL.as_slice(),
             "payload_keys": {

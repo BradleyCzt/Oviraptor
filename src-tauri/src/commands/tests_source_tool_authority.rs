@@ -17,7 +17,7 @@ fn native_source_tool_fixture_mode(role:crate::agent_runtime::contract::AgentRol
     let child=scheduler::schedule_child(&connection,&lease,role,AgentLane::ReadOnlyAnalysis,
         "source_tools_ready",&slice,1,&source::tool_capabilities(role).unwrap(),0,0).unwrap();
     scheduler::mark_child_running(&connection,&lease,&child).unwrap();
-    let mut context=crate::commands::agent_tests::test_context(&root.join("oviraptor.sqlite3"),&lease.target_key,Vec::new());
+    let mut context=crate::scanning::agent_tests::test_context(&root.join("oviraptor.sqlite3"),&lease.target_key,Vec::new());
     context.scan_id=record.scan_id;
     context.attempt_number=1;
     context.run=Some(AgentRunLedger{db_path:context.db_path.clone(),run_id:child.run_id});
@@ -191,13 +191,13 @@ fn source_tool_authority_requires_running_root_and_started_boundary() {
         let (root, db, context, actor) = native_source_tool_fixture(AgentRole::SourceAnalyst);
         assert!(agent_native_source_tool_authority(&db, &context, "repo.read_slice").is_ok());
         db.execute(&format!("UPDATE agent_runs SET {mutation} WHERE id=?1"), [&actor.root_run_id]).unwrap();
-        let before = crate::commands::web_mode_test_rows(&db);
+        let before = crate::scanning::web_mode_test_rows(&db);
         assert_eq!(agent_native_source_tool_authority(&db, &context, "repo.read_slice").err(), Some("source_tool_root_not_running"));
         assert!(agent_tool_specs_for(&context).is_empty());
         let answer = agent_execute_source_tool(&context, "repo.read_slice", &json!({"path":"app.py"}));
         assert!(answer.get("error").is_some());
         assert!(!answer.to_string().contains("print('changed')"));
-        crate::commands::web_mode_assert_rows(&db, &before);
+        crate::scanning::web_mode_assert_rows(&db, &before);
         drop(db); fs::remove_dir_all(root).unwrap();
     }
 }
@@ -209,12 +209,12 @@ fn source_tool_authority_remaining_time_uses_original_origin_not_started_metadat
         let origin: String = db.query_row("SELECT started_at FROM agent_budget_clock_origins WHERE root_run_id=?1",
             [&actor.root_run_id], |r| r.get(0)).unwrap();
         db.execute("UPDATE agent_runs SET started_at=?2 WHERE id=?1", params![actor.root_run_id, stamp]).unwrap();
-        let before = crate::commands::web_mode_test_rows(&db);
+        let before = crate::scanning::web_mode_test_rows(&db);
         assert!(crate::agent_runtime::multi_agent::budget::clock::remaining(&db, &actor.root_run_id).is_ok());
         assert!(agent_native_source_tool_authority(&db, &context, "repo.read_slice").is_ok(), "{stamp}");
         assert_eq!(db.query_row("SELECT started_at FROM agent_budget_clock_origins WHERE root_run_id=?1",
             [&actor.root_run_id], |r| r.get::<_, String>(0)).unwrap(), origin);
-        crate::commands::web_mode_assert_rows(&db, &before);
+        crate::scanning::web_mode_assert_rows(&db, &before);
         drop(db); fs::remove_dir_all(root).unwrap();
     }
 }

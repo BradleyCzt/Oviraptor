@@ -19,7 +19,7 @@ fn source_paid_deletion_original_material_receipt_and_parent_damage_cannot_delet
         let before=source_exit_snapshot(&db);
         // Pure Source audit under the original fault transaction; no grants.
         let c=native_source_fresh_finance::original_for_financial_exit(&db,actor);
-        assert!(c.and_then(|c|crate::commands::verify_closed_source_for_deletion(&db,&c)).is_err(),"{sql}");
+        assert!(c.and_then(|c|crate::scanning::source_deletion::verify_closed_source_for_deletion(&db,&c)).is_err(),"{sql}");
         assert_eq!(source_exit_snapshot(&db),before,"{sql}");
         db.execute_batch("ROLLBACK TO original_fault; RELEASE original_fault").unwrap();
     }

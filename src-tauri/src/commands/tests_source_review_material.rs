@@ -32,7 +32,7 @@ fn source_review_material_execution_fixture(damage:Option<&str>) -> (PathBuf,rus
 
 fn source_review_material_execution_with_candidate(damage:Option<&str>,candidate:JsonValue) -> (PathBuf,rusqlite::Connection,
     crate::agent_runtime::multi_agent::lease::CoordinatorLease,Result<JsonValue,String>) {
-    let (port,seen,stop)=crate::commands::agent_tests::spawn_endpoint(std::sync::Arc::new(move |request| {
+    let (port,seen,stop)=crate::scanning::agent_tests::spawn_endpoint(std::sync::Arc::new(move |request| {
         let body:JsonValue=serde_json::from_str(request.split("\r\n\r\n").nth(1).unwrap()).unwrap();
         let message=if body.get("tools").is_none() {json!({"role":"assistant","content":"Initial source assessment, not a review"})}
         else {

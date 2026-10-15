@@ -956,3 +956,20 @@ pub fn acknowledge_interrupted_run(state: State<AppState>, run_id: i64) -> Resul
         .map_err(|error| error.to_string())?;
     Ok(())
 }
+
+#[cfg(test)]
+pub(crate) mod test_support {
+    use crate::asset_models::AssetQuery;
+    use rusqlite::types::Value as SqlValue;
+
+    pub(crate) fn asset_filter(
+        query: &AssetQuery,
+        apply_decision_view: bool,
+    ) -> (String, Vec<SqlValue>) {
+        super::asset_filter(query, apply_decision_view)
+    }
+
+    pub(crate) fn detect_target(value: &str) -> &'static str {
+        super::detect_target(value)
+    }
+}

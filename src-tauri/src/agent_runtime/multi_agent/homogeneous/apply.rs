@@ -525,7 +525,7 @@ fn apply_decompose(
     let existing = store::load_slices(connection, &task.task_id)?;
     for draft in &body.slices {
         if draft.lane!="read_only_analysis" {
-            crate::commands::homogeneous_execution::validate_draft(connection,lease,task,draft).map_err(|e|DecisionError::new(reason::TOOL_NOT_AUTHORIZED,e))?;
+            crate::scanning::homogeneous_execution::validate_draft(connection,lease,task,draft).map_err(|e|DecisionError::new(reason::TOOL_NOT_AUTHORIZED,e))?;
         }
         if existing
             .iter()
@@ -681,7 +681,7 @@ fn apply_assign(
         ));
     }
     if slice.lane != "read_only_analysis" {
-        crate::commands::homogeneous_execution::validate_assign(connection,lease,&slice,body).map_err(|e|DecisionError::new(reason::TOOL_NOT_AUTHORIZED,e))?;
+        crate::scanning::homogeneous_execution::validate_assign(connection,lease,&slice,body).map_err(|e|DecisionError::new(reason::TOOL_NOT_AUTHORIZED,e))?;
         let active:i64=connection.query_row("SELECT count(*) FROM agent_lane_slots WHERE root_run_id=?1 AND released_at=''",[&task.root_run_id],|r|r.get(0)).map_err(|e|DecisionError::new(reason::LANE_QUOTA_EXCEEDED,e.to_string()))?;
         if active!=0 {return Err(DecisionError::new(reason::LANE_QUOTA_EXCEEDED,"执行和复核必须独占；先验收并释放已有切片"));}
     } else if super::execution_policy::read_original_on(connection,&task.root_run_id).map_err(|e|DecisionError::new(reason::LANE_QUOTA_EXCEEDED,e))?.is_some(){
@@ -984,7 +984,7 @@ fn release_after_verdict(
         &assignment.lane,
         &assignment.slice_id,
     )?;
-    crate::commands::homogeneous_execution::release_on(connection,assignment).map_err(|e|DecisionError::new(reason::SCHEMA_INVALID,e))?;
+    crate::scanning::homogeneous_execution::release_on(connection,assignment).map_err(|e|DecisionError::new(reason::SCHEMA_INVALID,e))?;
     if !assignment.worker_id.is_empty() {
         pool::mark_idle(connection, &assignment.worker_id)?;
     }
@@ -1087,7 +1087,7 @@ fn apply_accept(
         decided_by_lease_epoch: lease.lease_epoch,
         attempt: assignment.attempt,
     };
-    crate::commands::homogeneous_execution::accept_on(connection,lease,&assignment).map_err(|e|DecisionError::new(reason::MODEL_JUDGEMENT_FAIL,e))?;
+    crate::scanning::homogeneous_execution::accept_on(connection,lease,&assignment).map_err(|e|DecisionError::new(reason::MODEL_JUDGEMENT_FAIL,e))?;
     store::insert_verdict(connection, &verdict)?;
     store::set_assignment_state(connection, &assignment.assignment_id, "accepted")?;
     store::set_slice_state(connection, &assignment.slice_id, "accepted")?;

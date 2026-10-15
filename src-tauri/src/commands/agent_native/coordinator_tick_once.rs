@@ -170,9 +170,9 @@ fn native_root_transport_original(
                     #[cfg(test)]
                     native_financial_continuation_received_test_checkpoint(context, actor);
                     #[cfg(test)]
-                    crate::commands::agent_tests::native_root_controlled_post_original_invoice_checkpoint(context, actor, round);
+                    crate::scanning::agent_tests::native_root_controlled_post_original_invoice_checkpoint(context, actor, round);
                     #[cfg(test)]
-                    crate::commands::agent_tests::native_mapper_source_drift_post_original_invoice_checkpoint(context, actor, round);
+                    crate::scanning::agent_tests::native_mapper_source_drift_post_original_invoice_checkpoint(context, actor, round);
                     NativeRootOriginalResponse::Fresh { tick, response }
                 }
                 Err(error) => {

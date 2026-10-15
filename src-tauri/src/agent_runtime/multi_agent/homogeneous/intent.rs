@@ -205,7 +205,7 @@ pub fn validate_stop(
 ) -> Result<(), DecisionError> {
     let slices = store::load_slices(connection, &task.task_id)?;
     let legitimate = match body.stop_reason.as_str() {
-        "goal_reached" => !body.accepted_slice_ids.is_empty() && crate::commands::homogeneous_execution::goal_ready(connection,task).map_err(|e|illegal(e))?,
+        "goal_reached" => !body.accepted_slice_ids.is_empty() && crate::scanning::homogeneous_execution::goal_ready(connection,task).map_err(|e|illegal(e))?,
         "budget_exhausted" => budget_exhausted(connection, &task.root_run_id)?,
         "retry_limit_exceeded" => {
             !slices.is_empty()

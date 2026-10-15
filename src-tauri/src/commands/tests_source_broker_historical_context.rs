@@ -4,7 +4,7 @@ fn source_broker_context(root: &Path, connection: &rusqlite::Connection, record:
 
 fn source_broker_context_for_attempt(root: &Path, connection: &rusqlite::Connection, record: &WorkbenchStartRecord, attempt:i64) -> AgentRunContext {
     use crate::agent_runtime::{contract::{AgentBackendKind,AgentRole},store::{self,AgentRunRow}};
-    let mut context=crate::commands::agent_tests::test_context(&root.join("oviraptor.sqlite3"),"https://source.example.invalid",Vec::new());
+    let mut context=crate::scanning::agent_tests::test_context(&root.join("oviraptor.sqlite3"),"https://source.example.invalid",Vec::new());
     context.scan_id=record.scan_id.clone();
     context.attempt_number=attempt;
     context.execution_plan.attempt_number=attempt;

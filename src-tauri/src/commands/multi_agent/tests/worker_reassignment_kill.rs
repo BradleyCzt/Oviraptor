@@ -90,7 +90,7 @@ fn assignment_attempt_reassignment_real_sigkill_keeps_dispatch_and_receipt_bound
         let mut process = std::process::Command::new(std::env::current_exe().unwrap())
             .args([
                 "--exact",
-                "commands::agent_tests::assignment_attempt_reassignment_process_probe",
+                "scanning::agent_tests::assignment_attempt_reassignment_process_probe",
                 "--nocapture",
             ])
             .env("OVIRAPTOR_WORKER_KILL_DB", &context.db_path)

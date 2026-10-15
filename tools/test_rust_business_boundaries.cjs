@@ -7,6 +7,7 @@ const test = require('node:test');
 const read = (relative) => fs.readFileSync(path.join(__dirname, '..', relative), 'utf8');
 const registration = read('src-tauri/src/lib.rs');
 const legacy = read('src-tauri/src/commands.rs');
+const scanning = read('src-tauri/src/scanning.rs');
 const owners = {
   workspace_projects: ['list_projects', 'save_project', 'project_impact', 'archive_project', 'delete_project'],
   application_overview: ['dashboard_stats'],
@@ -37,7 +38,7 @@ for (const [owner, commands] of Object.entries(owners)) {
       assert.doesNotMatch(source, /crate::models::|(?:^|[\s,{])models::\{/m);
       assert.doesNotMatch(source, /crate::(?:commands|scanning|skills_catalog)::/);
     }
-    assert.doesNotMatch(source, /(?:use\s+(?:crate|super)::|crate::)(?:conversations|skill_packages|commands::(?:agent|scan))/);
+    assert.doesNotMatch(source, /(?:use\s+(?:crate|super)::|crate::)(?:conversations|skill_packages|scanning|commands::(?:agent|scan))/);
     if (owner === 'model_profiles') {
       // A connectivity check uses the shared gateway's refusal classifier;
       // it must not import any scan/Agent runtime or grant machinery.
@@ -53,10 +54,75 @@ for (const [owner, commands] of Object.entries(owners)) {
     }
   });
 }
+
+test('Scanning keeps the actual owner scope and explicit DTO edges', () => {
+  assert.match(registration, /mod scanning;/);
+  const indexNames = [...legacy.matchAll(/^\s*pub\(crate\) mod (\w+);/gm)].map(match => match[1]);
+  const expectedIndex = ["workspace_projects", "application_overview", "application_settings", "workspace_config_profiles", "assets", "asset_export", "tool_administrator", "environment", "model_profiles", "ownership", "exposure", "hackerone"];
+  assert.deepEqual(indexNames.sort(), [...expectedIndex].sort());
+  const indexBody = legacy.replace(/\/\/[^\n]*/g, '')
+    .replace(/#\[path = "[^"]+"\]\s*/g, '')
+    .replace(/pub\(crate\) mod \w+;/g, '').trim();
+  assert.equal(indexBody, '', 'index contains only the 12 reviewed module declarations');
+  assert.match(legacy, /^pub\(crate\) mod exposure;/m);
+  assert.doesNotMatch(legacy, /#\[path = "commands\/exposure\.rs"\]/);
+  assert.doesNotMatch(legacy, /include!\s*\(/);
+  assert.doesNotMatch(scanning, /pub(?:\([^)]*\))?\s+use[^;]*\*/);
+  assert.match(scanning, /use crate::scanning_models::\*;/);
+  assert.doesNotMatch(scanning, /(?:crate::|[\s,{])models::\*/);
+  assert.match(scanning, /use crate::skills_catalog::model::\{\s*AgentKnowledgeEntry, AgentLearningCandidate,/);
+  assert.match(scanning, /#\[cfg\(test\)\]\s*use crate::asset_models::\{\s*AssetQuery, AssetSummary,/);
+  assert.match(scanning, /#\[cfg\(test\)\]\s*use crate::configuration_models::\{\s*ConfigProfileInput,/);
+  assert.doesNotMatch(scanning, /use crate::(?:environment_models|hackerone_models|workspace_models|application_models)::/);
+  const handler = registration.split('tauri::generate_handler![')[1]?.split('])')[0];
+  assert.ok(handler, 'live IPC handler input exists');
+  const routes = [...handler.matchAll(/^\s*((?:[a-z_]\w*::)+\w+),?\s*$/gm)].map(match => match[1]);
+  assert.equal(routes.length, 289);
+  assert.equal(new Set(routes.map(route => route.split('::').at(-1))).size, 289);
+  assert.deepEqual(routes.filter(route => route.startsWith('scanning::')).map(route => route.split('::').at(-1)), ["create_sentinel_scan", "create_sentinel_url_scan", "create_sentinel_homogeneous_url_scan", "create_sentinel_url_scan_with_tool_selection", "list_capability_bundles", "list_role_config_drafts", "save_role_config_draft", "role_config_draft_status_label", "save_authorization_control", "get_authorization_control_setup", "list_agent_traces", "get_agent_trace", "generate_agent_learning_candidate", "analyze_agent_trace", "aggregate_agent_knowledge", "list_security_rule_packs", "save_security_rule_pack", "delete_security_rule_pack", "sync_security_rule_pack", "start_workbench_scan", "rescan_workbench_scan", "rescan_sentinel_scan", "confirm_sentinel_scan", "pause_sentinel_scan", "recover_native_source_pause_result", "resume_sentinel_scan", "cancel_sentinel_scan", "delete_sentinel_scan", "list_sentinel_scans", "search_sentinel_scan_page", "archive_sentinel_scan", "list_sentinel_scan_attempts", "list_sentinel_vulnerability_scan_ids", "get_sentinel_runner_log", "read_sentinel_runner_log", "read_native_process_log", "read_native_sdk_log", "read_native_mapper_prepared_history", "search_sentinel_scan_ids", "list_sentinel_targets", "list_sentinel_fuse_zone", "save_sentinel_fuse_review", "remove_sentinel_fuse_entry", "list_sentinel_checkpoints", "list_sentinel_findings", "list_historical_import_previews", "list_historical_import_runs", "list_historical_bundle_previews", "get_agent_target_execution", "get_agent_request_reviews", "record_agent_request_review", "get_native_scan_status", "get_native_budget_diagnostics", "get_native_root_cost_reconciliations", "confirm_native_root_cost_reconciliation", "preview_native_root_financial_continuation", "preview_native_single_continuation", "preview_native_protection_recovery", "discover_native_protection_recovery_sources", "preview_native_protection_recovery_proposal", "approve_native_protection_recovery", "preview_native_priced_protection_recovery", "approve_native_priced_protection_recovery", "get_native_priced_protection_recovery_approval", "find_native_priced_protection_recovery_approval", "cancel_native_priced_protection_recovery_approval", "get_native_priced_protection_recovery_cancellation", "get_native_protection_recovery_approval", "create_native_protection_recovery_draft", "get_native_protection_recovery_draft", "get_native_protection_recovery_cancellation", "get_native_protection_recovery_cancellation_by_request", "approve_native_root_financial_continuation", "get_native_root_financial_continuation", "discover_native_root_financial_continuation", "get_native_scan_timeline_page", "get_agent_dialog_view", "save_agent_dialog_view", "get_agent_dialog_selection", "save_agent_dialog_selection", "get_agent_dialog_task", "recover_never_dispatched_web_attempt", "close_never_dispatched_web_attempt", "preview_web_administrative_closure", "close_web_task_administratively", "preview_web_closure_handoff", "create_web_closure_handoff", "preview_agent_gap_followup", "create_agent_gap_followup", "get_agent_gap_followup_submission", "release_agent_gap_followup_submission", "get_native_attempt_mailbox_history", "get_native_attempt_tool_history", "get_native_attempt_execution_history", "get_native_source_findings", "export_native_source_findings", "draft_scan_directive", "post_scan_directive", "confirm_scan_directive", "revise_scan_directive", "reject_scan_directive", "reconcile_scan_directive_receipt", "reconcile_historical_scan_directive_receipt", "cancel_scan_directive", "list_sentinel_opportunities", "update_sentinel_opportunity_status", "get_investigation_graph", "list_investigation_hypotheses", "update_investigation_hypothesis", "set_investigation_mutation_approval", "replay_investigation_request", "save_investigation_validation", "list_investigation_validations", "investigation_overview", "list_appsec_scan_result", "sentinel_overview_stats", "list_sentinel_validations", "list_all_sentinel_validations", "list_sentinel_validation_work_items", "save_sentinel_validation", "export_sentinel_results", "import_sentinel_results", "export_sentinel_project", "import_sentinel_project", "get_artifact_import_status"]);
+  for (const name of ["worker_bridge", "scope_contract", "source_deletion", "financial_continuation", "publication_replay", "evidence_bridge", "recovery_draft", "log_events"]) {
+    assert.ok(scanning.includes(`pub(crate) mod ${name} {`), name);
+    assert.ok(!scanning.includes(`#[cfg(test)]\npub(crate) mod ${name} {`), name);
+  }
+  for (const name of ["runtime_test_support", "process_log_test_support"])
+    assert.ok(scanning.includes(`#[cfg(test)]\npub(crate) mod ${name} {`), name);
+  const typedScope = scanning + '\n' + read('src-tauri/src/commands/agent_native.rs')
+    + '\n' + read('src-tauri/src/commands/multi_agent_runtime.rs');
+  for (const name of ["authorization_output_receipt", "authorization_side", "business_logic_dispatch_receipt", "business_logic_output_receipt", "external_surface_output_receipt", "external_surface_response_receipt", "homogeneous_execution", "http_budget_receipt", "http_exchange", "mapper_evidence_lookup", "mapper_loop_request", "recovery_approval_signature"])
+    assert.equal(typedScope.split(`pub(crate) mod ${name};`).length - 1, 1, name);
+  const modelLines = read('src-tauri/src/models.rs').split('\n')
+    .map(line => line.trim()).filter(line => line && !line.startsWith('//'));
+  assert.deepEqual(modelLines, ["pub use crate::asset_models::*;", "pub use crate::scanning_models::*;", "pub use crate::workspace_models::*;", "pub use crate::configuration_models::*;", "pub use crate::application_models::*;", "pub use crate::environment_models::*;", "pub use crate::hackerone_models::*;", "pub use crate::skills_catalog::model::*;"]);
+});
+
 test('asset exports share the inventory predicate and ownership fixtures verify it', () => {
   assert.match(read('src-tauri/src/commands/asset_export.rs'), /use super::assets::\{asset_filter, asset_from_row, ASSET_SELECT\}/);
-  assert.match(legacy, /#\[cfg\(test\)\]\s*use assets::asset_filter;/);
+  assert.match(scanning, /#\[cfg\(test\)\]\s*use crate::commands::assets::test_support::asset_filter;/);
   assert.match(read('src-tauri/src/commands/asset_ownership.rs'), /asset_filter\(&query, true\)/);
+});
+
+test('Scanning fixtures use test-only owner adapters without widening production helpers', () => {
+  const adapters = {
+    assets: ['asset_filter', 'detect_target'],
+    workspace_projects: ['delete_project_for_connection', 'project_impact_for_connection'],
+    workspace_config_profiles: ['read_config_profiles', 'persist_config_profile', 'delete_config_profile_inner'],
+    environment: ['ensure_environment_install_idle'],
+  };
+  for (const [owner, helpers] of Object.entries(adapters)) {
+    const source = read(`src-tauri/src/commands/${owner}.rs`);
+    const split = source.split('#[cfg(test)]\npub(crate) mod test_support {');
+    assert.equal(split.length, 2, `${owner} has exactly one cfg(test) adapter module`);
+    const [production, support] = split;
+    assert.doesNotMatch(support, /(?:SELECT|INSERT|UPDATE|DELETE)\s/);
+    assert.doesNotMatch(support, /crate::(?:models|scanning|agent_runtime)::|super::\*/);
+    assert.deepEqual([...support.matchAll(/pub\(crate\) fn (\w+)\(/g)].map(match => match[1]).sort(), [...helpers].sort());
+    assert.match(scanning, new RegExp(`#\\[cfg\\(test\\)\\]\\s*use crate::commands::${owner}::test_support::`));
+    for (const helper of helpers) {
+      assert.match(production, new RegExp(`pub\\(super\\) fn ${helper}\\(`));
+      assert.match(support, new RegExp(`super::${helper}\\(`));
+      assert.doesNotMatch(scanning, new RegExp(`use crate::commands::${owner}::(?:\\{[^}]*\\b)?${helper}\\b`));
+    }
+  }
 });
 
 test('FOFA account validation belongs to Assets with direct jobs and IPC consumers', () => {
@@ -73,7 +139,7 @@ test('FOFA account validation belongs to Assets with direct jobs and IPC consume
   assert.deepEqual(routes, ['asset_fofa::test_fofa_api']);
   assert.doesNotMatch(read('src-tauri/src/commands/runtime_environment.rs'),
     /fn (?:fofa_transport_error|request_fofa_account|test_fofa_api)\(/);
-  assert.doesNotMatch(legacy, /fofa::|request_fofa_account|test_fofa_api/);
+  assert.doesNotMatch(legacy + '\n' + scanning, /fofa::|request_fofa_account|test_fofa_api/);
   assert.match(jobs, /crate::asset_fofa::request_fofa_account\(fofa_key\.trim\(\), fofa_proxy\.trim\(\)\)/);
   assert.doesNotMatch(jobs, /commands::|\bcommands\s*,/);
 });
@@ -83,7 +149,14 @@ test('asset ownership compiles in its domain scope with explicit read consumers'
   assert.match(legacy, /pub\(crate\) mod ownership;/);
   assert.doesNotMatch(legacy, /include!\("commands\/(?:asset_ownership|ownership_\w+)\.rs"\)/);
   assert.doesNotMatch(source, /use\s+(?:super|crate::commands)::\s*\*/);
-  assert.doesNotMatch(source, /crate::(?:conversations|skill_packages|skills_catalog|agent_runtime|scanning)::/);
+  const allowedScanTestImport = "#[cfg(test)]\nuse crate::scanning::ownership_test_support::authorization_control_setup_in;";
+  assert.equal(source.split(allowedScanTestImport).length - 1, 1,
+    'only the exact cfg(test) Ownership bridge import is allowed');
+  const productionSource = source.replace(allowedScanTestImport, '');
+  assert.doesNotMatch(productionSource, /crate::(?:conversations|skill_packages|skills_catalog|agent_runtime|scanning)::/);
+  assert.match(scanning, /#\[cfg\(test\)\]\s*pub\(crate\) mod ownership_test_support/);
+  const originalAuthorization = read('src-tauri/src/commands/agent_authorization_control.rs');
+  assert.doesNotMatch(originalAuthorization, /pub(?:\([^)]*\))?\s+fn authorization_control_setup_in\(/);
   assert.match(source, /asset_models::\{/);
   assert.deepEqual([...source.matchAll(/include!\("([^"]+)"\)/g)].map(match => match[1]), [
     'asset_ownership.rs', 'ownership_directory.rs', 'ownership_public_suffix.rs',
@@ -112,8 +185,8 @@ test('Chat resolves its model through snapshot-preserving infrastructure', () =>
   const source = read('src-tauri/src/conversations/reply.rs');
   assert.match(source, /crate::model_configuration::gateway_profile_on\(db, None\)/);
   assert.match(source, /map_err\(\|_\| "conversation_model_unavailable"\.to_string\(\)\)/);
-  assert.doesNotMatch(source, /crate::commands::/);
-  assert.doesNotMatch(legacy, /fn conversation_model_profile\(/);
+  assert.doesNotMatch(source, /crate::(?:commands|scanning)::/);
+  assert.doesNotMatch(legacy + '\n' + scanning, /fn conversation_model_profile\(/);
 });
 
 test('model configuration owns the only application resolver without business dependencies', () => {

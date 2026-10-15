@@ -46,7 +46,7 @@ impl NativeCoordinatorFrame {
         // Reader re-verifies its private seal, normal closed three-side Authorization financial
         // proof, exact frozen control batch/cap set and original message/terminal rows.
         // No rows are signed or adopted by this Root advisory consumer.
-        let source = crate::commands::authorization_output_receipt::read_original_on(db, actor, child)?
+        let source = crate::scanning::authorization_output_receipt::read_original_on(db, actor, child)?
             .ok_or("root_authorization_output_original_receipt_missing")?;
         Ok(Self {
             kind: "authorization-output",

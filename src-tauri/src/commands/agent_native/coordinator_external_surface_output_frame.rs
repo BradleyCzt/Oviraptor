@@ -49,7 +49,7 @@ impl NativeCoordinatorFrame {
         // proof, exact frozen GET/cap set and original message/terminal rows.
         // No rows are signed or adopted by this Root advisory consumer.
         let source =
-            crate::commands::external_surface_output_receipt::read_original_on(db, actor, child)?
+            crate::scanning::external_surface_output_receipt::read_original_on(db, actor, child)?
                 .ok_or("root_external_surface_output_original_receipt_missing")?;
         Ok(Self {
             kind: "external-surface-output",

@@ -5,7 +5,7 @@ fn source_direct_sdk_missing_original_owner_refuses_send_and_keeps_all_rows() {
         contract::AgentRole,
         multi_agent::{scheduler, source, supervisor::WorkerSupervisor},
     };
-    let (port, seen, stop) = crate::commands::agent_tests::spawn_endpoint(std::sync::Arc::new(
+    let (port, seen, stop) = crate::scanning::agent_tests::spawn_endpoint(std::sync::Arc::new(
         |_| {
             (200, "application/json", json!({
             "choices":[{"message":{"role":"assistant","content":"Old Source Root reached SDK"},"finish_reason":"stop"}],
@@ -58,12 +58,12 @@ fn source_direct_sdk_missing_original_owner_refuses_send_and_keeps_all_rows() {
     );
     crate::agent_runtime::multi_agent::lease::validate_coordinator_lease(&db, &actor).unwrap();
     crate::agent_runtime::multi_agent::attempts::require_live_for_run(&db, &child.run_id).unwrap();
-    let before = crate::commands::web_mode_test_rows(&db);
+    let before = crate::scanning::web_mode_test_rows(&db);
     let result =
         specialist_round_transport(&context, &actor, &child, SOURCE_ASSESSMENT_SYSTEM, input);
     let sent = seen.lock().unwrap().len();
     stop.store(true, std::sync::atomic::Ordering::SeqCst);
-    let unchanged = crate::commands::web_mode_test_rows(&db) == before;
+    let unchanged = crate::scanning::web_mode_test_rows(&db) == before;
     drop(supervisor);
     drop(db);
     fs::remove_dir_all(root).unwrap();

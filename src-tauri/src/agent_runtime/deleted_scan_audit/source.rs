@@ -67,7 +67,7 @@ pub(super) fn verify_closed(db: &Connection, actor: &CoordinatorLease) -> Result
     if crate::agent_runtime::web_mode::root::read(db, &actor.root_run_id)?.is_some() {
         return Err("deleted_audit_source_web_mode_conflict".into());
     }
-    crate::commands::verify_closed_source_for_deletion(db, actor)
+    crate::scanning::source_deletion::verify_closed_source_for_deletion(db, actor)
 }
 pub(super) fn require_idle(
     db: &Connection,

@@ -54,7 +54,7 @@ impl RootModelCall {
         let signature: Option<Vec<u8>> = db.query_row("SELECT signature FROM main.agent_root_model_cache_capture WHERE call_id=?1", [&self.id], |r|r.get(0)).optional().map_err(|e|e.to_string())?;
         let Some(signature) = signature else { return Ok(false); };
         verify_schema_source(db, include_str!("../../root_cache_capture_schema.sql"), "agent_root_model_cache_capture")?;
-        let proof = crate::commands::original_root_capture_mode(db, &self.owner.root)?;
+        let proof = crate::scanning::scope_contract::original_root_capture_mode(db, &self.owner.root)?;
         proof.verify_root_cache(&capture_message(self, invoice, cached == 1, proof.fact())?, &signature)?;
         Ok(cached == 1)
     }
@@ -84,7 +84,7 @@ impl RootModelCall {
         if crate::agent_runtime::web_mode::root::read(tx, &self.owner.root)?.is_none() {
             return self.verify(tx, "received", &original);
         }
-        let original_mode = crate::commands::original_root_capture_mode(tx, &self.owner.root)?;
+        let original_mode = crate::scanning::scope_contract::original_root_capture_mode(tx, &self.owner.root)?;
         let capture = FreshRootCacheCapture { message: capture_message(self, &original, cached, original_mode.fact())?, original: original_mode };
         let signature = capture.original.sign_fresh_root_cache(&capture)?;
         if tx.execute("INSERT INTO main.agent_root_model_cache_capture(call_id,signature) VALUES(?1,?2)", params![self.id,signature]).map_err(|e|e.to_string())? != 1 {

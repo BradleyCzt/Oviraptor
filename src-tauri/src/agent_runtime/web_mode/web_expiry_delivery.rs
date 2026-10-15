@@ -227,7 +227,7 @@ pub(crate) fn read_closed_original_on(
         return Err("web_expiry_delivery_role_invalid".into());
     }
     verify_schema_on(db)?;
-    let original = crate::commands::original_root_capture_mode(db, &actor.root_run_id)?;
+    let original = crate::scanning::scope_contract::original_root_capture_mode(db, &actor.root_run_id)?;
     let issuer = WithdrawalIssuer::from_verified_birth_on(db, &actor.root_run_id, original)?;
     issuer.require_actor(db, actor)?;
     budget::root::RootOwner::load_original(db, &actor.root_run_id)?

@@ -146,11 +146,11 @@ fn native_homogeneous_model_worker(
 
 fn native_homogeneous_review_worker(transport:&SpecialistTransportContext<'_>,actor:&crate::agent_runtime::multi_agent::lease::CoordinatorLease,id:&str,control:&std::sync::Mutex<()>)->Result<(),String>{
     let db=db::open(transport.db_path)?;
-    let (child,input)={let _guard=control.lock().map_err(|_|"homogeneous_control_poisoned")?;crate::commands::homogeneous_execution::claim_review(&db,actor,id)?};
+    let (child,input)={let _guard=control.lock().map_err(|_|"homogeneous_control_poisoned")?;crate::scanning::homogeneous_execution::claim_review(&db,actor,id)?};
     let expected=input.clone();
-    let result=specialist_round_transport_bound(transport,actor,&child,crate::commands::homogeneous_execution::REVIEW_SYSTEM,input,None,|tx|{
-        if crate::commands::homogeneous_execution::review_input(tx,actor,id)?!=expected {return Err("homogeneous_review_original_bundle_changed".into());}Ok(())
+    let result=specialist_round_transport_bound(transport,actor,&child,crate::scanning::homogeneous_execution::REVIEW_SYSTEM,input,None,|tx|{
+        if crate::scanning::homogeneous_execution::review_input(tx,actor,id)?!=expected {return Err("homogeneous_review_original_bundle_changed".into());}Ok(())
     });
     let _guard=control.lock().map_err(|_|"homogeneous_control_poisoned")?;
-    crate::commands::homogeneous_execution::deliver_review(&db,actor,&child).map_err(|e|format!("homogeneous_review_reconciliation_required:{};{e}",result.err().unwrap_or_default()))
+    crate::scanning::homogeneous_execution::deliver_review(&db,actor,&child).map_err(|e|format!("homogeneous_review_reconciliation_required:{};{e}",result.err().unwrap_or_default()))
 }

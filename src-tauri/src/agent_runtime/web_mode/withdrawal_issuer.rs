@@ -15,7 +15,7 @@ pub(crate) struct WithdrawalIssuer {
     proof: VerifiedMode,
 }
 impl WithdrawalIssuer {
-    pub(crate) fn sign_fresh_homogeneous_execution_fact(&self,fresh:&crate::commands::homogeneous_execution::FreshFact)->Result<Vec<u8>,String>{
+    pub(crate) fn sign_fresh_homogeneous_execution_fact(&self,fresh:&crate::scanning::homogeneous_execution::FreshFact)->Result<Vec<u8>,String>{
         let encoded=fresh.encoded_for_original(self.proof.fact())?;
         let value:serde_json::Value=serde_json::from_slice(&encoded).map_err(|_|"homogeneous_execution_fact_invalid")?;
         if value["rootRunId"]!=self.root {return Err("homogeneous_execution_fact_root_changed".into());}Ok(self.proof.sign_private(&encoded))
@@ -75,31 +75,31 @@ impl WithdrawalIssuer {
         self.proof.verify_private(encoded, signature)
             .map_err(|_| "mapper_loop_final_signature_invalid".into())
     }
-    pub(crate) fn sign_fresh_business_logic_dispatch_receipt(&self, fresh: &crate::commands::business_logic_dispatch_receipt::FreshBusinessLogicDispatchReceipt) -> Result<Vec<u8>, String> {
+    pub(crate) fn sign_fresh_business_logic_dispatch_receipt(&self, fresh: &crate::scanning::business_logic_dispatch_receipt::FreshBusinessLogicDispatchReceipt) -> Result<Vec<u8>, String> {
         Ok(self.proof.sign_private(&fresh.encoded_for_original(self.proof.fact())?))
     }
     pub(crate) fn verify_business_logic_dispatch_receipt(&self, encoded: &[u8], signature: &[u8]) -> Result<(), String> {
         self.proof.verify_private(encoded, signature).map_err(|_| "business_logic_dispatch_signature_invalid".into())
     }
-    pub(crate) fn sign_fresh_business_logic_output_receipt(&self, fresh: &crate::commands::business_logic_output_receipt::FreshBusinessLogicOutputReceipt) -> Result<Vec<u8>, String> {
+    pub(crate) fn sign_fresh_business_logic_output_receipt(&self, fresh: &crate::scanning::business_logic_output_receipt::FreshBusinessLogicOutputReceipt) -> Result<Vec<u8>, String> {
         Ok(self.proof.sign_private(&fresh.encoded_for_original(self.proof.fact())?))
     }
     pub(crate) fn verify_business_logic_output_receipt(&self, encoded: &[u8], signature: &[u8]) -> Result<(), String> {
         self.proof.verify_private(encoded, signature).map_err(|_| "business_logic_output_signature_invalid".into())
     }
-    pub(crate) fn sign_fresh_external_surface_output_receipt(&self, fresh: &crate::commands::external_surface_output_receipt::FreshExternalSurfaceOutputReceipt) -> Result<Vec<u8>, String> {
+    pub(crate) fn sign_fresh_external_surface_output_receipt(&self, fresh: &crate::scanning::external_surface_output_receipt::FreshExternalSurfaceOutputReceipt) -> Result<Vec<u8>, String> {
         Ok(self.proof.sign_private(&fresh.encoded_for_original(self.proof.fact())?))
     }
     pub(crate) fn verify_external_surface_output_receipt(&self, encoded: &[u8], signature: &[u8]) -> Result<(), String> {
         self.proof.verify_private(encoded, signature).map_err(|_| "external_surface_output_signature_invalid".into())
     }
-    pub(crate) fn sign_fresh_public_surface_response_receipt(&self, fresh: &crate::commands::external_surface_response_receipt::FreshPublicSurfaceResponse) -> Result<Vec<u8>, String> {
+    pub(crate) fn sign_fresh_public_surface_response_receipt(&self, fresh: &crate::scanning::external_surface_response_receipt::FreshPublicSurfaceResponse) -> Result<Vec<u8>, String> {
         Ok(self.proof.sign_private(&fresh.encoded_for_original(self.proof.fact())?))
     }
     pub(crate) fn verify_public_surface_response_receipt(&self, encoded: &[u8], signature: &[u8]) -> Result<(), String> {
         self.proof.verify_private(encoded, signature).map_err(|_| "public_surface_response_signature_invalid".into())
     }
-    pub(crate) fn sign_fresh_authorization_output_receipt(&self, fresh: &crate::commands::authorization_output_receipt::FreshAuthorizationOutputReceipt) -> Result<Vec<u8>, String> {
+    pub(crate) fn sign_fresh_authorization_output_receipt(&self, fresh: &crate::scanning::authorization_output_receipt::FreshAuthorizationOutputReceipt) -> Result<Vec<u8>, String> {
         Ok(self.proof.sign_private(&fresh.encoded_for_original(self.proof.fact())?))
     }
     pub(crate) fn verify_authorization_output_receipt(&self, encoded: &[u8], signature: &[u8]) -> Result<(), String> {
@@ -202,7 +202,7 @@ impl WithdrawalIssuer {
     pub(crate) fn issue_authorization_side_on(
         &self,
         db: &Connection,
-        fresh: &crate::commands::authorization_side::FreshAuthorizationSideReceipt,
+        fresh: &crate::scanning::authorization_side::FreshAuthorizationSideReceipt,
     ) -> Result<(), String> {
         let (actor, raw) = fresh.require_on(db)?;
         self.require_actor(db, actor)?;

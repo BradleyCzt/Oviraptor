@@ -141,7 +141,7 @@ pub(crate) fn read_final_original_on(
     if text != canonical || id != store::stable_hash(&text) {
         return Err("mapper_loop_final_hash_changed".into());
     }
-    let original = crate::commands::original_root_capture_mode(db, &actor.root_run_id)?;
+    let original = crate::scanning::scope_contract::original_root_capture_mode(db, &actor.root_run_id)?;
     let issuer = WithdrawalIssuer::from_verified_birth_on(db, &actor.root_run_id, original)?;
     issuer.require_actor(db, actor)?;
     issuer.verify_mapper_loop_final_receipt(&encoded(&value)?, &signature)?;

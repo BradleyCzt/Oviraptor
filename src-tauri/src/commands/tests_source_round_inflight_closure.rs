@@ -8,7 +8,7 @@ fn source_round_inflight_boundary(blocked:usize) {
     use std::sync::{Arc,Mutex,mpsc};
     let (arrive_tx,arrive)=mpsc::channel();let (release_tx,release)=mpsc::channel();let release=Mutex::new(release);
     let calls=std::sync::atomic::AtomicUsize::new(0);
-    let (port,seen,_stop)=crate::commands::agent_tests::spawn_endpoint(Arc::new(move |_| {
+    let (port,seen,_stop)=crate::scanning::agent_tests::spawn_endpoint(Arc::new(move |_| {
         if calls.fetch_add(1,std::sync::atomic::Ordering::SeqCst)+1<blocked {
             return (200,"application/json",source_round_inflight_reply("repo.inventory",json!({})));
         }
@@ -76,11 +76,11 @@ struct SourceRoundClosureFixture {
     actor:crate::agent_runtime::multi_agent::lease::CoordinatorLease,
     child:crate::agent_runtime::multi_agent::scheduler::ScheduledChild,
     parent:crate::agent_runtime::multi_agent::supervisor::WorkerSupervisor,
-    seen:crate::commands::agent_tests::Seen,
+    seen:crate::scanning::agent_tests::Seen,
 }
 fn source_round_inflight_finished(paid:bool)->SourceRoundClosureFixture {
     use crate::agent_runtime::{contract::{AgentLane,AgentRole},multi_agent::{scheduler,source,supervisor::WorkerSupervisor}};
-    let (port,seen,_stop)=crate::commands::agent_tests::spawn_endpoint(std::sync::Arc::new(move |_| {
+    let (port,seen,_stop)=crate::scanning::agent_tests::spawn_endpoint(std::sync::Arc::new(move |_| {
         if paid {(200,"application/json",source_round_inflight_reply("assignment.finish",json!({"summary":"actual scoped finish","gaps":[]})))}
         else {(503,"application/json",json!({"error":{"message":"source fixture unavailable"}}).to_string())}
     }));

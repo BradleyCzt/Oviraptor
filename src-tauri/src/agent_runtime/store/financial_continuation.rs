@@ -3,7 +3,7 @@ use super::*;
 
 pub(crate) fn insert_financial_continuation_root_in<T>(
     tx: &Transaction<'_>,
-    approval: &crate::commands::FinancialContinuationAuthorization,
+    approval: &crate::scanning::financial_continuation::FinancialContinuationAuthorization,
     publish: impl FnOnce(&NewlyInsertedNativeRoot<'_, '_>) -> Result<T, String>,
 ) -> Result<T, String> {
     approval.verified_financial_source_on(tx)?;

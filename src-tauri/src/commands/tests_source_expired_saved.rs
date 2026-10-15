@@ -21,8 +21,8 @@ fn source_expired_saved_reviewers_keep_original_worker_and_complete_local_public
                     params![lease.root_run_id,if coverage {"source_coverage_ready"} else {"source_candidates_ready"}],
                     |r|Ok(ScheduledChild {assignment_id:r.get(0)?,run_id:r.get(1)?,role:AgentRole::EvidenceReviewer})).unwrap();
                 let original =
-                    crate::commands::agent_tests::restore_expired_saved_worker(db, &child);
-                crate::commands::agent_tests::forbid_expired_saved_execution(db);
+                    crate::scanning::agent_tests::restore_expired_saved_worker(db, &child);
+                crate::scanning::agent_tests::forbid_expired_saved_execution(db);
                 let database = root.join("oviraptor.sqlite3");
                 let work = root.join("attempt-0001");
                 let (model, runtime, _) =
@@ -60,7 +60,7 @@ fn source_expired_saved_reviewers_keep_original_worker_and_complete_local_public
                 tx.commit().unwrap();
                 let payload = complete()?;
                 assert_eq!(
-                    crate::commands::agent_tests::expired_saved_worker_row(db, &child.run_id),
+                    crate::scanning::agent_tests::expired_saved_worker_row(db, &child.run_id),
                     original
                 );
                 assert_eq!(
@@ -105,7 +105,7 @@ fn source_expired_saved_final_decision_faults_roll_back_all_local_writes() {
                 let child = db.query_row("SELECT id,child_run_id FROM agent_assignments WHERE coordinator_run_id=?1 AND trigger_code=?2",
                     params![lease.root_run_id, if coverage {"source_coverage_ready"} else {"source_candidates_ready"}],
                     |r| Ok(ScheduledChild { assignment_id:r.get(0)?, run_id:r.get(1)?, role:AgentRole::EvidenceReviewer })).unwrap();
-                crate::commands::agent_tests::restore_expired_saved_worker(db, &child);
+                crate::scanning::agent_tests::restore_expired_saved_worker(db, &child);
                 let database = root.join("oviraptor.sqlite3");
                 let work = root.join("attempt-0001");
                 let (model, runtime, _) =

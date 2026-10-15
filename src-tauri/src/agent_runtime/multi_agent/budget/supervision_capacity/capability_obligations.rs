@@ -121,9 +121,9 @@ pub(super) fn pending_on(db: &Connection, actor: &CoordinatorLease) -> Result<i6
             // assessment can close this worker's obligation. State alone is
             // never enough; normal running/completed workers must not enter
             // the expiry reader or adopt an unrelated withdrawal cause.
-            crate::commands::native_coordinator_web_expiry_publication_replay_on(db, actor, &child)?
+            crate::scanning::publication_replay::native_coordinator_web_expiry_publication_replay_on(db, actor, &child)?
         } else {
-            crate::commands::native_coordinator_capability_transition_publication_replay_on(
+            crate::scanning::publication_replay::native_coordinator_capability_transition_publication_replay_on(
                 db, actor, &child,
             )?
         };

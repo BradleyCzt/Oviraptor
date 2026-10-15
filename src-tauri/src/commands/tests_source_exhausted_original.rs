@@ -48,7 +48,7 @@ fn source_exhausted_original() -> SourceExhaustedOriginal {
     };
     let calls = Arc::new(AtomicUsize::new(0));
     let observed = calls.clone();
-    let (port, _, stop) = crate::commands::agent_tests::spawn_endpoint(Arc::new(move |_| {
+    let (port, _, stop) = crate::scanning::agent_tests::spawn_endpoint(Arc::new(move |_| {
         let number = observed.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
         (200,"application/json",json!({"choices":[{"message":{"role":"assistant","tool_calls":[{"id":format!("original-exhausted-{number}"),
             "type":"function","function":{"name":"repo.inventory","arguments":"{}"}}]},"finish_reason":"tool_calls"}],

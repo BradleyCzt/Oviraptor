@@ -6,7 +6,7 @@ fn source_financial_exit_actual_sdk_stop_preserves_original_fee_and_only_observe
         let (arrive, arrived) = mpsc::channel();
         let (release, released) = mpsc::channel();
         let released = Arc::new(Mutex::new(released));
-        let (port, seen, stop) = crate::commands::agent_tests::spawn_endpoint(Arc::new(
+        let (port, seen, stop) = crate::scanning::agent_tests::spawn_endpoint(Arc::new(
             move |_| {
                 arrive.send(()).unwrap();
                 let _ = released

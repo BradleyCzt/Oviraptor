@@ -27,7 +27,7 @@ fn lease_paid_kill_and_recover(f: &mut RootTickFixture, child: &crate::agent_run
     root_tick_write_probe(f,&input);
     drop(f.parent.take());
     let mut process = std::process::Command::new(std::env::current_exe().unwrap())
-        .args(["--exact","commands::agent_tests::lease_paid_process_probe","--nocapture"])
+        .args(["--exact","scanning::agent_tests::lease_paid_process_probe","--nocapture"])
         .env("OVIRAPTOR_LEASE_PAID_INPUT",&input)
         .env("OVIRAPTOR_LEASE_PAID_CHILD",&child.run_id)
         .env("OVIRAPTOR_ROOT_TICK_PAID_READY_FILE",&ready)

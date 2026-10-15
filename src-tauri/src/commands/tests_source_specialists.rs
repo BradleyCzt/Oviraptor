@@ -349,7 +349,7 @@ fn source_specialists_unreviewed_pipeline_cannot_report_ci_passed() {
 #[test]
 fn source_specialists_real_transport_delivers_once_and_refuses_unbound_model_input() {
     use crate::agent_runtime::{contract::AgentRole,multi_agent::{source,scheduler}};
-    let (port,seen,stop)=crate::commands::agent_tests::spawn_endpoint(std::sync::Arc::new(|_|(200,"application/json",
+    let (port,seen,stop)=crate::scanning::agent_tests::spawn_endpoint(std::sync::Arc::new(|_|(200,"application/json",
         json!({"id":"source-loopback","choices":[{"message":{"role":"assistant","content":"source assessment recorded"},"finish_reason":"stop"}],
             "usage":{"prompt_tokens":10,"completion_tokens":10,"total_tokens":20}}).to_string())));
     let environment=source_specialist_test_environment(port);

@@ -118,9 +118,9 @@
     },
     "src-tauri/src/commands/agent_tests_backend_residual_runtime.rs": {
       "category": "fixture",
-      "reason": "Reviewed the new test-only runtime fixture. Its four retired-CLI literals create an inert fake PATH executable, inspect its untouched sentinel, and assert resolution without invoking it. A different neutral executable is the positive launch control; actual Native Web and source branches must never touch the fake CLI. The egress test now runs under an isolated child process, retaining its positive loopback-proxy control and Native/importer negative assertions without changing the parent process proxy environment. No production launcher or backend selection was added.",
+      "reason": "Reviewed the new test-only runtime fixture. Its four retired-CLI literals create an inert fake PATH executable, inspect its untouched sentinel, and assert resolution without invoking it. A different neutral executable is the positive launch control; actual Native Web and source branches must never touch the fake CLI. The egress test now runs under an isolated child process, retaining its positive loopback-proxy control and Native/importer negative assertions without changing the parent process proxy environment. No production launcher or backend selection was added. Phase 6 review against 9085a9c: the complete diff only changes two exact isolated child-test selectors from commands::agent_tests to scanning::agent_tests. Child completion receipts still reject a zero-selected-test exit; the inert CLI trap, neutral launch positive control, Web/source branches, proxy isolation and zero blocked-host egress assertions are unchanged. This remains a fixture-only context refresh, not an active-runtime exemption.",
       "evidence": {
-        "sha256": "5a5e3fe52d2ddcc443f966d66ee0f5555c8e839bfb361f0b194841fe67a286d1",
+        "sha256": "b0e611e5bff7c129dac1018ee4585feb37b90a7120a55e4ce05bedf48febf2cf",
         "literalOccurrences": 4,
         "pathMatch": false
       }
@@ -201,9 +201,9 @@
     },
     "src-tauri/src/commands/tests_native_routing.rs": {
       "category": "fixture",
-      "reason": "Reviewed test-only routing, source plan/CI projection and retired-backend rejection fixtures. Unsupported aliases now reject the complete matrix instead of remaining readable; a separate neutral tombstone fixture retains dependency refusal coverage. Existing source publication, missing-tool, CI and snapshot permission guards remain; four historical literals are negative fixtures only.",
+      "reason": "Reviewed test-only routing, source plan/CI projection and retired-backend rejection fixtures. Unsupported aliases now reject the complete matrix instead of remaining readable; a separate neutral tombstone fixture retains dependency refusal coverage. Existing source publication, missing-tool, CI and snapshot permission guards remain; four historical literals are negative fixtures only. Phase 6 review against 9085a9c: the complete diff only redirects two test_context references from crate::commands::agent_tests to crate::scanning::agent_tests. All routing inputs, Native-only rejection cases, snapshot/tool admission checks and assertions are byte-identical after that exact namespace substitution. Four historical markers remain unchanged negative fixtures; no runtime selection or compatibility is added.",
       "evidence": {
-        "sha256": "9286e7610f39a6084ac6380825f5b0095feed6c029b9660da4a84967167a4a4b",
+        "sha256": "465b58cb256284b64c840c23c5c141b7ae223aa9b7965912900e39948060e2c6",
         "literalOccurrences": 4,
         "pathMatch": false
       }
@@ -367,9 +367,9 @@
     },
     "src-tauri/src/commands/tests_retired_import_commands.rs": {
       "category": "fixture",
-      "reason": "Static negative guard rejects registration of retired implicit import commands and the deleted compatibility helper include. The old directory-walker literal must remain absent from ingestion; no runtime or compatibility is added.",
+      "reason": "Static negative guard rejects registration of retired implicit import commands and the deleted compatibility helper include. The old directory-walker literal must remain absent from ingestion; no runtime or compatibility is added. Phase 6 review against 9085a9c: the static guard now inspects the real command-owner index together with Scanning, requires live owner/source anchors, parses the actual Tauri generate_handler table, and checks 289 unique qualified terminal names plus three existing live-command controls. Retired importer terminal names are refused regardless of owner namespace. Both deleted-helper include checks and all six ingestion-root negative checks are preserved exactly. The sole retired directory literal is unchanged test data; the guard gains no runtime importer, compatibility or scope exemption.",
       "evidence": {
-        "sha256": "417ab364b5a205bf02d154ed6adcfe4610e401138ac73033efdfe43ecc9330e6",
+        "sha256": "42502c0b6cb7bc2a6c4d9183e0670f680722d8dc866f8d4d4e0f8ecf9d4d4fbf",
         "literalOccurrences": 1,
         "pathMatch": false
       }

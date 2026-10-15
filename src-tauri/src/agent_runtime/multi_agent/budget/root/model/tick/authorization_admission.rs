@@ -125,7 +125,7 @@ pub(super) fn verify_on(
     // foreign role seal cannot satisfy the other phase's one-shot proof.
     let (source_id, message_id, source_fact) = match role {
         AgentRole::Authorization => {
-            let source = crate::commands::authorization_output_receipt::read_original_on(
+            let source = crate::scanning::authorization_output_receipt::read_original_on(
                 db, &actor, &child,
             )?
             .ok_or("root_authorization_admission_source_missing")?;
@@ -136,7 +136,7 @@ pub(super) fn verify_on(
             )
         }
         AgentRole::ExternalSurface => {
-            let source = crate::commands::external_surface_output_receipt::read_original_on(
+            let source = crate::scanning::external_surface_output_receipt::read_original_on(
                 db, &actor, &child,
             )?
             .ok_or("root_external_surface_admission_source_missing")?;
@@ -149,7 +149,7 @@ pub(super) fn verify_on(
         AgentRole::BusinessLogic => {
             // The private reader verifies the exact original v13 birth and all
             // three rules, frozen input, known SDK fees, zero target and closure.
-            let source = crate::commands::business_logic_output_receipt::read_original_on(
+            let source = crate::scanning::business_logic_output_receipt::read_original_on(
                 db, &actor, &child,
             )?
             .ok_or("root_business_logic_admission_source_missing")?;
