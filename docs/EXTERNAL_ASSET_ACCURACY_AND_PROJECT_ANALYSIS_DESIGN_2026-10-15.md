@@ -295,7 +295,7 @@ flowchart LR
 3. 默认“项目有多少资产”指**全部未回收的原始成员**，包含尚未回收的 rejected/not_applicable；并独立给出包含回收的项目成员、未回收、回收及未知回收状态、筛选后成员。人工 rejected、not_applicable、ownership excluded、回收是不同轴，可能交叠，不能相加冒充互斥总量；页面隔离通常同时写 rejected 与回收，因此默认已排除该类。
 4. 人工决定、探测结果等分组使用固定白名单及未知/未分类兜底；每个互斥维度须可核对到相同筛选分母。空值、未知枚举、历史无探测不补造成可达或已确认。独立轴/重叠指标明确标记，不能把9+6+3当作20条全部分布。返回 `asOf` 和本次读事务范围；它描述已保存库存，不证明现在在线，也不是跨请求持久快照。
 5. 窄严格 filter DTO 复用资产列表的合法过滤及状态口径。**本轮有意把 Chat 的旧 host/title 字面搜索升级为资产列表同一八字段参数化 LIKE**（project name、company、host、link、ip、domain、title、asset_key，保留 `%`/`_` 通配规则）；工具说明、结果 `searchSemantics` 与回归须写明，不能伪称零语义变化。默认聊天统计不继承 UI 的 review/browser_review 队列或响应折叠。
-6. `assets_search` 同时返回匹配 `total`、`returned`、`limit`、`hasMore`、明确 filters/scope/排序及 `asOf`，items 与 total 在同一读快照。结果继续最多20条；稳定ID游标若提供，须绑定项目、规范化完整筛选及真实排序，跨项目/筛选变更/非法token均拒绝。游标不能承诺跨调用旧快照仍存在。不得靠增大limit或让模型遍历分页回答总数。
+6. `assets_search` 同时返回匹配 `total`、`returned`、`limit`、`hasMore`、明确 filters/scope/排序及 `asOf`，items 与 total 在同一读快照。 Chat 搜索和单条读取继续只返回未回收内容；新统计可提供回收聚合数量，不据此开放回收资产正文/备注或引用。模型要求 trash/all 行读取时应拒绝，不静默忽略该参数。结果继续最多20条；稳定ID游标若提供，须绑定项目、规范化完整筛选及真实排序，跨项目/筛选变更/非法token均拒绝。游标不能承诺跨调用旧快照仍存在。不得靠增大limit或让模型遍历分页回答总数。
 7. 系统和工具说明要求数量问题优先使用精确统计；禁止用ID最大最小差推总数，样本不等于全量；权限不足或统计失败应明说，不能用0代替未知。所有返回 scalar 有长度界限、无raw body/secret，保留32,768字节完整JSON守卫和原轮次/调用预算。
 8. UI `total` 开启折叠时是展示组数，`memberTotal` 是完整筛选原始URL数，`summary.all` 刻意忽略人工决定分组。明确这三个分母，不能直接与默认全库存数字比较。读取中、失败、旧筛选快照、真实零须区分；空探测结果显示未知。保留现有默认队列、查询键和配置默认值。
 
