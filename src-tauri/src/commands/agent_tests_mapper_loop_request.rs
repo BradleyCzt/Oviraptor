@@ -184,3 +184,179 @@ fn mapper_loop_request_actor_artifact_and_observation_limit_drift_refuse_without
     );
     assert_eq!(super::tests::application_table_snapshot(&tx), before);
 }
+
+#[test]
+fn mapper_loop_request_current_provider_options_and_legacy_wire_preserve_original_fact_readonly() {
+    use crate::agent_runtime::{
+        multi_agent::budget::model::mapper_loop_contract::FrozenMapperLoopInput, store,
+    };
+    let (f, _, seen) = mapper_loop_allocation_fixture(false, 20);
+    let db = db::open(&f.context.db_path).unwrap();
+    let tx = db.unchecked_transaction().unwrap();
+    let before = super::tests::application_table_snapshot(&tx);
+    let changes = tx.total_changes();
+    for (model, options) in [
+        ("ordinary-mapper-model", json!({})),
+        ("deepseek-v4-flash", json!({"thinking":{"type":"disabled"}})),
+        ("deepseek-v4-pro", json!({"thinking":{"type":"disabled"}})),
+        ("deepseek-flash", json!({"thinking":{"type":"disabled"}})),
+    ] {
+        let mut environment = f.context.environment.clone();
+        environment.llm = model.into();
+        let bounds = super::mapper_loop_request::VerifiedMapperLoopRequestBounds::capture_on(
+            &tx,
+            &f.actor,
+            &f.context.target_dir,
+            mapper_request_inventory(&tx, &f),
+            &environment,
+            f.context.proxy.as_deref(),
+        )
+        .unwrap();
+        assert_eq!(bounds.profile().model, model);
+        assert_eq!(bounds.profile().max_output_tokens, Some(512));
+        assert_eq!(bounds.fact()["request"].as_object().unwrap().len(), 10);
+        assert_eq!(bounds.fact()["request"]["providerOptions"], options);
+        assert_eq!(bounds.fact()["request"]["maxOutputTokens"], 512);
+        assert_eq!(bounds.fact()["maxRounds"], 2);
+        assert_eq!(bounds.fact()["maxLookupCalls"], 1);
+        assert!(bounds.first_estimate() + bounds.second_estimate() <= 8000);
+
+        let current_bytes = serde_json::to_vec(bounds.fact()).unwrap();
+        let current_hash = store::stable_hash(&bounds.fact().to_string());
+        let current =
+            FrozenMapperLoopInput::from_frozen_wire_on(&tx, &f.actor, bounds.fact()).unwrap();
+        current.require_on(&tx, &f.actor).unwrap();
+        assert_eq!(current.fact(), bounds.fact());
+        assert_eq!(serde_json::to_vec(current.fact()).unwrap(), current_bytes);
+        assert_eq!(current.hash(), current_hash);
+        assert_eq!(
+            current.reserved_tokens(),
+            bounds.first_estimate() + bounds.second_estimate()
+        );
+
+        // Historical nine-field facts are read as saved. Compatibility cannot
+        // synthesize provider options or re-hash it as a ten-field record.
+        let mut legacy_fact = bounds.fact().clone();
+        assert_eq!(
+            legacy_fact["request"]
+                .as_object_mut()
+                .unwrap()
+                .remove("providerOptions"),
+            Some(options)
+        );
+        assert_eq!(legacy_fact["request"].as_object().unwrap().len(), 9);
+        let legacy_bytes = serde_json::to_vec(&legacy_fact).unwrap();
+        let legacy_hash = store::stable_hash(&legacy_fact.to_string());
+        assert_ne!(legacy_hash, current_hash);
+        let legacy =
+            FrozenMapperLoopInput::from_frozen_wire_on(&tx, &f.actor, &legacy_fact).unwrap();
+        for _ in 0..2 {
+            legacy.require_on(&tx, &f.actor).unwrap();
+            assert_eq!(legacy.fact(), &legacy_fact);
+            assert_eq!(serde_json::to_vec(legacy.fact()).unwrap(), legacy_bytes);
+            assert!(legacy.fact()["request"].get("providerOptions").is_none());
+            assert_eq!(legacy.hash(), legacy_hash);
+            assert_eq!(legacy.reserved_tokens(), current.reserved_tokens());
+            assert_eq!(super::tests::application_table_snapshot(&tx), before);
+            assert_eq!(tx.total_changes(), changes);
+        }
+    }
+    assert_eq!(super::tests::application_table_snapshot(&tx), before);
+    assert_eq!(
+        seen.lock().unwrap().len(),
+        0,
+        "wire readers cannot send an SDK request"
+    );
+}
+
+#[test]
+fn mapper_loop_request_provider_options_pollution_and_nonexact_shapes_refuse_readonly() {
+    use crate::agent_runtime::multi_agent::budget::model::mapper_loop_contract::FrozenMapperLoopInput;
+    let (f, _, seen) = mapper_loop_allocation_fixture(false, 20);
+    let db = db::open(&f.context.db_path).unwrap();
+    let tx = db.unchecked_transaction().unwrap();
+    let before = super::tests::application_table_snapshot(&tx);
+    let changes = tx.total_changes();
+    for model in ["ordinary-mapper-model", "deepseek-v4-flash"] {
+        let mut environment = f.context.environment.clone();
+        environment.llm = model.into();
+        let bounds = super::mapper_loop_request::VerifiedMapperLoopRequestBounds::capture_on(
+            &tx,
+            &f.actor,
+            &f.context.target_dir,
+            mapper_request_inventory(&tx, &f),
+            &environment,
+            f.context.proxy.as_deref(),
+        )
+        .unwrap();
+        FrozenMapperLoopInput::from_frozen_wire_on(&tx, &f.actor, bounds.fact()).unwrap();
+        let mut invalid = Vec::new();
+        for (name, options) in [
+            ("null", JsonValue::Null),
+            ("array", json!([])),
+            ("unknown", json!({"unrecognizedOption":true})),
+            (
+                "extra",
+                json!({"thinking":{"type":"disabled","extra":true}}),
+            ),
+            ("enabled", json!({"thinking":{"type":"enabled"}})),
+            (
+                "wrong-model-options",
+                if model == "ordinary-mapper-model" {
+                    json!({"thinking":{"type":"disabled"}})
+                } else {
+                    json!({})
+                },
+            ),
+        ] {
+            let mut fact = bounds.fact().clone();
+            fact["request"]["providerOptions"] = options;
+            invalid.push((name, fact));
+        }
+        let mut wrong_model = bounds.fact().clone();
+        let other_model = if model == "ordinary-mapper-model" {
+            "deepseek-v4-flash"
+        } else {
+            "ordinary-mapper-model"
+        };
+        wrong_model["request"]["model"] = json!(other_model);
+        wrong_model["configurationBinding"]["model"] = json!(other_model);
+        invalid.push(("wrong-frozen-model", wrong_model));
+        let mut extra_field = bounds.fact().clone();
+        extra_field["request"]["unknownField"] = json!(true);
+        invalid.push(("extra-request-field", extra_field));
+        let mut unknown_legacy_field = bounds.fact().clone();
+        unknown_legacy_field["request"]
+            .as_object_mut()
+            .unwrap()
+            .remove("providerOptions");
+        unknown_legacy_field["request"]["unknownField"] = json!(true);
+        invalid.push(("unknown-tenth-field", unknown_legacy_field));
+        let mut missing_field = bounds.fact().clone();
+        missing_field["request"]
+            .as_object_mut()
+            .unwrap()
+            .remove("maxContextTokens");
+        invalid.push(("missing-required-field", missing_field));
+        for (name, fact) in invalid {
+            assert_eq!(fact["request"]["maxOutputTokens"], 512);
+            assert_eq!(fact["maxRounds"], 2);
+            assert_eq!(fact["maxLookupCalls"], 1);
+            assert!(fact["totalEstimatedTokens"].as_i64().unwrap() <= 8000);
+            assert!(
+                matches!(FrozenMapperLoopInput::from_frozen_wire_on(&tx, &f.actor, &fact), Err(error) if error == "mapper_loop_frozen_wire_invalid"),
+                "{model}: {name} must be rejected by the frozen request contract"
+            );
+            assert_eq!(
+                super::tests::application_table_snapshot(&tx),
+                before,
+                "{model}: {name}"
+            );
+            assert_eq!(tx.total_changes(), changes, "{model}: {name} cannot write even transiently");
+        }
+        bounds
+            .require_on(&tx, &f.actor, &environment, f.context.proxy.as_deref())
+            .unwrap();
+    }
+    assert_eq!(seen.lock().unwrap().len(), 0);
+}

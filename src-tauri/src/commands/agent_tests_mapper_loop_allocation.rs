@@ -326,3 +326,164 @@ fn mapper_loop_allocation_original_v9_and_v14_cannot_use_new_issuer() {
     assert_eq!(super::tests::application_table_snapshot(&db), before);
     assert_eq!(old.h.model_seen.lock().unwrap().len(), requests);
 }
+
+// Cold damage is confined to this test's disposable original database. Keep
+// its path, owner and every invoice; only replace the frozen task JSON, with
+// the original schema guards restored before any production reader runs.
+fn mapper_loop_provider_wire_replace_fixture_task(
+    db: &rusqlite::Connection,
+    assignment: &str,
+    task: &JsonValue,
+) {
+    assert!(db.is_autocommit());
+    let triggers = db
+        .prepare("SELECT name,sql FROM main.sqlite_master WHERE type='trigger' AND tbl_name='agent_assignments' ORDER BY name")
+        .unwrap()
+        .query_map([], |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)))
+        .unwrap()
+        .collect::<rusqlite::Result<Vec<_>>>()
+        .unwrap();
+    let tx = db.unchecked_transaction().unwrap();
+    for (name, _) in &triggers {
+        tx.execute_batch(&format!("DROP TRIGGER \"{}\"", name.replace('"', "\"\"")))
+            .unwrap();
+    }
+    assert_eq!(
+        tx.execute(
+            "UPDATE agent_assignments SET task_slice_json=?2 WHERE id=?1",
+            params![assignment, task.to_string()],
+        )
+        .unwrap(),
+        1,
+        "cold damage must affect exactly the original Mapper task"
+    );
+    for (_, ddl) in &triggers {
+        tx.execute_batch(ddl).unwrap();
+    }
+    tx.commit().unwrap();
+    let restored = db
+        .prepare("SELECT name,sql FROM main.sqlite_master WHERE type='trigger' AND tbl_name='agent_assignments' ORDER BY name")
+        .unwrap()
+        .query_map([], |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)))
+        .unwrap()
+        .collect::<rusqlite::Result<Vec<_>>>()
+        .unwrap();
+    assert_eq!(restored, triggers);
+}
+
+#[test]
+fn mapper_loop_allocation_legacy_read_does_not_authorize_downgraded_live_request() {
+    use crate::agent_runtime::{
+        multi_agent::{budget, specialist::mapper_loop},
+        store,
+    };
+    let (f, decision, seen) = mapper_loop_allocation_fixture(true, 20);
+    let decision = decision.unwrap();
+    let bounds = mapper_loop_allocation_bounds(&f);
+    assert_eq!(bounds.fact()["request"].as_object().unwrap().len(), 10);
+    assert_eq!(bounds.fact()["request"]["maxOutputTokens"], 512);
+    assert_eq!(bounds.fact()["maxRounds"], 2);
+    assert_eq!(bounds.fact()["maxLookupCalls"], 1);
+    let db = db::open(&f.context.db_path).unwrap();
+    let child = native_coordinator_prepare_mapper_loop_allocated(
+        &db,
+        &f.context,
+        &f.actor,
+        &decision,
+        &bootstrap_mapper_task(&f),
+        &mapper_loop_original_basis(&decision),
+        &bounds,
+    )
+    .unwrap();
+    let original = super::tests::application_table_snapshot(&db);
+    let raw: String = db
+        .query_row(
+            "SELECT task_slice_json FROM agent_assignments WHERE id=?1",
+            [&child.assignment_id],
+            |row| row.get(0),
+        )
+        .unwrap();
+    let original_task: JsonValue = serde_json::from_str(&raw).unwrap();
+    assert_eq!(original_task.to_string(), raw);
+    let tx = db.unchecked_transaction().unwrap();
+    let grant =
+        budget::model::original_mapper_loop_grant_on(&tx, &f.actor, &child.assignment_id).unwrap();
+    assert_eq!(grant.input().fact(), bounds.fact());
+    assert_eq!(grant.requests(), 2);
+    let tokens = grant.tokens();
+    assert!(tokens <= 8000);
+    drop(tx);
+
+    let mut legacy_task = original_task.clone();
+    assert!(legacy_task["mapperLoop"]["request"]
+        .as_object_mut()
+        .unwrap()
+        .remove("providerOptions")
+        .is_some());
+    assert_eq!(
+        legacy_task["mapperLoop"]["request"]
+            .as_object()
+            .unwrap()
+            .len(),
+        9
+    );
+    legacy_task["mapperLoopHash"] =
+        json!(store::stable_hash(&legacy_task["mapperLoop"].to_string()));
+    let mut restored_task = legacy_task.clone();
+    restored_task["mapperLoop"] = original_task["mapperLoop"].clone();
+    restored_task["mapperLoopHash"] = original_task["mapperLoopHash"].clone();
+    assert_eq!(
+        restored_task, original_task,
+        "only the frozen wire and its hash may change"
+    );
+    mapper_loop_provider_wire_replace_fixture_task(&db, &child.assignment_id, &legacy_task);
+    let before = super::tests::application_table_snapshot(&db);
+    let calls = seen.lock().unwrap().len();
+    assert_eq!(calls, 1, "only the original paid Root request exists");
+
+    // A historical reader accepts and preserves the nine-field grant using
+    // the unchanged original paid Root, worker and two-request invoices.
+    let tx = db.unchecked_transaction().unwrap();
+    let changes = tx.total_changes();
+    let historical =
+        budget::model::original_mapper_loop_grant_on(&tx, &f.actor, &child.assignment_id).unwrap();
+    historical.input().require_on(&tx, &f.actor).unwrap();
+    assert_eq!(historical.input().fact(), &legacy_task["mapperLoop"]);
+    assert_eq!(
+        historical.input().hash(),
+        legacy_task["mapperLoopHash"].as_str().unwrap()
+    );
+    assert!(historical.input().fact()["request"]
+        .get("providerOptions")
+        .is_none());
+    assert_eq!(historical.tokens(), tokens);
+    assert_eq!(historical.requests(), 2);
+    assert_eq!(super::tests::application_table_snapshot(&tx), before);
+    assert_eq!(tx.total_changes(), changes);
+    drop(tx);
+
+    // The live transport must still compare the complete original current
+    // wire. Historical compatibility cannot remove a live frozen option.
+    match mapper_loop::begin_first_for_transport(&db, &f.actor, &child, &bounds) {
+        Err(error) => assert_eq!(error, "mapper_loop_original_input_changed"),
+        Ok(_) => panic!("a downgraded historical fact must not authorize live dispatch"),
+    }
+    assert_eq!(super::tests::application_table_snapshot(&db), before);
+    assert_eq!(
+        seen.lock().unwrap().len(),
+        calls,
+        "refusal cannot send a Mapper SDK request"
+    );
+    assert_eq!(
+        db.query_row(
+            "SELECT count(*) FROM agent_mapper_loop_journal WHERE child_run_id=?1",
+            [&child.run_id],
+            |row| row.get::<_, i64>(0)
+        )
+        .unwrap(),
+        0
+    );
+    mapper_loop_provider_wire_replace_fixture_task(&db, &child.assignment_id, &original_task);
+    assert_eq!(super::tests::application_table_snapshot(&db), original);
+    assert_eq!(seen.lock().unwrap().len(), calls);
+}
