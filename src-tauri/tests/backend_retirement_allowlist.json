@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "reviewedOn": "2026-10-02",
+  "reviewedOn": "2026-10-15",
   "note": "REM-012 source review: exact files, full-content SHA-256 (UTF-8 CRLF normalized), case-insensitive literal occurrence count and path match. This is not an active-runtime exemption. New/stale/changed entries require semantic review; never regenerate blindly. Historical data fixtures and design docs are outside packaged-source scope and remain covered by importer tests.",
   "entries": {
     "src-tauri/src/agent_runtime/tests_backend_retirement.rs": {
@@ -23,12 +23,13 @@
     },
     "src-tauri/src/agent_runtime/model/tests.rs": {
       "category": "fixture",
-      "reason": "Test-only model gateway fixtures; the sole old-backend literal is a comment saying no old process is involved. The added admission_tests module is test-only and introduces no legacy execution path.",
+      "reason": "Review from 14a78753b95a: Complete added-test diff reviewed. Parent module is cfg(test); the sole retired marker remains the opening mock-provider comment. Additions cover cancellation, received/ambiguous usage, cache provenance, diagnostic logging, payload/output bounds, DeepSeek frozen options and strict Chat tool decoding against in-process providers. No legacy executable path is introduced.",
       "evidence": {
-        "sha256": "13ee8436576e88d9e925887213c75c004264e2640a46f287c800aa701a9f7edb",
+        "sha256": "aab86dd15541600b160429d8d00b795982d6bead696d0c4363e56f6d413dc49d",
         "literalOccurrences": 1,
         "pathMatch": false
-      }
+      },
+      "reviewedOn": "2026-10-15"
     },
     "src-tauri/src/agent_runtime/stage1a_tests/contract_assignment.rs": {
       "category": "fixture",
@@ -50,12 +51,13 @@
     },
     "src-tauri/src/agent_runtime/tests.rs": {
       "category": "fixture",
-      "reason": "Test-only module/include: tests.rs exercises historical fixtures, migration, provenance or negative runtime controls. It is not part of production execution.",
+      "reason": "Review from 14a78753b95a: Complete diff adds only readonly-role vocabulary/admission assertions in a cfg(test) module. Existing retired markers remain rejected parser input and a synthetic integrity-error signal; no executable backend or new live authority is introduced.",
       "evidence": {
-        "sha256": "c535ceb7fdd78081dc6c93e31f54f8084bf5dc38c16d8effeea9c2dca39ae9a8",
+        "sha256": "acc0ec325b628d15856eacfdd6090cc66761eaac290e568a528ed1538c524682",
         "literalOccurrences": 2,
         "pathMatch": false
-      }
+      },
+      "reviewedOn": "2026-10-15"
     },
     "src-tauri/src/artifact_import/tests_import_idempotence.rs": {
       "category": "fixture",
@@ -86,30 +88,33 @@
     },
     "src-tauri/src/commands/agent_acceptance.rs": {
       "category": "fixture",
-      "reason": "Test-only module/include: agent_acceptance.rs exercises historical fixtures, migration, provenance or negative runtime controls. The local WAF fixture now explicitly freezes its current Native attempt plan before terminal projection; challenge-stop and no-finding assertions are unchanged. It is not part of production execution.",
+      "reason": "Review from 14a78753b95a: Test-only module remains cfg(test). Changed acceptance cases now use the real current Single creator/startup/frozen-plan and owned terminal projection; Native selection, WAF fuse, single target request, no finding and bounded-result assertions remain. All retired literals are an exclusion comment, test name and negative result-label assertion; no retired execution is added.",
       "evidence": {
-        "sha256": "f12b4ab45bb8f60a3f5a4d837522561a1395fdadb561e981e3c27c4634ebeec8",
+        "sha256": "9a49096b02f5a3ecb7f62bd182d3d0f95c11cc9a85c0b18140231b28c0537b3b",
         "literalOccurrences": 3,
         "pathMatch": false
-      }
+      },
+      "reviewedOn": "2026-10-15"
     },
     "src-tauri/src/commands/agent_tests_backend_literal.rs": {
       "category": "fixture",
-      "reason": "Reviewed test-only literal guard and packaging-source coverage, including platform configuration, automatic plist metadata and optional project-local Cargo configuration trees. One additional mixed-case marker checks six inert temporary files; missing optional trees remain allowed and symlinks are rejected. No process launches, network operations, production runtime changes or active-symbol exemptions are introduced.",
+      "reason": "Review from d61454cdf73c: Test-only audit helper; fixed source scope list and package resource/sidecar rules unchanged. Only scripts/public may be absent. Every present entry, arbitrary extension and dangling root/nested symlink retains recursive inspection/rejection. Required src/tools absence still errors. Two new tests cover optional absence/presence, arbitrary extension, required-root absence and root/nested symlinks. No filter, broad ignore, symlink relaxation or runtime execution introduced. New retired literals are detector-positive synthetic bytes inside these tests.",
       "evidence": {
-        "sha256": "472f56fd5c5a40ac4e6ec6dc842ae160759fe2a93a2697e21a12306e770caccf",
-        "literalOccurrences": 11,
+        "sha256": "e37fb0ff842488dc47456dd52f898c7e2eeec65fda8385b2e7c39a105ac885d6",
+        "literalOccurrences": 12,
         "pathMatch": false
-      }
+      },
+      "reviewedOn": "2026-10-15"
     },
     "src-tauri/src/commands/agent_tests_backend_residual.rs": {
       "category": "fixture",
-      "reason": "Reviewed the test-only static residual guard after moving runtime PATH and egress tests into a separate included fixture. Its 12 remaining literals are comments, fixture paths, detector assertions, a negative Native outcome check and a zero-retired-run SQL assertion; none launch or install the retired backend. The source walker still rejects symlinks, checks executable syntax and build inputs, and requires empty active baselines. No production runtime or exemption was added.",
+      "reason": "Review from 14a78753b95a: Included only inside cfg(test) agent_tests. Changed Native fixture now exercises actual owned Multi dispatch, explicitly verifies default Native selection, and adds a positive Native-run count alongside zero retired-run count. All retired literals remain static detector/fixture paths, anti-regression messages and read-only SQL/test symbols; no legacy executable is launched. Reviewed 13c4855 diff in full: only scripts/public NotFound may return empty; scope membership and all rule baselines unchanged. Present roots still use original strict recursive walker; root and nested dangling links panic. Two new cfg(test) controls check optional absent/present matches, mandatory src/tools errors and symlink refusal. No active symbol exemption or runtime path added.",
       "evidence": {
-        "sha256": "987fc35d3d71792e68aa2868fc743fbb7c7d4470e3a95de3de6100a930bc9655",
+        "sha256": "0085477c4e3e68505644cdbaae6ae43d1689f6279b6710c36e04aecad27a77fd",
         "literalOccurrences": 12,
         "pathMatch": false
-      }
+      },
+      "reviewedOn": "2026-10-15"
     },
     "src-tauri/src/commands/agent_tests_backend_residual_runtime.rs": {
       "category": "fixture",
@@ -122,21 +127,23 @@
     },
     "src-tauri/src/commands/agent_tests_e2e.rs": {
       "category": "fixture",
-      "reason": "Test-only included E2E module. The two old policy cases now include a separate real creator/startup/original Root/role SDK/Broker/owned-consumption fixture; obsolete saved-policy positive conversion is removed. Anonymous, no-finding, WAF, isolation and coverage assertions outside that region are unchanged. The two remaining literals are the retained anonymous test name and comment; no executable legacy path or compatibility is introduced.",
+      "reason": "Review from 14a78753b95a: Included only inside cfg(test) agent_tests. Added durable WAF denial across reopened DB/attempts, no-publication/no-grant/unchanged-state/zero-resend checks and private unsealed response provenance checks. The two retired literals are unchanged header/test naming. Added scope-only lease cannot authorize execution and all mutation paths are asserted denied.",
       "evidence": {
-        "sha256": "0a9199b6b7a79201803cc5535222da51f4e0e12f1be81c8f5df883b57e1e1c08",
+        "sha256": "9d89576fb3033f4da62169c6086774d083399564d8a37d01385e5e1f57595426",
         "literalOccurrences": 2,
         "pathMatch": false
-      }
+      },
+      "reviewedOn": "2026-10-15"
     },
     "src-tauri/src/commands/agent_tests_persistence.rs": {
       "category": "fixture",
-      "reason": "Test-only plan and matrix fixtures now seed a retired historical row directly rather than calling the production Native-only plan writer. This retains read-side rejection and immutability coverage without reopening a retired write path.",
+      "reason": "Review from 14a78753b95a: Included only inside cfg(test) agent_tests. Cancellation now starts from authentic current Single original and invokes real pause rather than editing task status, preserving zero consumed model requests and adding one held unknown provider outcome. Retired literals remain synthetic historical plans, inert policy inputs and Native-only matrix/reentry assertions.",
       "evidence": {
-        "sha256": "9c6ab9ff13242b99310f89baa7bb985dc8fbad9e681dcf6efae4f8e39ed748a8",
+        "sha256": "ab35b5909c873cd6cfbcbd56d9ffc82b3fd4ff17d26768c2261904bccee09fe5",
         "literalOccurrences": 13,
         "pathMatch": false
-      }
+      },
+      "reviewedOn": "2026-10-15"
     },
     "src-tauri/src/commands/agent_tests_policy.rs": {
       "category": "fixture",
@@ -275,12 +282,13 @@
     },
     "src-tauri/src/commands/tests_web_startup.rs": {
       "category": "fixture",
-      "reason": "Reviewed startup negative fixtures only: malformed and retired parent backend matrices must reject Web resume without writes or dispatch. The three legacy literals are JSON inputs in tests, never an executable fallback.",
+      "reason": "Review from 14a78753b95a: Included only inside cfg(test) commands::tests. Only added include is test-only paid-resume finance coverage; the three retired backend markers remain malformed/retired resume JSON requiring read-only rejection. No production include or fallback is added.",
       "evidence": {
-        "sha256": "047aa4a04606a072f7b6ea87f9dc16d218a4c452a4f2c1cf7d819ec73007eac7",
+        "sha256": "90a1976a33e4480cfa2db9dfe52de23834438649e51bc080ef785c0f5ce9a37e",
         "literalOccurrences": 3,
         "pathMatch": false
-      }
+      },
+      "reviewedOn": "2026-10-15"
     },
     "src-tauri/src/db_neutral_tests.rs": {
       "category": "fixture",
@@ -329,30 +337,33 @@
     },
     "src-tauri/src/db_settings.rs": {
       "category": "migration",
-      "reason": "Pure in-memory normalization excludes old top-level fields from execution. The update helper preserves existing excluded fields verbatim without activating or overwriting them; startup no longer persists discarded fields.",
+      "reason": "Review from 14a78753b95a: Production code is pure in-memory normalization/update preservation. Only delta to reviewed version additionally excludes pythonExecutable and redisCliExecutable from the active top-level view. The sole retired prefix is a rejection filter; nested user documents and stored inert fields remain preserved, current model profile defaults/conversion logic unchanged. No command, install, network, model borrowing or legacy execution path is added.",
       "evidence": {
-        "sha256": "573713dffd548b8b8b771c0fd0a06a780be225f2f3f7e5f1158857ee9c8ceeee",
+        "sha256": "d79c0ad2c5cd0b340051448a69149841d1ff04ddb4e918c708a31a76b3904512",
         "literalOccurrences": 1,
         "pathMatch": false
-      }
+      },
+      "reviewedOn": "2026-10-15"
     },
     "src-tauri/src/db_settings_tests.rs": {
       "category": "fixture",
-      "reason": "Five synthetic negative-retirement and Native preservation tests. Retired literals exercise rejection including unknown/case variants, no model borrowing, explicit clears and nested user-document isolation. They cannot activate a backend or contact any endpoint.",
+      "reason": "Review from 14a78753b95a: cfg(test) child of db_settings. Added pure JSON case proves retired host tools stay absent from execution view, incoming data cannot overwrite stored inert history, and nested user data survives. Existing retired-token cases remain synthetic negative configuration fixtures with no endpoint contact or credential activation.",
       "evidence": {
-        "sha256": "f7a7245014fad23e10e85cd97a344e8b0cd7ea6ba36ba32b5d032ff3772fb438",
+        "sha256": "f76416ff8cc47a1a2575e10a2df6f871c5d8a43f57da9c745730845ff00d53c5",
         "literalOccurrences": 20,
         "pathMatch": false
-      }
+      },
+      "reviewedOn": "2026-10-15"
     },
     "tools/test_execution_presentation.cjs": {
       "category": "fixture",
-      "reason": "Test-only negative fixtures reject old backend values, case changes and substring lookalikes from Native display; missing plan with model calls remains read-only instead of claiming Native. Both presentation source files and the page container contain no retired literal. No runtime or recovery path is created.",
+      "reason": "Review from 14a78753b95a: Complete diff from reviewed-hash commit only moves SentinelBoard source path and its relative-import assertion. Every retired marker remains a negative backend/display fixture or assertion that production presentation lacks the marker.",
       "evidence": {
-        "sha256": "d0b9779929398dc5ffe0215c80ad63fd8b29422dd12b4594ee50fdf578ae0548",
+        "sha256": "6df1adf5d915d8e7b1ec0b2ea126271293798de150898e402d93b1e412fd49e6",
         "literalOccurrences": 5,
         "pathMatch": false
-      }
+      },
+      "reviewedOn": "2026-10-15"
     },
     "src-tauri/src/commands/tests_retired_import_commands.rs": {
       "category": "fixture",
@@ -419,12 +430,13 @@
     },
     "tools/test_vulnerability_results.cjs": {
       "category": "fixture",
-      "reason": "Test-only actual SFC compilation/SSR verifies that retired, Native, scanner and unknown records have identical neutral unreviewed presentation and that packaged release notes do not advertise the retired runtime. No old reader, import alias or execution path is introduced.",
+      "reason": "Review from 14a78753b95a: Complete diff only moves ReleaseNotesDialog to shell owner and adjusts its i18n mock. Retired markers remain neutral-source/display negatives and a rendered-release-note absence assertion.",
       "evidence": {
-        "sha256": "ec60dc0199d80723d57871e646d5a8d740b57c86440063aae19a61ed21ca18d2",
+        "sha256": "2bf8b62776b4ea49997153cbb4c6b6f71c727291d79c89bde48936f4188980ae",
         "literalOccurrences": 2,
         "pathMatch": false
-      }
+      },
+      "reviewedOn": "2026-10-15"
     },
     "tools/retire_nest_data.py": {
       "category": "migration",
@@ -446,12 +458,13 @@
     },
     "src-tauri/src/commands/agent_tests_native_policy_original.rs": {
       "category": "fixture",
-      "reason": "Test-only actual original Multi entry and readiness regressions. The sole retired literal deliberately corrupts a disposable original frozen backend matrix; execution and owned publication must refuse without SDK, HTTP or database changes. Positive cases use only current Native originals, with real fee/rowid/replay and independent role assertions. No production runtime, legacy conversion or active exemption is introduced.",
+      "reason": "Review from 14a78753b95a: Included only inside cfg(test) agent_tests. Change accounts explicitly for one extra public capture plus original Broker requests and checks both anonymous root requests have no Cookie/Authorization. The sole retired literal still deliberately corrupts a disposable backend matrix to require rejection; no legacy positive control or runtime path is introduced.",
       "evidence": {
-        "sha256": "0c6055eb5042e15f6be63aeed3446576ab2d99c65a61c1512cb029190b368eaa",
+        "sha256": "8e91e095bd30e1181f48f92b5bd911da8806df4bea7069bf986321520fc15a83",
         "literalOccurrences": 1,
         "pathMatch": false
-      }
+      },
+      "reviewedOn": "2026-10-15"
     }
   }
 }
