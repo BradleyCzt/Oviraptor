@@ -21,6 +21,8 @@ const owners = {
   environment: ['check_environment', 'get_environment_preparation_status', 'list_environment_install_logs',
     'recover_environment_preparation', 'install_environment_dependencies'],
   model_profiles: ['test_model_profile'],
+  hackerone: ['list_hackerone_programs', 'get_hackerone_detail', 'set_hackerone_bookmark',
+    'list_hackerone_events', 'sync_hackerone', 'add_hackerone_scopes_to_project'],
 };
 for (const [owner, commands] of Object.entries(owners)) {
   test(`${owner} has an explicit Rust boundary and stable IPC registration`, () => {
@@ -30,6 +32,11 @@ for (const [owner, commands] of Object.entries(owners)) {
     // A wildcard of the parent silently restores all cross-business coupling.
     assert.doesNotMatch(source, /use\s+(?:super|crate::commands)::\s*\*/);
     assert.doesNotMatch(source, /include!\s*\(/);
+    if (owner === 'hackerone') {
+      assert.match(source, /hackerone_models::\{/);
+      assert.doesNotMatch(source, /crate::models::|(?:^|[\s,{])models::\{/m);
+      assert.doesNotMatch(source, /crate::(?:commands|scanning|skills_catalog)::/);
+    }
     assert.doesNotMatch(source, /(?:use\s+(?:crate|super)::|crate::)(?:conversations|skill_packages|commands::(?:agent|scan))/);
     if (owner === 'model_profiles') {
       // A connectivity check uses the shared gateway's refusal classifier;
@@ -50,6 +57,25 @@ test('asset exports share the inventory predicate and ownership fixtures verify 
   assert.match(read('src-tauri/src/commands/asset_export.rs'), /use super::assets::\{asset_filter, asset_from_row, ASSET_SELECT\}/);
   assert.match(legacy, /#\[cfg\(test\)\]\s*use assets::asset_filter;/);
   assert.match(read('src-tauri/src/commands/asset_ownership.rs'), /asset_filter\(&query, true\)/);
+});
+
+test('FOFA account validation belongs to Assets with direct jobs and IPC consumers', () => {
+  const source = read('src-tauri/src/assets/fofa.rs');
+  const jobs = read('src-tauri/src/jobs.rs');
+  assert.match(registration, /#\[path = "assets\/fofa\.rs"\]\s*mod asset_fofa;/);
+  assert.match(source, /use crate::asset_models::\{FofaApiTestInput, FofaApiTestResult\};/);
+  assert.doesNotMatch(source, /crate::(?:commands|scanning|agent_runtime|conversations|skill_packages|skills_catalog|models)::/);
+  assert.doesNotMatch(source, /use\s+(?:super|crate::commands)::\s*\*/);
+  assert.doesNotMatch(source, /include!\s*\(/);
+  assert.deepEqual([...source.matchAll(/#\[tauri::command\]\s*pub (?:async )?fn (\w+)/g)]
+    .map(match => match[1]), ['test_fofa_api']);
+  const routes = [...registration.matchAll(/\b(?:[a-z_]+::)*test_fofa_api(?=,)/g)].map(match => match[0]);
+  assert.deepEqual(routes, ['asset_fofa::test_fofa_api']);
+  assert.doesNotMatch(read('src-tauri/src/commands/runtime_environment.rs'),
+    /fn (?:fofa_transport_error|request_fofa_account|test_fofa_api)\(/);
+  assert.doesNotMatch(legacy, /fofa::|request_fofa_account|test_fofa_api/);
+  assert.match(jobs, /crate::asset_fofa::request_fofa_account\(fofa_key\.trim\(\), fofa_proxy\.trim\(\)\)/);
+  assert.doesNotMatch(jobs, /commands::|\bcommands\s*,/);
 });
 
 test('asset ownership compiles in its domain scope with explicit read consumers', () => {

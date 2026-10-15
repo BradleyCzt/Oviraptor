@@ -79,7 +79,8 @@ pub(crate) mod ownership;
 // Transitional bridge for the retained scan/Agent include scope's two domain reads.
 use ownership::{domain_matches, normalize_ownership_domain};
 pub(crate) mod exposure;
-include!("commands/hackerone.rs");
+#[path = "commands/hackerone.rs"]
+pub(crate) mod hackerone;
 #[path = "commands/environment.rs"]
 pub(crate) mod environment;
 #[path = "commands/model_profiles.rs"]

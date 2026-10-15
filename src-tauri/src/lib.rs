@@ -20,6 +20,8 @@ mod log_framing;
 mod models;
 #[path = "assets/model.rs"]
 mod asset_models;
+#[path = "assets/fofa.rs"]
+mod asset_fofa;
 #[path = "scanning/model.rs"]
 mod scanning_models;
 #[path = "workspaces/model.rs"]
@@ -473,12 +475,12 @@ pub fn run() {
             commands::assets::list_runs,
             commands::assets::list_logs,
             commands::assets::list_asset_events,
-            commands::list_hackerone_programs,
-            commands::get_hackerone_detail,
-            commands::set_hackerone_bookmark,
-            commands::list_hackerone_events,
-            commands::sync_hackerone,
-            commands::add_hackerone_scopes_to_project,
+            commands::hackerone::list_hackerone_programs,
+            commands::hackerone::get_hackerone_detail,
+            commands::hackerone::set_hackerone_bookmark,
+            commands::hackerone::list_hackerone_events,
+            commands::hackerone::sync_hackerone,
+            commands::hackerone::add_hackerone_scopes_to_project,
             commands::environment::check_environment,
             commands::tool_administrator::approve_tool_inventory,
             commands::tool_administrator::revoke_tool_inventory,
@@ -492,7 +494,7 @@ pub fn run() {
             commands::create_sentinel_homogeneous_url_scan,
             commands::create_sentinel_url_scan_with_tool_selection,
             commands::model_profiles::test_model_profile,
-            commands::test_fofa_api,
+            asset_fofa::test_fofa_api,
             skills_catalog::instructions::list_agent_instructions,
             commands::list_capability_bundles,
             commands::list_role_config_drafts,

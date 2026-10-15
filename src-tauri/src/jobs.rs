@@ -1,5 +1,5 @@
 use crate::{
-    commands, db,
+    db,
     models::{ImportResult, JobProgressEvent, StartJobInput},
     AppState,
 };
@@ -786,7 +786,7 @@ fn execute_job(
             3.0,
             "正在预检 FOFA 网络、代理与 Key",
         );
-        commands::request_fofa_account(fofa_key.trim(), fofa_proxy.trim()).map_err(|error| {
+        crate::asset_fofa::request_fofa_account(fofa_key.trim(), fofa_proxy.trim()).map_err(|error| {
             log_line(
                 &app,
                 &db_path,

@@ -1,3 +1,15 @@
+//! HackerOne builtin workspace commands and source adapter.
+use crate::{
+    db,
+    hackerone_models::{HackerOneDetail, HackerOneEvent, HackerOneExclusion, HackerOneProgram, HackerOneScope},
+    AppState,
+};
+use rusqlite::{params, OptionalExtension, Row};
+use serde_json::Value as JsonValue;
+use sha2::{Digest, Sha256};
+use std::{collections::{HashMap, HashSet}, time::Duration};
+use tauri::{AppHandle, State};
+
 fn hackerone_program(row: &Row<'_>) -> rusqlite::Result<HackerOneProgram> {
     Ok(HackerOneProgram {
         id: row.get(0)?,
