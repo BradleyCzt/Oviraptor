@@ -44,6 +44,8 @@ When transfer becomes available:
 3. Preserve the filtered bundle as a source reference; compare original-base
    blobs at `8fddee2`, restored local edits, and the preserved WIP/current
    integration tree. Replay semantic changes in reviewable source commits.
+   [The migration map](integration/module-moves-2026-10-14.json) retains the 17
+   component moves, two Skills moves and 128 declaration owners for that review.
 4. Do not import unrelated filtered history as a common ancestor, overwrite
    cloud WIP, request secrets, or substitute main's configuration defaults.
 5. The package omits `agent_runtime/tests.rs`, `commands/exposure/tests_g1.rs`,
