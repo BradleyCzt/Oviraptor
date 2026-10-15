@@ -292,7 +292,7 @@ pub struct OwnershipSuggestionPreview {
     pub readiness: Vec<String>,
 }
 
-fn org_directory_version(connection: &rusqlite::Connection) -> Result<i64, String> {
+pub(crate) fn org_directory_version(connection: &rusqlite::Connection) -> Result<i64, String> {
     Ok(connection
         .query_row(
             "SELECT version FROM org_directory_state WHERE id=1",
@@ -304,7 +304,7 @@ fn org_directory_version(connection: &rusqlite::Connection) -> Result<i64, Strin
         .unwrap_or(0))
 }
 
-fn load_org_entities(connection: &rusqlite::Connection) -> Result<Vec<OrgEntityView>, String> {
+pub(crate) fn load_org_entities(connection: &rusqlite::Connection) -> Result<Vec<OrgEntityView>, String> {
     let mut entities = {
         let mut statement = connection
             .prepare("SELECT id,group_id,parent_id,entity_kind,legal_name,region_code,unified_code,source,source_ref,directory_version,normalized_name FROM org_entities WHERE status='confirmed' ORDER BY id")
@@ -363,7 +363,7 @@ fn load_org_entities(connection: &rusqlite::Connection) -> Result<Vec<OrgEntityV
     Ok(entities)
 }
 
-fn load_project_org_binding(
+pub(crate) fn load_project_org_binding(
     connection: &rusqlite::Connection,
     project_id: i64,
 ) -> Result<Option<ProjectOrgBindingView>, String> {
@@ -378,7 +378,7 @@ fn load_project_org_binding(
 }
 
 /// 绑定范围：集团总账 = 集团及其全部成员；单位项目 = 该单位及其下级（按 parent_id 闭包）。
-fn org_binding_scope(
+pub(crate) fn org_binding_scope(
     entities: &[OrgEntityView],
     binding: Option<&ProjectOrgBindingView>,
 ) -> HashSet<i64> {

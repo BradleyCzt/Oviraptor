@@ -412,16 +412,16 @@ fn rem_scale_tier_with_per_asset_projection() {
     out.insert("seedMs".into(), json!(ms(start)));
 
     let start = Instant::now();
-    let projection = crate::commands::ownership_asset_unit_projection(&connection, pid).unwrap();
+    let projection = crate::commands::ownership::ownership_asset_unit_projection(&connection, pid).unwrap();
     let projection_cold = ms(start);
     let start = Instant::now();
-    let projection_hot = crate::commands::ownership_asset_unit_projection(&connection, pid).unwrap();
+    let projection_hot = crate::commands::ownership::ownership_asset_unit_projection(&connection, pid).unwrap();
     let projection_hot_ms = ms(start);
     assert_eq!(projection.edges.len(), projection_hot.edges.len());
     let expected_edges: i64 = connection.query_row("SELECT COUNT(*) FROM project_assets WHERE project_id=?1 AND (asset_id % 5)<4", [pid], |row| row.get(0)).unwrap();
     assert_eq!(projection.edges.len() as i64, expected_edges, "4/5 资产有单位依据");
     let start = Instant::now();
-    let one = crate::commands::ownership_asset_unit_edge(&connection, pid, projection.edges[projection.edges.len() / 2].asset_id).unwrap();
+    let one = crate::commands::ownership::ownership_asset_unit_edge(&connection, pid, projection.edges[projection.edges.len() / 2].asset_id).unwrap();
     let single_edge_ms = ms(start);
     assert!(one.is_some());
     out.insert("projection".into(), json!({"coldMs": projection_cold, "hotMs": projection_hot_ms, "edges": projection.edges.len(), "unassigned": projection.unassigned, "singleAssetEdgeMs": single_edge_ms}));
@@ -1115,7 +1115,7 @@ fn fix3_p2_1_reading_a_large_incident_loads_the_directory_once() {
         super::incidents::read_incident(&connection, pid, incident).unwrap();
     });
     let edge_small = rem2_vm_steps(&connection, || {
-        crate::commands::ownership_asset_unit_edge(&connection, pid, assets[0]).unwrap();
+        crate::commands::ownership::ownership_asset_unit_edge(&connection, pid, assets[0]).unwrap();
     });
     connection
         .execute(
@@ -1129,7 +1129,7 @@ fn fix3_p2_1_reading_a_large_incident_loads_the_directory_once() {
         super::incidents::read_incident(&connection, pid, incident).unwrap();
     });
     let edge_big = rem2_vm_steps(&connection, || {
-        crate::commands::ownership_asset_unit_edge(&connection, pid, assets[0]).unwrap();
+        crate::commands::ownership::ownership_asset_unit_edge(&connection, pid, assets[0]).unwrap();
     });
     let read_delta = read_big.saturating_sub(read_small);
     let edge_delta = edge_big.saturating_sub(edge_small).max(1);
@@ -1137,9 +1137,9 @@ fn fix3_p2_1_reading_a_large_incident_loads_the_directory_once() {
     // 修复前每个位置各加载一次目录，约为 40 倍；批量后是常数倍（读事件本身还要读一次绑定上下文）。
     assert!(read_delta <= edge_delta * 6, "读事件随目录增长 {read_delta}，单次取边增长 {edge_delta}：目录被按位置重复加载");
     // 批量结果与逐个取边一致。
-    let batch = crate::commands::ownership_asset_unit_edges(&connection, pid, &assets).unwrap();
+    let batch = crate::commands::ownership::ownership_asset_unit_edges(&connection, pid, &assets).unwrap();
     for asset in &assets {
-        let one = crate::commands::ownership_asset_unit_edge(&connection, pid, *asset).unwrap();
+        let one = crate::commands::ownership::ownership_asset_unit_edge(&connection, pid, *asset).unwrap();
         assert_eq!(batch.get(asset).map(|edge| (edge.owner_entity_id, edge.relation.clone())), one.map(|edge| (edge.owner_entity_id, edge.relation)));
     }
     drop(connection);

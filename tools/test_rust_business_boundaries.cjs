@@ -52,6 +52,36 @@ test('asset exports share the inventory predicate and ownership fixtures verify 
   assert.match(read('src-tauri/src/commands/asset_ownership.rs'), /asset_filter\(&query, true\)/);
 });
 
+test('asset ownership compiles in its domain scope with explicit read consumers', () => {
+  const source = read('src-tauri/src/commands/ownership.rs');
+  assert.match(legacy, /pub\(crate\) mod ownership;/);
+  assert.doesNotMatch(legacy, /include!\("commands\/(?:asset_ownership|ownership_\w+)\.rs"\)/);
+  assert.doesNotMatch(source, /use\s+(?:super|crate::commands)::\s*\*/);
+  assert.doesNotMatch(source, /crate::(?:conversations|skill_packages|skills_catalog|agent_runtime|scanning)::/);
+  assert.match(source, /asset_models::\{/);
+  assert.deepEqual([...source.matchAll(/include!\("([^"]+)"\)/g)].map(match => match[1]), [
+    'asset_ownership.rs', 'ownership_directory.rs', 'ownership_public_suffix.rs',
+    'ownership_review.rs', 'ownership_operations.rs', 'ownership_authorization.rs',
+    'ownership_unit_projection.rs', 'ownership_o3_tests.rs',
+  ]);
+  const commands = [
+    'get_asset_ownership_profile', 'save_asset_ownership_profile', 'get_asset_ownership_summary',
+    'assess_asset_ownership', 'update_asset_ownership', 'get_project_ownership_bootstrap',
+    'preview_project_ownership_suggestions', 'save_project_ownership_directory',
+    'start_ownership_analysis', 'read_ownership_analysis', 'cancel_ownership_analysis',
+    'page_ownership_groups', 'page_ownership_group_members', 'preview_ownership_group_decision',
+    'apply_ownership_group_decision', 'read_ownership_operation', 'preview_ownership_group_revert',
+    'apply_ownership_group_revert', 'revoke_ownership_group_authorization',
+    'confirm_asset_ownership', 'authorize_asset_ownership',
+  ];
+  for (const command of commands) {
+    assert.match(registration, new RegExp(`commands::ownership::${command},`));
+    assert.doesNotMatch(registration, new RegExp(`commands::${command},`));
+  }
+  const projection = read('src-tauri/src/commands/exposure/units.rs');
+  assert.match(projection, /crate::commands::ownership::ownership_asset_unit_projection/);
+});
+
 test('Chat resolves its model through snapshot-preserving infrastructure', () => {
   const source = read('src-tauri/src/conversations/reply.rs');
   assert.match(source, /crate::model_configuration::gateway_profile_on\(db, None\)/);

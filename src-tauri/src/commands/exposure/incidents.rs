@@ -238,9 +238,9 @@ struct BindingContext {
 }
 
 fn binding_context(connection: &Connection, project_id: i64) -> Result<BindingContext, String> {
-    let directory_version = crate::commands::org_directory_version(connection).map_err(storage)?;
-    let entities = crate::commands::load_org_entities(connection).map_err(storage)?;
-    let binding = crate::commands::load_project_org_binding(connection, project_id).map_err(storage)?;
+    let directory_version = crate::commands::ownership::org_directory_version(connection).map_err(storage)?;
+    let entities = crate::commands::ownership::load_org_entities(connection).map_err(storage)?;
+    let binding = crate::commands::ownership::load_project_org_binding(connection, project_id).map_err(storage)?;
     let mut context = BindingContext { unit_entity_id: None, group_ledger: false, directory_version, binding_version: 0 };
     if let Some(row) = binding {
         context.binding_version = row.binding_version;
@@ -258,7 +258,7 @@ fn binding_context(connection: &Connection, project_id: i64) -> Result<BindingCo
 /// the incident stays "unit unknown"; nothing is inferred from names or region codes. An older
 /// projection link for this asset that no longer holds is deactivated, never kept as current.
 fn auto_link_from_ownership(tx: &Connection, project_id: i64, incident_id: i64, row: &LeadRow, asset_id: i64, context: &BindingContext) -> Result<(), String> {
-    let edge = crate::commands::ownership_asset_unit_edge(tx, project_id, asset_id).map_err(storage)?;
+    let edge = crate::commands::ownership::ownership_asset_unit_edge(tx, project_id, asset_id).map_err(storage)?;
     reconcile_ownership_link(tx, project_id, incident_id, asset_id, row.observation_id, edge.as_ref(), context)
 }
 
@@ -269,7 +269,7 @@ fn reconcile_ownership_link(
     incident_id: i64,
     asset_id: i64,
     observation_id: i64,
-    edge: Option<&crate::commands::OwnershipAssetUnitEdge>,
+    edge: Option<&crate::commands::ownership::OwnershipAssetUnitEdge>,
     context: &BindingContext,
 ) -> Result<(), String> {
     let keep = edge.map(|edge| edge.owner_entity_id).unwrap_or(0);
@@ -759,8 +759,8 @@ fn refresh_ownership_links(tx: &Connection, project_id: i64, context: &BindingCo
             retire_ownership_links(tx, project_id, None)?;
         }
     } else if rebuild {
-        let projection = crate::commands::ownership_asset_unit_projection(tx, project_id).map_err(storage)?;
-        let edges: HashMap<i64, &crate::commands::OwnershipAssetUnitEdge> = projection.edges.iter().map(|edge| (edge.asset_id, edge)).collect();
+        let projection = crate::commands::ownership::ownership_asset_unit_projection(tx, project_id).map_err(storage)?;
+        let edges: HashMap<i64, &crate::commands::ownership::OwnershipAssetUnitEdge> = projection.edges.iter().map(|edge| (edge.asset_id, edge)).collect();
         for (incident, asset, observation) in ownership_link_targets(tx, TARGETS_ALL, &[project_id])? {
             reconcile_ownership_link(tx, project_id, incident, asset, observation, edges.get(&asset).copied(), context)?;
         }
@@ -788,7 +788,7 @@ fn refresh_ownership_links(tx: &Connection, project_id: i64, context: &BindingCo
         }
         // FIX3-P2-1：这批资产的边一次取齐（目录只读一次）。
         let wanted: Vec<i64> = assets.iter().copied().collect();
-        let edges = crate::commands::ownership_asset_unit_edges(tx, project_id, &wanted).map_err(storage)?;
+        let edges = crate::commands::ownership::ownership_asset_unit_edges(tx, project_id, &wanted).map_err(storage)?;
         for asset in assets {
             for (incident, asset, observation) in ownership_link_targets(tx, TARGETS_OF_ASSET, &[project_id, asset])? {
                 reconcile_ownership_link(tx, project_id, incident, asset, observation, edges.get(&asset), context)?;
@@ -819,7 +819,7 @@ fn refresh_incident_ownership_links(connection: &Connection, project_id: i64, in
         // FIX3-P2-1：大事件按位置逐个取边会重复加载整份目录；先收齐资产，一次批量取边。
         let targets = ownership_link_targets(tx, TARGETS_OF_INCIDENT, &[project_id, incident_id])?;
         let wanted: Vec<i64> = targets.iter().map(|(_, asset, _)| *asset).collect();
-        let edges = crate::commands::ownership_asset_unit_edges(tx, project_id, &wanted).map_err(storage)?;
+        let edges = crate::commands::ownership::ownership_asset_unit_edges(tx, project_id, &wanted).map_err(storage)?;
         for (incident, asset, observation) in targets {
             reconcile_ownership_link(tx, project_id, incident, asset, observation, edges.get(&asset), &context)?;
         }
@@ -1231,7 +1231,7 @@ pub fn act(connection: &Connection, project_id: i64, raw: &JsonValue) -> Result<
         "link_entity" => {
             let entity_id = action.entity_id.unwrap_or_default();
             let level = action.link_level.clone().unwrap_or_default();
-            let entities = crate::commands::load_org_entities(tx).map_err(storage)?;
+            let entities = crate::commands::ownership::load_org_entities(tx).map_err(storage)?;
             if !entities.iter().any(|entity| entity.id == entity_id) {
                 return Err(format!("[exposure_incident_entity_invalid] 组织目录里没有实体 {entity_id}，不会新建"));
             }
@@ -1251,7 +1251,7 @@ pub fn act(connection: &Connection, project_id: i64, raw: &JsonValue) -> Result<
             if level == "confirmed_link" && evidence.is_empty() {
                 return Err("[exposure_incident_evidence_required] confirmed_link 需要本事件里的观察作为证据".to_string());
             }
-            let directory_version = crate::commands::org_directory_version(tx).map_err(storage)?;
+            let directory_version = crate::commands::ownership::org_directory_version(tx).map_err(storage)?;
             tx.execute(
                 "UPDATE exposure_incident_entities SET active=0 WHERE incident_id=?1 AND entity_id=?2 AND origin='manual' AND active=1",
                 params![action.incident_id, entity_id],
@@ -1630,7 +1630,7 @@ pub fn read_incident(connection: &Connection, project_id: i64, incident_id: i64)
             .map_err(storage)?;
         rows
     };
-    let names: HashMap<i64, (String, String)> = crate::commands::load_org_entities(connection)
+    let names: HashMap<i64, (String, String)> = crate::commands::ownership::load_org_entities(connection)
         .map_err(storage)?
         .into_iter()
         .map(|entity| (entity.id, (entity.legal_name, entity.entity_kind)))

@@ -1339,10 +1339,10 @@ fn rem_scale_full_projection_matches_the_per_asset_edges_exactly() {
     connection.execute("DELETE FROM asset_events WHERE asset_id=?1", [ids[4]]).unwrap();
     // f：大写的非确认事件（如 'Revoked:'）也算变更；以 'Confirmed' 开头但没有冒号的不算变更、也不算决定。
     event(ids[5], "Confirmedish note");
-    let full = crate::commands::ownership_asset_unit_projection(&connection, pid).unwrap();
+    let full = crate::commands::ownership::ownership_asset_unit_projection(&connection, pid).unwrap();
     let mut single_edges = Vec::new();
     for asset_id in &ids {
-        if let Some(edge) = crate::commands::ownership_asset_unit_edge(&connection, pid, *asset_id).unwrap() {
+        if let Some(edge) = crate::commands::ownership::ownership_asset_unit_edge(&connection, pid, *asset_id).unwrap() {
             single_edges.push((edge.asset_id, edge.owner_entity_id, edge.version.clone()));
         }
     }

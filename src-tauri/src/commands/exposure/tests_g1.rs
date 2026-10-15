@@ -247,7 +247,7 @@ fn g1_0_settings_view_says_execution_is_serial() {
 #[test]
 fn g1_1_cluster_boundaries_come_from_the_shared_psl() {
     use super::clusters::{boundary_label, legacy_last_two_labels, registrable_boundary, registered_domain, BOUNDARY_EXACT_HOST};
-    let psl = format!("psl:{}", crate::commands::OWNERSHIP_PSL_VERSION);
+    let psl = format!("psl:{}", crate::commands::ownership::OWNERSHIP_PSL_VERSION);
     assert_eq!(registrable_boundary("shop.a.example.com.cn"), ("example.com.cn".to_string(), psl.clone()));
     assert_eq!(legacy_last_two_labels("shop.a.example.com.cn"), "com.cn", "旧规则会把所有 .com.cn 合并");
     assert_eq!(registrable_boundary("team.github.io"), ("team.github.io".to_string(), psl.clone()));
@@ -308,7 +308,7 @@ fn g1_1_new_clusters_use_psl_boundaries_and_never_absorb_legacy_rows() {
     let basis: String = connection
         .query_row("SELECT root_basis FROM exposure_observations WHERE id=?1", [ids[0]], |row| row.get(0))
         .unwrap();
-    assert_eq!(basis, format!("psl:{}", crate::commands::OWNERSHIP_PSL_VERSION), "观察必须记录边界依据");
+    assert_eq!(basis, format!("psl:{}", crate::commands::ownership::OWNERSHIP_PSL_VERSION), "观察必须记录边界依据");
     super::cluster_repository::persist_for_observations(&connection, 41100, 411, &ids, 1).unwrap();
     let clusters = |connection: &Connection| -> Vec<(String, String, String, i64)> {
         let mut statement = connection
@@ -323,7 +323,7 @@ fn g1_1_new_clusters_use_psl_boundaries_and_never_absorb_legacy_rows() {
     assert_eq!(
         clusters(&connection),
         vec![
-            ("domain:example.com.cn".to_string(), "psl".to_string(), crate::commands::OWNERSHIP_PSL_VERSION.to_string(), 2),
+            ("domain:example.com.cn".to_string(), "psl".to_string(), crate::commands::ownership::OWNERSHIP_PSL_VERSION.to_string(), 2),
             ("host:10.0.0.8".to_string(), "exact_host".to_string(), String::new(), 2),
         ],
         "other.com.cn 与 github.io 租户都不能被合并；IP 只按精确主机分组"
@@ -341,7 +341,7 @@ fn g1_1_new_clusters_use_psl_boundaries_and_never_absorb_legacy_rows() {
         .unwrap();
     super::cluster_repository::persist_for_observations(&connection, 41100, 411, &[ids[0], ids[2]], 1).unwrap();
     let after = clusters(&connection);
-    assert!(after.contains(&("domain:example.com.cn".to_string(), "psl".to_string(), crate::commands::OWNERSHIP_PSL_VERSION.to_string(), 2)), "旧行不能被并入新簇：{after:?}");
+    assert!(after.contains(&("domain:example.com.cn".to_string(), "psl".to_string(), crate::commands::ownership::OWNERSHIP_PSL_VERSION.to_string(), 2)), "旧行不能被并入新簇：{after:?}");
     let (direct, inherited): (i64, i64) = connection
         .query_row("SELECT direct_count,inherited_count FROM exposure_clusters WHERE project_id=411 AND cluster_key='domain:example.com.cn'", [], |row| Ok((row.get(0)?, row.get(1)?)))
         .unwrap();
@@ -365,7 +365,7 @@ fn g1_1_new_clusters_use_psl_boundaries_and_never_absorb_legacy_rows() {
     assert_eq!(legacy.boundary_basis, "");
     assert!(legacy.boundary_label.contains("旧版末两段"), "{}", legacy.boundary_label);
     let fresh = page.items.iter().find(|row| row.cluster_key == "domain:example.com.cn").unwrap();
-    assert!(fresh.boundary_label.contains(crate::commands::OWNERSHIP_PSL_VERSION), "{}", fresh.boundary_label);
+    assert!(fresh.boundary_label.contains(crate::commands::ownership::OWNERSHIP_PSL_VERSION), "{}", fresh.boundary_label);
     let _ = std::fs::remove_dir_all(root);
 }
 
@@ -447,8 +447,8 @@ fn g1_2_a_professional_subsidiary_is_never_placed_under_a_province() {
     let root = sandbox("units");
     let (connection, _) = database(&root);
     directory(&connection);
-    let entities = crate::commands::load_org_entities(&connection).unwrap();
-    let by_id: std::collections::HashMap<i64, &crate::commands::OrgEntityView> = entities.iter().map(|row| (row.id, row)).collect();
+    let entities = crate::commands::ownership::load_org_entities(&connection).unwrap();
+    let by_id: std::collections::HashMap<i64, &crate::commands::ownership::OrgEntityView> = entities.iter().map(|row| (row.id, row)).collect();
     let place = |id: i64| super::units::place_unit(by_id[&id], &by_id);
     let (bucket, province, note) = place(4);
     assert_eq!((bucket.as_str(), province.is_none()), ("professional_subsidiary", true), "名字和地区码像浙江也不能归入浙江省公司");
@@ -493,8 +493,8 @@ fn g1_2_a_professional_subsidiary_is_never_placed_under_a_province() {
     entity(&connection, 9, "city_branch", "环甲", Some(1), None, "");
     entity(&connection, 10, "city_branch", "环乙", Some(1), Some(9), "");
     connection.execute("UPDATE org_entities SET parent_id=10 WHERE id=9", []).unwrap();
-    let entities = crate::commands::load_org_entities(&connection).unwrap();
-    let by_id: std::collections::HashMap<i64, &crate::commands::OrgEntityView> = entities.iter().map(|row| (row.id, row)).collect();
+    let entities = crate::commands::ownership::load_org_entities(&connection).unwrap();
+    let by_id: std::collections::HashMap<i64, &crate::commands::ownership::OrgEntityView> = entities.iter().map(|row| (row.id, row)).collect();
     let (_, province, note) = super::units::place_unit(by_id[&9], &by_id);
     assert!(province.is_none());
     assert!(note.unwrap_or_default().contains("成环"));
@@ -1418,7 +1418,7 @@ fn rem_acceptance_full_loop_import_discover_own_incident_retest_close() {
             params![pid, asset, format!("confirmed: 组确认（复核组 #{group}，快照 #{analysis}，操作 op-rem-loop-own）")],
         )
         .unwrap();
-    let edge = crate::commands::ownership_asset_unit_edge(&connection, pid, asset).unwrap().expect("资产有单位依据");
+    let edge = crate::commands::ownership::ownership_asset_unit_edge(&connection, pid, asset).unwrap().expect("资产有单位依据");
     assert_eq!(edge.owner_entity_id, 5);
 
     // ③ 发现：生产执行器对授权站点做一轮被动采集。

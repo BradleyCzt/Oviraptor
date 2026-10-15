@@ -364,7 +364,7 @@ pub fn ledger_rows(connection: &rusqlite::Connection, project_id: i64, coverage:
     }
     let mut links: Vec<Vec<String>> = Vec::new();
     {
-        let names: std::collections::HashMap<i64, String> = crate::commands::load_org_entities(connection)
+        let names: std::collections::HashMap<i64, String> = crate::commands::ownership::load_org_entities(connection)
             .map_err(|error| error.to_string())?
             .into_iter()
             .map(|entity| (entity.id, entity.legal_name))

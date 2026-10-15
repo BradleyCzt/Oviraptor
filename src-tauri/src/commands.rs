@@ -74,14 +74,10 @@ use assets::detect_target;
 use workspace_projects::{delete_project_for_connection, project_impact_for_connection};
 #[cfg(test)]
 use workspace_config_profiles::{delete_config_profile_inner, persist_config_profile, read_config_profiles};
-include!("commands/asset_ownership.rs");
-include!("commands/ownership_directory.rs");
-include!("commands/ownership_public_suffix.rs");
-include!("commands/ownership_review.rs");
-include!("commands/ownership_operations.rs");
-include!("commands/ownership_authorization.rs");
-include!("commands/ownership_unit_projection.rs");
-include!("commands/ownership_o3_tests.rs");
+#[path = "commands/ownership.rs"]
+pub(crate) mod ownership;
+// Transitional bridge for the retained scan/Agent include scope's two domain reads.
+use ownership::{domain_matches, normalize_ownership_domain};
 include!("commands/exposure.rs");
 include!("commands/hackerone.rs");
 #[path = "commands/environment.rs"]

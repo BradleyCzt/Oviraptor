@@ -410,7 +410,7 @@ pub fn unit_statistics(connection: &Connection, project_id: i64, projection: Opt
     {
         // IR-02/IR-11: a projection link counts only while the ownership projection still
         // gives that asset that unit (a revert, retirement or rebinding drops it at once).
-        let current: HashMap<i64, i64> = crate::commands::ownership_asset_unit_projection(connection, project_id)
+        let current: HashMap<i64, i64> = crate::commands::ownership::ownership_asset_unit_projection(connection, project_id)
             .map_err(storage)?
             .edges
             .into_iter()
@@ -438,8 +438,8 @@ pub fn unit_statistics(connection: &Connection, project_id: i64, projection: Opt
             }
         }
     }
-    let entities = crate::commands::load_org_entities(connection).map_err(storage)?;
-    let by_id: HashMap<i64, &crate::commands::OrgEntityView> = entities.iter().map(|entity| (entity.id, entity)).collect();
+    let entities = crate::commands::ownership::load_org_entities(connection).map_err(storage)?;
+    let by_id: HashMap<i64, &crate::commands::ownership::OrgEntityView> = entities.iter().map(|entity| (entity.id, entity)).collect();
     // entity -> level -> incidents
     let mut per_entity: BTreeMap<i64, BTreeMap<String, BTreeSet<i64>>> = BTreeMap::new();
     let mut linked_incidents: BTreeSet<i64> = BTreeSet::new();
@@ -627,12 +627,12 @@ pub fn coverage_drilldown(
     let mut asset_units: HashMap<i64, i64> = HashMap::new();
     let mut unit_axis = json!({"state": "not_asset_scoped", "label": "这个来源按域名/关键词计划，不对应单个资产，不按单位分摊"});
     if asset_scoped {
-        match crate::commands::ownership_asset_unit_projection(connection, project_id) {
+        match crate::commands::ownership::ownership_asset_unit_projection(connection, project_id) {
             Ok(projection) => {
                 for edge in &projection.edges {
                     asset_units.insert(edge.asset_id, edge.owner_entity_id);
                 }
-                let names: HashMap<i64, String> = crate::commands::load_org_entities(connection)
+                let names: HashMap<i64, String> = crate::commands::ownership::load_org_entities(connection)
                     .map_err(storage)?
                     .into_iter()
                     .map(|entity| (entity.id, entity.legal_name))

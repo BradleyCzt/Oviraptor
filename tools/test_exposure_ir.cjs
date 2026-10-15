@@ -200,5 +200,6 @@ test('ir02 the group ledger shows real unit counts, a subsidiary stays apart, an
   assert.doesNotMatch(units, /per_asset_edge: "integration_pending"/);
   const own = readSource('src-tauri/src/commands/ownership_unit_projection.rs').split('#[cfg(test)]')[0];
   assert.doesNotMatch(own, /INSERT|UPDATE |DELETE|ALTER TABLE|CREATE TABLE/, '归属投影只读');
-  assert.match(readSource('src-tauri/src/commands.rs'), /include!\("commands\/ownership_unit_projection.rs"\);/);
+  assert.match(readSource('src-tauri/src/commands.rs'), /pub\(crate\) mod ownership;/);
+  assert.match(readSource('src-tauri/src/commands/ownership.rs'), /include!\("ownership_unit_projection.rs"\);/);
 });

@@ -236,22 +236,22 @@ fn g0_corrupt_saved_settings_refuse_view_and_scan_but_can_be_repaired() {
 fn g0_shared_psl_and_directory_are_reachable_read_only() {
     let (_db, connection) = temp_db(141);
     let changes_before = connection.total_changes();
-    let zj = crate::commands::ownership_domain_parts("www.zj.10086.cn").expect("可解析");
+    let zj = crate::commands::ownership::ownership_domain_parts("www.zj.10086.cn").expect("可解析");
     assert_eq!(zj.registrable.as_deref(), Some("10086.cn"));
-    let pages = crate::commands::ownership_domain_parts("team.github.io").expect("可解析");
+    let pages = crate::commands::ownership::ownership_domain_parts("team.github.io").expect("可解析");
     assert_eq!(pages.registrable.as_deref(), Some("team.github.io"));
     assert_eq!(pages.section.as_str(), "private");
-    assert!(crate::commands::ownership_domain_parts("10.0.0.8").is_none(), "IP 没有注册域");
-    assert_eq!(crate::commands::ownership_domain_parts("com.cn").and_then(|parts| parts.registrable), None);
+    assert!(crate::commands::ownership::ownership_domain_parts("10.0.0.8").is_none(), "IP 没有注册域");
+    assert_eq!(crate::commands::ownership::ownership_domain_parts("com.cn").and_then(|parts| parts.registrable), None);
     for host in ["team.github.io", "www.zj.10086.cn", "a.b.gov.cn", "shop.example.co.uk"] {
         // G1-1: registered_domain now reads the shared PSL; the legacy rule is kept by name.
         let legacy = super::clusters::legacy_last_two_labels(host);
-        let shared = crate::commands::ownership_domain_parts(host).and_then(|parts| parts.registrable).unwrap_or_default();
-        eprintln!("G0_MEASURE host={host} legacy_registered_domain={legacy} shared_psl={shared} psl_version={}", crate::commands::OWNERSHIP_PSL_VERSION);
+        let shared = crate::commands::ownership::ownership_domain_parts(host).and_then(|parts| parts.registrable).unwrap_or_default();
+        eprintln!("G0_MEASURE host={host} legacy_registered_domain={legacy} shared_psl={shared} psl_version={}", crate::commands::ownership::OWNERSHIP_PSL_VERSION);
     }
-    assert!(crate::commands::org_directory_version(&connection).unwrap() >= 0);
-    let entities = crate::commands::load_org_entities(&connection).unwrap();
+    assert!(crate::commands::ownership::org_directory_version(&connection).unwrap() >= 0);
+    let entities = crate::commands::ownership::load_org_entities(&connection).unwrap();
     assert!(entities.iter().all(|entity| entity.directory_version >= 0));
-    assert!(crate::commands::load_project_org_binding(&connection, 141).unwrap().is_none(), "未绑定项目没有单位");
+    assert!(crate::commands::ownership::load_project_org_binding(&connection, 141).unwrap().is_none(), "未绑定项目没有单位");
     assert_eq!(connection.total_changes(), changes_before, "共享读取不写库");
 }
