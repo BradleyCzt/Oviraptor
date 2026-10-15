@@ -26,6 +26,7 @@ import type { Project } from "../../workspaces/types";
 import { useI18n } from "../../../i18n";
 import TitleRulePopover from "./TitleRulePopover.vue";
 import PageIsolationDialog from "./PageIsolationDialog.vue";
+import AssetObservation from "./AssetObservation.vue";
 import "../../../asset-workspace-enhancements.css";
 import "../../../asset-workspace-patch.css";
 
@@ -46,7 +47,7 @@ const { tr } = useI18n();
 const allColumns = [
   ["projectName", "所属项目", "Project"],
   ["assetKey", "资产键", "Asset key"],
-  ["company", "公司名称", "Company"],
+  ["company", "来源标签", "Discovery label"],
   ["reviewTier", "复核等级", "Review tier"],
   ["host", "访问入口", "Host"],
   ["link", "原始链接", "Raw link"],
@@ -56,7 +57,7 @@ const allColumns = [
   ["domain", "域名", "Domain"],
   ["title", "标题", "Title"],
   ["statusCode", "状态码", "Status"],
-  ["probeOutcome", "探测结果", "Probe result"],
+  ["probeOutcome", "最近探测结果", "Last probe result"],
   ["hasLogin", "登录口", "Login portal"],
   ["hasRegister", "注册口", "Register portal"],
   ["entrySeen", "是否看过", "Seen"],
@@ -75,10 +76,10 @@ const allColumns = [
   ["sentinelScanCount", "扫描次数", "Scan count"],
   ["sentinelSentAt", "最近送扫", "Last sent"],
   ["firstSeen", "全局首次发现", "Global first seen"],
-  ["lastSeen", "全局最后发现", "Global last seen"],
-  ["lastAlive", "最后存活", "Last alive"],
+  ["lastSeen", "全局最近入库", "Global last imported"],
+  ["lastAlive", "最近存活记录", "Last alive record"],
   ["projectFirstSeen", "项目首次发现", "Project first seen"],
-  ["projectLastSeen", "项目最后发现", "Project last seen"],
+  ["projectLastSeen", "项目最近入库", "Project last imported"],
   ["lastRunId", "最近任务 ID", "Last run ID"],
   ["isDeleted", "回收状态", "Trash state"],
   ["deletedAt", "移入回收站时间", "Deleted at"],
@@ -635,17 +636,17 @@ onUnmounted(() => { disposed = true; ++queryGeneration; cancelRowDrag(); });
         <select v-model="query.projectId" class="toolbar-select" @change="changeQueryProject"><option :value="undefined">{{tr('全部项目','All projects')}}</option><option v-for="p in projects" :key="p.id" :value="p.id">{{ p.name }}{{p.status==='archived'?tr('（已归档）',' (archived)'):''}}</option></select>
       </div>
       <div class="asset-toolbar-filters">
-        <label><span>{{tr('探测队列','Probe queue')}}</span><select v-if="!quarantineOnly" v-model="query.probeView" class="toolbar-select" @change="search"><option value="browser_review">{{tr('Web 人工队列','Web review queue')}}</option><option value="browser_accessible">{{tr('浏览器可访问','Browser accessible')}}</option><option value="restricted">{{tr('受限 / 需渲染 / 需域名','Restricted / render / vhost')}}</option><option value="service">{{tr('TCP 非 Web 服务','TCP non-Web services')}}</option><option value="abnormal">{{tr('异常 / 无法连接','Abnormal / unreachable')}}</option><option value="blocked">{{tr('内容隔离','Blocked content')}}</option><option value="all">{{tr('全部分类','All classes')}}</option></select><strong v-else>{{tr('内容隔离','Blocked content')}}</strong></label>
-        <label><span>{{tr('具体探测结果（二次筛选）','Exact probe result')}}</span><select v-model="query.probeOutcomeView" class="toolbar-select" @change="changeProbeOutcome"><option value="all">{{tr('全部具体结果','All exact results')}}</option><option v-for="option in probeOutcomeOptions" :key="option[0]" :value="option[0]">{{tr(option[1],option[2])}}</option></select></label>
+        <label><span>{{tr('最近探测分类','Last probe classification')}}</span><select v-if="!quarantineOnly" v-model="query.probeView" class="toolbar-select" @change="search"><option value="browser_review">{{tr('Web 人工队列','Web review queue')}}</option><option value="browser_accessible">{{tr('最近探测可访问（含旧记录）','Last probe accessible (incl. legacy)')}}</option><option value="restricted">{{tr('受限 / 需渲染 / 需域名','Restricted / render / vhost')}}</option><option value="service">{{tr('TCP 非 Web 服务','TCP non-Web services')}}</option><option value="abnormal">{{tr('异常 / 无法连接','Abnormal / unreachable')}}</option><option value="blocked">{{tr('内容隔离','Blocked content')}}</option><option value="all">{{tr('全部分类','All classes')}}</option></select><strong v-else>{{tr('内容隔离','Blocked content')}}</strong></label>
+        <label><span>{{tr('最近探测结果（二次筛选）','Exact last probe result')}}</span><select v-model="query.probeOutcomeView" class="toolbar-select" @change="changeProbeOutcome"><option value="all">{{tr('全部具体结果','All exact results')}}</option><option v-for="option in probeOutcomeOptions" :key="option[0]" :value="option[0]">{{tr(option[1],option[2])}}</option></select></label>
         <label><span>{{tr('人工结论','Decision')}}</span><select v-model="query.decisionView" class="toolbar-select" @change="search"><option value="review">{{tr('待复核（未审核 + 待补证据）','Review: pending + needs evidence')}}</option><option value="pending">{{tr('仅未审核','Not reviewed only')}}</option><option value="uncertain">{{tr('仅待补证据','Needs evidence only')}}</option><option value="confirmed">{{tr('已确认有效','Confirmed valid')}}</option><option value="rejected">{{tr('已排除','Rejected')}}</option><option value="not_applicable">{{tr('不适用 Web','Not applicable')}}</option><option value="all">{{tr('全部人工结论','All decisions')}}</option></select></label>
         <label><span>{{tr('调查状态','Investigation state')}}</span><select v-model="query.sentinelView" class="toolbar-select" @change="search"><option value="all">{{tr('全部调查状态','All investigation states')}}</option><option value="sent">{{tr('已发起调查','Investigated')}}</option><option value="not_sent">{{tr('未发起调查','Not investigated')}}</option></select></label>
         <label><span>{{tr('登录口','Login portal')}}</span><select v-model="query.hasLoginView" class="toolbar-select" @change="search"><option value="all">{{tr('全部','All')}}</option><option value="yes">{{tr('有','Present')}}</option><option value="no">{{tr('无','Absent')}}</option><option value="unknown">{{tr('未识别','Not screened')}}</option></select></label>
         <label><span>{{tr('注册口','Register portal')}}</span><select v-model="query.hasRegisterView" class="toolbar-select" @change="search"><option value="all">{{tr('全部','All')}}</option><option value="yes">{{tr('有','Present')}}</option><option value="no">{{tr('无','Absent')}}</option><option value="unknown">{{tr('未识别','Not screened')}}</option></select></label>
         <label><span>{{tr('是否看过','Seen')}}</span><select v-model="query.entrySeenView" class="toolbar-select" @change="search"><option value="all">{{tr('全部','All')}}</option><option value="seen">{{tr('已看','Seen')}}</option><option value="unseen">{{tr('未看','Not seen')}}</option></select></label>
         <label><span>{{tr('数据范围','Data scope')}}</span><select v-model="query.deletedView" class="toolbar-select" @change="search"><option value="active">{{tr('正常资产','Active assets')}}</option><option value="trash">{{tr('仅回收站','Trash only')}}</option><option value="all">{{tr('正常 + 回收站','Active + trash')}}</option></select></label>
-        <label><span>{{tr('排序','Sort')}}</span><span class="sort-control"><select v-model="query.sortBy" class="toolbar-select" @change="search(false)"><option value="priority">{{tr('复核优先级','Review priority')}}</option><option value="projectLastSeen">{{tr('项目最后发现','Project last seen')}}</option><option value="lastAlive">{{tr('最后存活','Last alive')}}</option><option value="score">{{tr('评分','Score')}}</option><option value="statusCode">{{tr('状态码','Status')}}</option><option value="company">{{tr('公司名称','Company')}}</option><option value="host">{{tr('访问入口','Host')}}</option><option value="title">{{tr('标题','Title')}}</option><option value="hasLogin">{{tr('登录口','Login portal')}}</option><option value="hasRegister">{{tr('注册口','Register portal')}}</option><option value="entrySeen">{{tr('是否看过','Seen')}}</option></select><button class="sort-direction" :title="query.sortDirection === 'desc' ? tr('当前降序','Descending') : tr('当前升序','Ascending')" @click="query.sortDirection=query.sortDirection==='desc'?'asc':'desc';search(false)">{{query.sortDirection==='desc'?'↓':'↑'}}</button></span></label>
+        <label><span>{{tr('排序','Sort')}}</span><span class="sort-control"><select v-model="query.sortBy" class="toolbar-select" @change="search(false)"><option value="priority">{{tr('复核优先级','Review priority')}}</option><option value="projectLastSeen">{{tr('项目最近入库','Project last imported')}}</option><option value="lastAlive">{{tr('最近存活记录','Last alive record')}}</option><option value="score">{{tr('评分','Score')}}</option><option value="statusCode">{{tr('状态码','Status')}}</option><option value="company">{{tr('来源标签','Discovery label')}}</option><option value="host">{{tr('访问入口','Host')}}</option><option value="title">{{tr('标题','Title')}}</option><option value="hasLogin">{{tr('登录口','Login portal')}}</option><option value="hasRegister">{{tr('注册口','Register portal')}}</option><option value="entrySeen">{{tr('是否看过','Seen')}}</option></select><button class="sort-direction" :title="query.sortDirection === 'desc' ? tr('当前降序','Descending') : tr('当前升序','Ascending')" @click="query.sortDirection=query.sortDirection==='desc'?'asc':'desc';search(false)">{{query.sortDirection==='desc'?'↓':'↑'}}</button></span></label>
       </div>
-      <div class="asset-filter-hint"><span>{{tr('探测队列确定一级范围。登录口、注册口和是否看过可以在这里筛选，高级查询里也能按同样的值过滤。点「访问入口」打开浏览器后，这条资产会记为已看。','Probe queue sets the primary scope. Login portal, register portal and seen state can be filtered here or in advanced query. Opening a browser from Access entry marks that asset as seen.')}}</span><b v-if="query.probeOutcomeView && query.probeOutcomeView !== 'all'">{{tr('当前二次筛选：','Secondary filter: ')}}{{probeLabel(query.probeOutcomeView)}}</b></div>
+      <div class="asset-filter-hint"><span>{{tr('最近保存的探测结果确定一级范围，不代表本轮已复测。登录口、注册口和是否看过可以在这里筛选，高级查询里也能按同样的值过滤。点「访问入口」打开浏览器后，这条资产会记为已看。','Recorded probe results set the primary scope; they do not prove this run re-probed the asset. Login portal, register portal and seen state can be filtered here or in advanced query. Opening a browser from Access entry marks that asset as seen.')}}</span><b v-if="query.probeOutcomeView && query.probeOutcomeView !== 'all'">{{tr('当前二次筛选：','Secondary filter: ')}}{{probeLabel(query.probeOutcomeView)}}</b></div>
       <div class="asset-toolbar-actions">
         <label class="check-field"><input v-model="query.collapseIdenticalResponses" type="checkbox" @change="search()" />{{tr('完全相同响应仅显示一条','Show one identical response')}}</label>
         <button class="button ghost compact" @click="openPageRules()"><ShieldBan :size="15" /> {{tr('页面隔离规则','Page rules')}}</button>
@@ -684,10 +685,11 @@ onUnmounted(() => { disposed = true; ++queryGeneration; cancelRowDrag(); });
       <div class="advanced-actions"><button class="button ghost compact" @click="query.conditions=[];search()">{{tr('清空','Clear')}}</button><button class="button primary compact" @click="search">{{tr('应用查询','Apply')}}</button></div>
     </div>
 
+    <p class="asset-evidence-note">{{tr('来源标签与评分是发现线索；人工确认有效不等于确认归属或授予执行权限。最近入库时间不代表本次已经探测。','Discovery labels and scores are clues. Validity review does not confirm ownership or grant execution permission. A recent import is not a new probe.')}}</p>
     <div v-if="selectedRows.length" class="bulk-bar">
       <button v-if="selectedRows.length===1" :disabled="bulkBusy" @click="openPageRules(selectedRows[0])"><ShieldBan :size="15" /> {{tr('隔离此类页面','Isolate this page type')}}</button>
       <div class="bulk-context"><strong>{{tr(`已选择 ${selectedRows.length} 条`,`${selectedRows.length} selected`)}}</strong><span v-if="selectedProjectCount > 1">{{tr(`来自 ${selectedProjectCount} 个项目`,`Across ${selectedProjectCount} projects`)}}</span><span v-else>{{tr('选择会跨页保留','Selection persists across pages')}}</span></div><span class="bulk-divider"></span>
-      <button class="bulk-confirm" :disabled="bulkBusy" :title="tr('确认属于有效资产；保存后从待复核队列移出','Mark valid and remove from the review queue')" @click="act('confirmed')"><Check :size="15" /><span><strong>{{tr('确认有效','Confirm valid')}}</strong><small>{{tr('移出待审核','Leave review')}}</small></span></button>
+      <button class="bulk-confirm" :disabled="bulkBusy" :title="tr('人工保留并移出待复核；不确认归属或授予执行权限','Keep after validity review; this does not confirm ownership or grant execution permission')" @click="act('confirmed')"><Check :size="15" /><span><strong>{{tr('确认有效','Confirm valid')}}</strong><small>{{tr('移出待审核','Leave review')}}</small></span></button>
       <button class="bulk-uncertain" :disabled="bulkBusy" :title="tr('已经人工看过，但还需要补充证据；继续保留在复核队列','Reviewed but needs more evidence; keep in review')" @click="act('uncertain')"><ShieldQuestion :size="15" /><span><strong>{{tr('保留待核','Keep for review')}}</strong><small>{{tr('等待补证据','Needs evidence')}}</small></span></button>
       <label class="bulk-scan-mode" :title="tr('任务模式会固化到调查任务，确认后仍按该上限执行','The selected mode is stored with the investigation task and remains effective after confirmation')"><span>{{tr('扫描模式','Scan mode')}}</span><select v-model="assetScanMode"><option value="quick">{{tr('快速扫描','Quick')}}</option><option value="standard">{{tr('标准扫描','Standard')}}</option><option value="deep">{{tr('深度扫描','Deep')}}</option></select></label>
       <span v-if="scanningActionError" role="alert">{{scanningActionError}}</span><span v-if="props.scanningEnabled===false">{{tr('扫描插件已停用','Scanning is disabled')}}</span>
@@ -719,6 +721,7 @@ onUnmounted(() => { disposed = true; ++queryGeneration; cancelRowDrag(); });
                 <span v-else-if="column==='sentinelStatus'" class="data-badge" :class="badgeClass(column,asset.sentinelStatus)" :title="asset.sentinelSentAt||''">{{sentinelLabel(asset)}}</span>
                 <span v-else-if="column==='title'" class="title-rule-source" :title="String(value(asset,column))" @mouseup="captureTitleSelection($event,asset)">{{value(asset,column)||'—'}}</span>
                 <span v-else :title="String(value(asset,column))">{{ displayValue(asset,column) }}</span>
+                <AssetObservation v-if="column === 'host'" :asset="asset" />
               </td>
             </tr>
           </tbody>
@@ -744,6 +747,7 @@ onUnmounted(() => { disposed = true; ++queryGeneration; cancelRowDrag(); });
 @media(max-width:820px){.asset-workspace .bulk-bar {left:20px;right:20px;}}
 .asset-entry { display:flex; align-items:center; gap:6px; min-width:0; }
 .asset-entry .asset-link { flex:1 1 auto; min-width:0; text-align:left; }
+.asset-evidence-note { color:var(--muted); font-size:10px; line-height:1.6; margin:0; }
 .asset-response-group { display:inline-flex; flex:0 0 auto; align-items:center; gap:3px; padding:1px 5px; border:1px solid color-mix(in srgb,var(--blue) 18%,var(--line)); border-radius:5px; background:color-mix(in srgb,var(--blue) 6%,var(--app-surface)); color:var(--blue); font-size:9px; font-weight:600; line-height:16px; white-space:nowrap; transition:background .15s,border-color .15s; }
 .asset-response-group:hover { background:color-mix(in srgb,var(--blue) 12%,var(--app-surface)); border-color:color-mix(in srgb,var(--blue) 38%,var(--line)); }
 .asset-response-group:focus-visible { outline:2px solid var(--blue); outline-offset:2px; }
