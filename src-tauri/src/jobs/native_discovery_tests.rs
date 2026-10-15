@@ -149,14 +149,16 @@ fn duplicate_hits_across_priority_stages_keep_all_sources_on_first_stage() {
 fn persisted_discovery_retains_previous_round_sources_without_double_counting() {
     let company = json!({"label":"集团", "kind":"company", "ip":"1.2.3.4"});
     let domain = json!({"label":"example.com", "kind":"domain"});
-    let (merged, count) = merge_persisted_discovery(
+    let (merged, count, truncated) = merge_persisted_discovery(
         &json!([company.clone()]).to_string(),
         &json!([company.clone(), domain]).to_string(),
     );
     assert_eq!(count, 2);
-    let (again, count) = merge_persisted_discovery(&merged, &json!([company]).to_string());
+    let (again, count, again_truncated) =
+        merge_persisted_discovery(&merged, &json!([company]).to_string());
     assert_eq!(count, 2);
     assert_eq!(merged, again);
+    assert!(!truncated && !again_truncated);
 }
 
 #[test]
@@ -167,8 +169,9 @@ fn old_checkpoint_without_provenance_does_not_invent_an_extra_discovery_source()
     let incoming =
         json!([{"label":"集团","kind":"","evidence":"","matchedQueries":"","assetKey":"old-key"}])
             .to_string();
-    let (merged, count) = merge_persisted_discovery(&stored, &incoming);
+    let (merged, count, truncated) = merge_persisted_discovery(&stored, &incoming);
     assert_eq!(count, 2);
+    assert!(!truncated);
     assert_eq!(
         serde_json::from_str::<Vec<serde_json::Value>>(&merged)
             .unwrap()
@@ -418,4 +421,188 @@ fn optimizer_preserves_all_distinct_requested_entries_even_with_shared_redirect(
     assert_eq!(summary["kept"], urls.len());
     assert_eq!(summary["excluded"], 0);
     fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn known_service_protocols_on_one_host_port_are_not_discovery_duplicates() {
+    let service = |protocol: &str, label: &str| -> Record {
+        [
+            ("company", label),
+            ("discovery_seed_kind", "company"),
+            ("host", "EXAMPLE.test"),
+            ("port", "443"),
+            ("protocol", protocol),
+        ]
+        .into_iter()
+        .map(|(key, value)| (key.into(), value.into()))
+        .collect()
+    };
+    let merged = merge_discovery_rows(vec![
+        service("ssh", "A"),
+        service("redis", "A"),
+        service("SSH", "B"),
+        service("https", "A"),
+    ]);
+    assert_eq!(merged.len(), 3);
+    let ssh = merged
+        .iter()
+        .find(|row| text(row, &["asset_key"]).starts_with("service:ssh|"))
+        .unwrap();
+    assert_eq!(discovery_source_count(&discovery_sources(ssh)), 2);
+    assert!(!ssh.contains_key("ownership_status"));
+}
+
+#[test]
+fn discovery_merge_chooses_receipt_order_keeps_provider_literal_and_matching_receipts() {
+    let observation = |observed: &str, received: &str, ip: &str, title: &str| {
+        let mut value = row("集团", "company", "https://same.example/", "title-query");
+        for (key, field_value) in [
+            ("lastupdatetime", observed),
+            ("collection_provider_observed_at", observed),
+            ("collection_received_at", received),
+            ("ip", ip),
+            ("title", title),
+            ("collection_request_sha256", "request"),
+            ("collection_payload_sha256", "payload"),
+            ("collection_actual_fields_json", "[\"host\",\"ip\"]"),
+            ("collection_rule_version", "v1"),
+        ] {
+            value.insert(key.into(), field_value.into());
+        }
+        value
+    };
+    let old = observation(
+        "2026-10-10 10:00:00",
+        "2026-10-15T00:00:00Z",
+        "192.0.2.1",
+        "old",
+    );
+    let new = observation(
+        "2026-10-14 10:00:00",
+        "2026-10-14T12:00:00Z",
+        "192.0.2.2",
+        "",
+    );
+    for rows in [
+        vec![old.clone(), new.clone()],
+        vec![new.clone(), old.clone()],
+    ] {
+        let merged = merge_discovery_rows(rows);
+        assert_eq!(text(&merged[0], &["ip"]), "192.0.2.1");
+        assert_eq!(text(&merged[0], &["title"]), "old");
+        let sources = discovery_sources(&merged[0]);
+        assert_eq!(
+            sources.len(),
+            1,
+            "same logical query retains its latest observation"
+        );
+        assert_eq!(sources[0]["observedAt"], "2026-10-10 10:00:00");
+        assert_eq!(sources[0]["receivedAt"], "2026-10-15T00:00:00Z");
+        assert_eq!(sources[0]["payloadSha256"], "payload");
+        assert_eq!(sources[0]["actualFieldsJson"], "[\"host\",\"ip\"]");
+    }
+    let unknown = observation("not-a-time", "", "192.0.2.3", "unknown");
+    let merged = merge_discovery_rows(vec![new, unknown]);
+    assert_eq!(text(&merged[0], &["ip"]), "192.0.2.2");
+    assert_eq!(text(&merged[0], &["title"]), "");
+}
+
+#[test]
+fn discovery_history_has_explicit_count_and_byte_limits_including_single_oversized_source() {
+    let sources: Vec<_> = (0..200).map(|index| json!({"kind":"company", "label":format!("source-{index}"), "link":"https://same.example/", "observedAt":"2026-10-15T00:00:00Z"})).collect();
+    let (stored, count, truncated) = merge_persisted_discovery("[]", &json!(sources).to_string());
+    assert!(truncated);
+    assert_eq!(count, DISCOVERY_SOURCE_LIMIT);
+    assert!(stored.len() <= DISCOVERY_SOURCE_BYTES);
+    let huge = json!([{"kind":"company", "label":"oversized", "evidence":"x".repeat(DISCOVERY_SOURCE_BYTES+1)}]).to_string();
+    let (stored, count, truncated) = merge_persisted_discovery(&huge, "[]");
+    assert_eq!((stored.as_str(), count, truncated), ("[]", 0, true));
+    let (stored, count, truncated) = merge_persisted_discovery("not-json", "[]");
+    assert_eq!((stored.as_str(), count, truncated), ("[]", 0, true));
+    let mut oversized = row("oversized", "company", "https://same.example/", "query");
+    oversized.insert(
+        "matched_queries".into(),
+        "x".repeat(DISCOVERY_SOURCE_BYTES + 1),
+    );
+    let merged = merge_discovery_rows(vec![oversized]);
+    assert_eq!(text(&merged[0], &["discovery_sources_truncated"]), "true");
+    assert!(text(&merged[0], &["discovery_sources_json"]).len() <= DISCOVERY_SOURCE_BYTES);
+}
+
+#[test]
+fn discovery_newer_whole_snapshot_drops_missing_old_fields_without_refilling_them() {
+    let mut old = row("集团", "company", "https://same.example/", "query");
+    for (key, value) in [
+        ("collection_received_at", "2026-10-14T00:00:00Z"),
+        ("ip", "192.0.2.1"),
+        ("domain", "old.example"),
+        ("org", "old organization"),
+        ("country", "old country"),
+        ("title", "old title"),
+    ] {
+        old.insert(key.into(), value.into());
+    }
+    let mut new = row("集团", "company", "https://same.example/", "query");
+    new.insert(
+        "collection_received_at".into(),
+        "2026-10-15T00:00:00Z".into(),
+    );
+    new.insert("ip".into(), "192.0.2.2".into());
+    for records in [
+        vec![old.clone(), new.clone()],
+        vec![new.clone(), old.clone()],
+    ] {
+        let merged = merge_discovery_rows(records);
+        assert_eq!(text(&merged[0], &["ip"]), "192.0.2.2");
+        for key in ["domain", "org", "country", "title"] {
+            assert!(
+                !merged[0].contains_key(key),
+                "{key} must be unknown in the selected snapshot"
+            );
+        }
+        let sources = discovery_sources(&merged[0]);
+        assert_eq!(sources.len(), 1);
+        assert_eq!(
+            sources[0]["observation"],
+            json!(super::super::asset_observation::source_snapshot(&merged[0]))
+        );
+        assert_eq!(sources[0]["receivedAt"], "2026-10-15T00:00:00Z");
+    }
+}
+
+#[test]
+fn discovery_equal_time_winner_and_receipt_are_identical_in_both_orders_and_on_reentry() {
+    let observation = |ip: &str, title: &str, payload: &str| {
+        let mut value = row("集团", "company", "https://same.example/", "query");
+        for (key, field) in [
+            ("ip", ip),
+            ("title", title),
+            ("collection_payload_sha256", payload),
+            ("collection_request_sha256", "request"),
+            ("collection_received_at", "2026-10-15T00:00:00Z"),
+            ("collection_provider_observed_at", "2026-10-10 00:00:00"),
+        ] {
+            value.insert(key.into(), field.into());
+        }
+        value
+    };
+    let first = observation("192.0.2.1", "first", "payload-a");
+    let second = observation("192.0.2.2", "second", "payload-b");
+    let forward = merge_discovery_rows(vec![first.clone(), second.clone()]);
+    let backward = merge_discovery_rows(vec![second, first]);
+    assert_eq!(forward, backward);
+    assert_eq!(merge_discovery_rows(forward.clone()), forward);
+    let sources = discovery_sources(&forward[0]);
+    assert_eq!(sources.len(), 1);
+    assert_eq!(sources[0]["ip"], text(&forward[0], &["ip"]));
+    assert_eq!(
+        sources[0]["payloadSha256"],
+        text(&forward[0], &["collection_payload_sha256"])
+    );
+    assert_eq!(
+        sources[0]["observation"],
+        json!(super::super::asset_observation::source_snapshot(
+            &forward[0]
+        ))
+    );
 }

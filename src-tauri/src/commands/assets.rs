@@ -879,9 +879,9 @@ pub async fn list_runs(
 ) -> Result<Vec<JobRun>, String> {
     let connection = db::open(&state.db_path)?;
     let sql = if project_id.is_some() {
-        "SELECT r.id,r.project_id,r.profile_id,p.name,r.name,r.pipeline,r.status,r.stage,r.progress,r.processed,r.total,r.output_dir,r.error,r.started_at,r.finished_at,r.created_at FROM runs r JOIN projects p ON p.id=r.project_id WHERE r.project_id=?1 ORDER BY r.id DESC LIMIT ?2"
+        "SELECT r.id,r.project_id,r.profile_id,p.name,r.name,r.pipeline,r.status,r.stage,r.progress,r.processed,r.total,r.output_dir,r.error,r.started_at,r.finished_at,r.created_at,r.collection_summary_json FROM runs r JOIN projects p ON p.id=r.project_id WHERE r.project_id=?1 ORDER BY r.id DESC LIMIT ?2"
     } else {
-        "SELECT r.id,r.project_id,r.profile_id,p.name,r.name,r.pipeline,r.status,r.stage,r.progress,r.processed,r.total,r.output_dir,r.error,r.started_at,r.finished_at,r.created_at FROM runs r JOIN projects p ON p.id=r.project_id ORDER BY r.id DESC LIMIT ?1"
+        "SELECT r.id,r.project_id,r.profile_id,p.name,r.name,r.pipeline,r.status,r.stage,r.progress,r.processed,r.total,r.output_dir,r.error,r.started_at,r.finished_at,r.created_at,r.collection_summary_json FROM runs r JOIN projects p ON p.id=r.project_id ORDER BY r.id DESC LIMIT ?1"
     };
     let mut statement = connection.prepare(sql).map_err(|error| error.to_string())?;
     let mapper = |row: &Row<'_>| {
@@ -902,6 +902,7 @@ pub async fn list_runs(
             started_at: row.get(13)?,
             finished_at: row.get(14)?,
             created_at: row.get(15)?,
+            collection_summary: serde_json::from_str(&row.get::<_, String>(16)?).ok(),
         })
     };
     let rows = if let Some(id) = project_id {

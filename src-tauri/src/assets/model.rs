@@ -13,6 +13,49 @@ pub struct Target {
     pub created_at: String,
 }
 
+/// Collection coverage is independent of the job's execution terminal state.
+/// Old runs have no receipt and therefore serialize `collectionSummary: null`.
+#[derive(Debug, Serialize, Deserialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct CollectionRetentionSummary {
+    pub scope: String,
+    pub run_bytes: u64,
+    pub project_bytes: u64,
+    pub global_bytes: u64,
+    pub expired_files: u64,
+    pub expired_bytes: u64,
+    pub unmanaged_runs: u64,
+    pub unknown_files: u64,
+    pub history_truncated: bool,
+    pub max_run_bytes: u64,
+    pub max_project_bytes: u64,
+    pub max_global_bytes: u64,
+    pub max_pages: u64,
+    pub max_age_seconds: u64,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct CollectionSummary {
+    pub schema_version: u32,
+    pub execution_complete: bool,
+    pub coverage_complete: bool,
+    pub queries: u64,
+    pub completed_queries: u64,
+    pub failed_queries: u64,
+    pub truncated_queries: u64,
+    pub partial_queries: u64,
+    pub invalid_records: u64,
+    pub candidates: u64,
+    pub imported_candidates: Option<u64>,
+    pub probed_assets: Option<u64>,
+    pub reused_pages: u64,
+    pub error_categories: Vec<String>,
+    pub reasons: Vec<String>,
+    #[serde(default)]
+    pub retention: Option<CollectionRetentionSummary>,
+}
+
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct TargetImportInput {
@@ -40,6 +83,7 @@ pub struct JobRun {
     pub started_at: Option<String>,
     pub finished_at: Option<String>,
     pub created_at: String,
+    pub collection_summary: Option<CollectionSummary>,
 }
 
 #[derive(Debug, Serialize)]

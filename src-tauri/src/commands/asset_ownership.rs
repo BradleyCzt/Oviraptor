@@ -26,6 +26,49 @@ pub(crate) fn normalize_ownership_domain(value: &str) -> String {
     value.trim_start_matches("www.").to_string()
 }
 
+/// Endpoint/official-host identity preserves DNS labels, including `www`.
+/// Parse the authority so userinfo can never be mistaken for the hostname.
+fn normalize_ownership_host(value: &str) -> String {
+    let raw = value.trim();
+    if raw.is_empty() {
+        return String::new();
+    }
+    if let Ok(ip) = raw.parse::<std::net::IpAddr>() {
+        return ip.to_string();
+    }
+    let input = if raw.contains("://") {
+        raw.to_string()
+    } else {
+        format!("http://{raw}")
+    };
+    reqwest::Url::parse(&input)
+        .ok()
+        .and_then(|url| url.host_str().map(str::to_string))
+        .map(|host| host.trim_matches(['[', ']']).trim_end_matches('.').to_ascii_lowercase())
+        .unwrap_or_default()
+}
+
+fn ownership_endpoint_host(link: &str, host: &str) -> String {
+    // A nonempty invalid link is conflicting evidence, not permission to
+    // substitute an unrelated host/domain claim from the same source row.
+    normalize_ownership_host(if link.trim().is_empty() { host } else { link })
+}
+
+fn ownership_source_host_conflicts(link: &str, host: &str) -> bool {
+    !link.trim().is_empty() && !host.trim().is_empty()
+        && normalize_ownership_host(link) != normalize_ownership_host(host)
+}
+
+fn ownership_source_domain_conflicts(endpoint: &str, domain: &str) -> bool {
+    if domain.trim().is_empty() {
+        return false;
+    }
+    let source = normalize_ownership_host(domain);
+    endpoint.is_empty() || source.is_empty()
+        || (endpoint != source && (endpoint.parse::<std::net::IpAddr>().is_ok()
+            || source.parse::<std::net::IpAddr>().is_ok() || !endpoint.ends_with(&format!(".{source}"))))
+}
+
 pub(crate) fn domain_matches(host: &str, rule: &str) -> bool {
     let host = normalize_ownership_domain(host);
     let rule = normalize_ownership_domain(rule);
@@ -34,13 +77,26 @@ pub(crate) fn domain_matches(host: &str, rule: &str) -> bool {
 
 /// O1：目录域名默认精确主机（§8），不做子域泛化。
 fn host_equals_rule(host: &str, rule: &str) -> bool {
-    let host = normalize_ownership_domain(host);
-    !host.is_empty() && host == normalize_ownership_domain(rule)
+    let host = normalize_ownership_host(host);
+    !host.is_empty() && host == normalize_ownership_host(rule)
 }
 
 fn text_matches_term(text: &str, term: &str) -> bool {
     let term = term.trim().to_lowercase();
     term.chars().count() >= 2 && text.to_lowercase().contains(&term)
+}
+
+// Only new explicit confirmations can establish the endpoint-preserving
+// semantics. Older learned patterns may already have lost their `www` label.
+const OWNERSHIP_LEARNED_RULE_SOURCE_V2: &str = "manual_decision_endpoint_v2";
+
+fn ownership_legacy_learned_rule(rule_type: &str, action: &str, source: &str) -> bool {
+    matches!(rule_type, "host" | "domain") && action == "approve" && source == "manual_decision"
+}
+
+fn ownership_legacy_rule_matches(host: &str, rule_type: &str, pattern: &str) -> bool {
+    if rule_type == "domain" { domain_matches(host, pattern) }
+    else { !host.is_empty() && normalize_ownership_domain(host) == normalize_ownership_domain(pattern) }
 }
 
 fn network_only_ownership_candidate(company:&str,domain:&str,ip:&str,candidate_domain:&str)->bool{
@@ -228,22 +284,23 @@ fn assess_asset_ownership_for_connection(
     connection: &mut rusqlite::Connection,
     project_id: i64,
 ) -> Result<AssetOwnershipAssessmentResult, String> {
-    let profile = read_ownership_profile(connection, project_id)?;
+    let transaction = connection.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate).map_err(|error| error.to_string())?;
+    let profile = read_ownership_profile(&transaction, project_id)?;
     let rules = {
-        let mut statement = connection
-            .prepare("SELECT rule_type,pattern,action FROM asset_ownership_rules WHERE project_id=?1 AND enabled=1")
+        let mut statement = transaction
+            .prepare("SELECT rule_type,pattern,action,source FROM asset_ownership_rules WHERE project_id=?1 AND enabled=1")
             .map_err(|error| error.to_string())?;
         let rows = statement
-            .query_map([project_id], |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?, row.get::<_, String>(2)?)))
+            .query_map([project_id], |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?, row.get::<_, String>(2)?, row.get::<_, String>(3)?)))
             .map_err(|error| error.to_string())?
             .collect::<Result<Vec<_>, _>>()
             .map_err(|error| error.to_string())?;
         rows
     };
     // O1：已绑定组织目录时，本项目范围内的目录实体名称/别名/确认域名作为确定性线索；只产生“疑似归属”，不授权。
-    let directory = project_directory_terms(connection, project_id)?;
+    let directory = project_directory_terms(&transaction, project_id)?;
     let assets = {
-        let mut statement = connection
+        let mut statement = transaction
             .prepare(&format!("SELECT a.id,a.company,a.host,a.link,a.domain,a.title,a.ip,a.extra_json FROM assets a JOIN project_assets pa ON pa.asset_id=a.id LEFT JOIN asset_ownership_decisions o ON o.project_id=pa.project_id AND o.asset_id=pa.asset_id WHERE pa.project_id=?1 AND {OWNERSHIP_SCOPE_SQL} AND COALESCE(o.source,'auto')<>'manual'"))
             .map_err(|error| error.to_string())?;
         let rows = statement
@@ -253,14 +310,11 @@ fn assess_asset_ownership_for_connection(
             .map_err(|error| error.to_string())?;
         rows
     };
-    let transaction = connection.transaction().map_err(|error| error.to_string())?;
     let mut assessed = 0i64;
     for (asset_id, company, host, link, domain, title, ip, extra_json) in assets {
-        let candidate_domain = [domain.as_str(), host.as_str(), link.as_str()]
-            .into_iter()
-            .map(normalize_ownership_domain)
-            .find(|value| !value.is_empty())
-            .unwrap_or_default();
+        let candidate_domain = ownership_endpoint_host(&link, &host);
+        let source_domain_conflict = ownership_source_domain_conflicts(&candidate_domain, &domain);
+        let source_host_conflict = ownership_source_host_conflicts(&link, &host);
         let extra = serde_json::from_str::<JsonValue>(&extra_json).unwrap_or_else(|_| JsonValue::Object(Default::default()));let org=extra.get("org").and_then(JsonValue::as_str).unwrap_or("");let region=["country","country_name","region","province"].iter().filter_map(|key|extra.get(*key).and_then(JsonValue::as_str)).collect::<Vec<_>>().join(" ");
         let combined = format!("{company} {title} {org}");
         let mut approved_domains = profile.approved_domains.clone();
@@ -268,7 +322,12 @@ fn assess_asset_ownership_for_connection(
         let mut excluded_names = profile.excluded_names.clone();
         // O3：rule_type='host' 是精确主机规则（默认的学习范围），只匹配完全相同的主机。
         let (mut approved_hosts, mut excluded_hosts) = (Vec::new(), Vec::new());
-        for (rule_type, pattern, action) in &rules {
+        let mut legacy_rule = None;
+        for (rule_type, pattern, action, source) in &rules {
+            if ownership_legacy_learned_rule(rule_type, action, source) {
+                if ownership_legacy_rule_matches(&candidate_domain, rule_type, pattern) { legacy_rule = Some(pattern); }
+                continue;
+            }
             match (rule_type.as_str(), action.as_str()) {
                 ("domain", "approve") => approved_domains.push(pattern.clone()),
                 ("domain", "exclude") => excluded_domains.push(pattern.clone()),
@@ -294,6 +353,8 @@ fn assess_asset_ownership_for_connection(
             ("excluded", 100, format!("命中排除域名 {rule}"), Vec::<String>::new(), vec![format!("排除域名：{rule}")])
         } else if let Some(rule) = excluded_name {
             ("excluded", 94, format!("命中排除主体 {rule}"), Vec::<String>::new(), vec![format!("排除主体：{rule}")])
+        } else if source_domain_conflict || source_host_conflict {
+            ("unreviewed", 0, "来源主机/域名与实际端点不一致，需复核原始观测".into(), vec![format!("实际端点：{candidate_domain}")], vec![format!("来源主机：{host}；来源域名：{domain}")])
         } else if let Some(rule) = shared_domain {
             ("attributed", 52, format!("命中集团共享域名 {rule}；不能据此认定属于当前跨境主体"), vec![format!("集团域名线索：{rule}")], vec!["共享域名可能同时承载其他地区或子公司".into()])
         } else if let Some((rule, entity)) = directory_shared {
@@ -302,6 +363,8 @@ fn assess_asset_ownership_for_connection(
             ("attributed", 92, format!("属于确认根域名 {rule}；仍需确认授权范围"), vec![format!("确认域名：{rule}")], Vec::<String>::new())
         } else if let Some((rule, entity)) = directory_domain {
             ("attributed", 92, format!("精确主机 {rule} 为目录实体「{entity}」的已确认域名；仍需确认授权范围"), vec![format!("目录确认域名：{rule}")], Vec::<String>::new())
+        } else if let Some(pattern) = legacy_rule {
+            ("unreviewed", 0, "历史学习规则缺少精确主机依据，需人工重新确认".into(), Vec::<String>::new(), vec![format!("待复核旧规则：{pattern}")])
         } else if cidr_or_asn&&(alias_match.is_some()||directory_alias.is_some()) {
             let region_note=if let Some(value)=excluded_region{format!("；地域 {value} 位于排除范围")}else if let Some(value)=allowed_region{format!("；地域线索命中 {value}")}else{"；未取得可靠地域证据".into()};
             ("attributed",if allowed_region.is_some(){55}else{45},format!("ASN/IP 组织字段命中 {org}，仅证明网络登记或运营关系，不等于业务资产{region_note}"),vec![format!("网络组织：{org}"),format!("IP：{ip}")],vec!["ASN、CIDR、WHOIS 组织均属于弱归属证据".into()])
@@ -729,3 +792,7 @@ mod asset_ownership_o0_tests {
         fs::remove_dir_all(root).unwrap();
     }
 }
+
+#[cfg(test)]
+#[path = "asset_ownership_accuracy_tests.rs"]
+mod asset_ownership_accuracy_tests;

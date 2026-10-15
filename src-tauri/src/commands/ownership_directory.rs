@@ -1063,11 +1063,11 @@ fn ownership_suggestions_for_connection(
             .iter()
             .flat_map(|entity| entity.identifiers.iter())
             .filter(|identifier| ORG_DOMAIN_IDENTIFIER_KINDS.contains(&identifier.kind.as_str()))
-            .map(|identifier| normalize_ownership_domain(&identifier.value))
+            .map(|identifier| normalize_ownership_host(&identifier.value))
             .collect();
         let mut hosts: HashMap<(i64, String), (i64, i64, Vec<i64>)> = HashMap::new();
         let mut statement = connection
-            .prepare(&format!("SELECT a.id,COALESCE(NULLIF(a.domain,''),NULLIF(a.host,''),a.link),CASE WHEN o.source='manual' AND o.status IN ('excluded','third_party') THEN 1 ELSE 0 END FROM project_assets pa JOIN assets a ON a.id=pa.asset_id LEFT JOIN asset_ownership_decisions o ON o.project_id=pa.project_id AND o.asset_id=pa.asset_id WHERE pa.project_id=?1 AND {OWNERSHIP_SCOPE_SQL} AND a.company=?2 ORDER BY a.id LIMIT 50000"))
+            .prepare(&format!("SELECT a.id,a.link,a.host,CASE WHEN o.source='manual' AND o.status IN ('excluded','third_party') THEN 1 ELSE 0 END FROM project_assets pa JOIN assets a ON a.id=pa.asset_id LEFT JOIN asset_ownership_decisions o ON o.project_id=pa.project_id AND o.asset_id=pa.asset_id WHERE pa.project_id=?1 AND {OWNERSHIP_SCOPE_SQL} AND a.company=?2 ORDER BY a.id LIMIT 50000"))
             .map_err(|error| error.to_string())?;
         for (entity_id, labels) in &matched_labels {
             for label in labels {
@@ -1076,14 +1076,15 @@ fn ownership_suggestions_for_connection(
                         Ok((
                             row.get::<_, i64>(0)?,
                             row.get::<_, String>(1)?,
-                            row.get::<_, i64>(2)?,
+                            row.get::<_, String>(2)?,
+                            row.get::<_, i64>(3)?,
                         ))
                     })
                     .map_err(|error| error.to_string())?
                     .collect::<Result<Vec<_>, _>>()
                     .map_err(|error| error.to_string())?;
-                for (asset_id, raw, conflict) in rows {
-                    let host = normalize_ownership_domain(&raw);
+                for (asset_id, link, host, conflict) in rows {
+                    let host = ownership_endpoint_host(&link, &host);
                     if host.is_empty()
                         || !host.contains('.')
                         || host.parse::<std::net::IpAddr>().is_ok()
@@ -1394,6 +1395,18 @@ fn save_project_ownership_directory_for_connection(
             entity_id,
         });
     }
+    // Historical normalized_value may have collapsed www into the apex. The
+    // raw value still preserves its exact host; never rewrite that evidence.
+    let mut domain_index: HashMap<(String, String), HashSet<i64>> = HashMap::new();
+    {
+        let mut statement = transaction.prepare("SELECT entity_id,kind,value FROM org_entity_identifiers WHERE kind IN ('official_domain','shared_domain')").map_err(|error| error.to_string())?;
+        let rows = statement.query_map([], |row| Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?, row.get::<_, String>(2)?))).map_err(|error| error.to_string())?;
+        for row in rows {
+            let (entity, kind, value) = row.map_err(|error| error.to_string())?;
+            let host = normalize_ownership_host(&value);
+            if !host.is_empty() { domain_index.entry((kind, host)).or_default().insert(entity); }
+        }
+    }
     let mut created_identifiers = 0i64;
     for draft in &input.identifiers {
         let entity_id = resolve(&created, &draft.entity)?;
@@ -1401,13 +1414,13 @@ fn save_project_ownership_directory_for_connection(
         let kind = draft.kind.as_str();
         let value = clean_org_text(&draft.value, 240);
         let normalized = if ORG_DOMAIN_IDENTIFIER_KINDS.contains(&kind) {
-            let host = normalize_ownership_domain(&value);
+            let host = normalize_ownership_host(&value);
             if host.is_empty() || !host.contains('.') || host.parse::<std::net::IpAddr>().is_ok() {
                 return Err(format!(
                     "{ORG_DIRECTORY_INVALID}: 「{value}」不是有效域名（IP 不作为组织域名）"
                 ));
             }
-            host
+            format!("host-v2:{host}")
         } else if ORG_NAME_IDENTIFIER_KINDS.contains(&kind) {
             if org_label_is_network_clue(&value) {
                 return Err(format!(
@@ -1422,22 +1435,22 @@ fn save_project_ownership_directory_for_connection(
         } else {
             return Err(format!("{ORG_DIRECTORY_INVALID}: 标识类型 {kind} 无效"));
         };
-        if kind != "shared_domain" {
-            let clash: Option<i64> = if kind == "official_domain" {
-                transaction
-                    .query_row("SELECT entity_id FROM org_entity_identifiers WHERE kind='official_domain' AND normalized_value=?1 AND entity_id<>?2 LIMIT 1", params![normalized, entity_id], |row| row.get(0))
-                    .optional()
-                    .map_err(|error| error.to_string())?
-            } else {
-                transaction
-                    .query_row(
-                        "SELECT entity_id FROM org_entity_identifiers WHERE kind IN ('short_name','english_name','historical_name','brand') AND normalized_value=?1 AND entity_id<>?2 UNION ALL SELECT id FROM org_entities WHERE normalized_name=?1 AND id<>?2 LIMIT 1",
-                        params![normalized, entity_id],
-                        |row| row.get(0),
-                    )
-                    .optional()
-                    .map_err(|error| error.to_string())?
-            };
+        let domain_key = ORG_DOMAIN_IDENTIFIER_KINDS.contains(&kind).then(|| (kind.to_string(), normalize_ownership_host(&value)));
+        if let Some(key) = &domain_key {
+            if let Some(owners) = domain_index.get(key) {
+                if kind == "official_domain" {
+                    if let Some(other) = owners.iter().filter(|other| **other != entity_id).min() {
+                        return Err(format!("{ORG_DIRECTORY_INVALID}: 「{value}」已属于目录实体 #{other}；同一别名/确认域名不能指向两个单位，未写入"));
+                    }
+                }
+                if owners.contains(&entity_id) { continue; } // explicit raw-host reuse, not an ignored insert
+            }
+        } else {
+            let clash: Option<i64> = transaction
+                .query_row(
+                    "SELECT entity_id FROM org_entity_identifiers WHERE kind IN ('short_name','english_name','historical_name','brand') AND normalized_value=?1 AND entity_id<>?2 UNION ALL SELECT id FROM org_entities WHERE normalized_name=?1 AND id<>?2 LIMIT 1",
+                    params![normalized, entity_id], |row| row.get(0),
+                ).optional().map_err(|error| error.to_string())?;
             if let Some(other) = clash {
                 return Err(format!("{ORG_DIRECTORY_INVALID}: 「{value}」已属于目录实体 #{other}；同一别名/确认域名不能指向两个单位，未写入"));
             }
@@ -1456,6 +1469,12 @@ fn save_project_ownership_directory_for_connection(
                 params![entity_id, kind, value, normalized, source, clean_org_text(&draft.source_ref, 400), next_directory],
             )
             .map_err(|error| error.to_string())? as i64;
+        if let Some(key) = domain_key {
+            if inserted != 1 {
+                return Err(format!("{ORG_DIRECTORY_CONFLICT}: 精确主机唯一键与历史记录冲突，未新增任何标识，请重新核对目录"));
+            }
+            domain_index.entry(key).or_default().insert(entity_id);
+        }
         if inserted > 0 {
             transaction
                 .execute(

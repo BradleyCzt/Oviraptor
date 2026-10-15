@@ -20,6 +20,9 @@ use tauri::{image::Image, AppHandle, Emitter, State};
 use uuid::Uuid;
 
 mod asset_identity;
+mod asset_observation;
+pub(crate) mod collection_retention;
+mod collection_summary;
 mod job_lifecycle;
 mod job_resume;
 mod native_config;
@@ -448,19 +451,35 @@ fn import_csv_with_progress(
         } else {
             source_key
         };
-        if raw_key.trim_matches('|').is_empty() {
+        if raw_key.trim_matches('|').is_empty()
+            || !asset_identity::valid_network_identity(link, host, protocol, ip, port)
+        {
             invalid += 1;
             continue;
         }
         let canonical_key = canonical_identity(link, host, protocol, ip, port, raw_key);
-        let asset_key = known_assets
+        let candidate_key = known_assets
             .get(&canonical_key)
             .cloned()
             .unwrap_or_else(|| format!("{}\u{1f}{}", company, raw_key));
+        let asset_key =
+            asset_observation::choose_key(&transaction, &candidate_key, company, &canonical_key)?;
         known_assets.insert(canonical_key.clone(), asset_key.clone());
         let domain = field(&record, &index, &["domain"]);
-        let title = field(&record, &index, &["probe_title", "title"]);
-        let status_code = field(&record, &index, &["probe_status_code", "status_code"]);
+        let is_probe = index.contains_key("probe_outcome");
+        // An empty field in a real probe result is unknown for that observation,
+        // not permission to substitute a source's older title/status. CSVs that
+        // predate probe-specific columns retain their original compatibility.
+        let title = if is_probe && index.contains_key("probe_title") {
+            field(&record, &index, &["probe_title"])
+        } else {
+            field(&record, &index, &["title"])
+        };
+        let status_code = if is_probe && index.contains_key("probe_status_code") {
+            field(&record, &index, &["probe_status_code"])
+        } else {
+            field(&record, &index, &["status_code"])
+        };
         let probe_outcome = field(&record, &index, &["probe_outcome"]);
         let probe_entry_state = field(&record, &index, &["probe_entry_state"]);
         let review_tier = field(&record, &index, &["review_tier"]);
@@ -479,7 +498,6 @@ fn import_csv_with_progress(
         let has_register = field(&record, &index, &["has_register"]);
         let portal_known = matches!(has_login, "0" | "1") && matches!(has_register, "0" | "1");
 
-        let is_probe = index.contains_key("probe_outcome");
         let mut extra = Map::new();
         for (position, name) in headers.iter().enumerate() {
             if name.starts_with("response_group_") || name == "response_duplicate_of" {
@@ -521,33 +539,17 @@ fn import_csv_with_progress(
                 extra.insert(name.into(), Value::Null);
             }
         }
-        if let Some(incoming) = extra.get("discovery_sources_json").and_then(Value::as_str) {
-            let previous_extra: Option<String> = transaction
-                .query_row(
-                    "SELECT extra_json FROM assets WHERE asset_key=?1",
-                    [&asset_key],
-                    |row| row.get(0),
-                )
-                .optional()
-                .map_err(|error| error.to_string())?;
-            if let Some(previous) =
-                previous_extra.and_then(|raw| serde_json::from_str::<Value>(&raw).ok())
-            {
-                if let Some(stored) = previous
-                    .get("discovery_sources_json")
-                    .and_then(Value::as_str)
-                {
-                    let (merged, count) =
-                        native_workers::merge_persisted_discovery(stored, incoming);
-                    extra.insert("discovery_sources_json".into(), Value::String(merged));
-                    extra.insert(
-                        "discovery_source_count".into(),
-                        Value::String(count.to_string()),
-                    );
-                }
-            }
-        }
-        let extra_json = Value::Object(extra).to_string();
+        let stored_observation = asset_observation::Stored::load(&transaction, &asset_key)?;
+        let endpoint = asset_identity::endpoint_url(link, host, protocol, ip, port)
+            .unwrap_or_else(|| link.to_string());
+        let observation = asset_observation::plan(
+            stored_observation.as_ref(),
+            extra,
+            is_probe,
+            &endpoint,
+            ip,
+            probe_outcome,
+        );
         let mut hasher = DefaultHasher::new();
         let hash_values: Vec<&str> = if is_probe {
             let mut values = vec![
@@ -603,24 +605,30 @@ fn import_csv_with_progress(
         };
 
         transaction.execute(r#"
-            INSERT INTO assets(asset_key,company,host,link,ip,port,protocol,domain,title,status_code,probe_outcome,probe_entry_state,review_tier,content_category,score,state_hash,probe_hash,canonical_key,extra_json,last_alive)
-            VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19,CASE WHEN ?11 IN ('web_alive','web_restricted','browser_render_required','virtual_host_required','alive_clean') THEN datetime('now','localtime') ELSE NULL END)
-            ON CONFLICT(asset_key) DO UPDATE SET company=CASE WHEN assets.company='' OR (json_extract(assets.extra_json,'$.discovery_seed_kind')='domain' AND json_extract(excluded.extra_json,'$.discovery_seed_kind')='company') THEN excluded.company ELSE assets.company END,host=excluded.host,link=excluded.link,ip=excluded.ip,port=excluded.port,
-              protocol=excluded.protocol,domain=excluded.domain,
-              title=CASE WHEN excluded.probe_hash<>'' OR assets.probe_outcome='' THEN excluded.title ELSE assets.title END,
-              status_code=CASE WHEN excluded.probe_hash<>'' OR assets.probe_outcome='' THEN excluded.status_code ELSE assets.status_code END,
-              probe_outcome=CASE WHEN excluded.probe_outcome='' THEN assets.probe_outcome ELSE excluded.probe_outcome END,
-              probe_entry_state=CASE WHEN excluded.probe_entry_state='' THEN assets.probe_entry_state ELSE excluded.probe_entry_state END,
-              review_tier=CASE WHEN excluded.review_tier='' THEN assets.review_tier ELSE excluded.review_tier END,
-              content_category=CASE WHEN excluded.content_category='' THEN assets.content_category ELSE excluded.content_category END,
-              score=CASE WHEN excluded.score='' THEN assets.score ELSE excluded.score END,
-              state_hash=CASE WHEN excluded.state_hash='' THEN assets.state_hash ELSE excluded.state_hash END,
-              probe_hash=CASE WHEN excluded.probe_hash='' THEN assets.probe_hash ELSE excluded.probe_hash END,
+            INSERT INTO assets(asset_key,company,host,link,ip,port,protocol,domain,title,status_code,probe_outcome,probe_entry_state,review_tier,content_category,score,state_hash,probe_hash,canonical_key,extra_json,first_seen,last_seen,last_alive)
+            VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19,?20,?20,?21)
+            ON CONFLICT(asset_key) DO UPDATE SET company=CASE WHEN assets.company='' OR (json_extract(assets.extra_json,'$.discovery_seed_kind')='domain' AND json_extract(excluded.extra_json,'$.discovery_seed_kind')='company') THEN excluded.company ELSE assets.company END,
+              host=CASE WHEN ?22 THEN excluded.host ELSE assets.host END,
+              link=CASE WHEN ?22 THEN excluded.link ELSE assets.link END,
+              ip=CASE WHEN ?22 THEN excluded.ip ELSE assets.ip END,
+              port=CASE WHEN ?22 THEN excluded.port ELSE assets.port END,
+              protocol=CASE WHEN ?22 THEN excluded.protocol ELSE assets.protocol END,
+              domain=CASE WHEN ?22 THEN excluded.domain ELSE assets.domain END,
+              title=CASE WHEN ?23 OR (?22 AND assets.probe_outcome='') THEN excluded.title ELSE assets.title END,
+              status_code=CASE WHEN ?23 OR (?22 AND assets.probe_outcome='') THEN excluded.status_code ELSE assets.status_code END,
+              probe_outcome=CASE WHEN ?23 THEN excluded.probe_outcome ELSE assets.probe_outcome END,
+              probe_entry_state=CASE WHEN ?23 THEN excluded.probe_entry_state ELSE assets.probe_entry_state END,
+              review_tier=CASE WHEN ?24 AND excluded.review_tier<>'' THEN excluded.review_tier ELSE assets.review_tier END,
+              content_category=CASE WHEN ?23 THEN excluded.content_category WHEN ?25 AND excluded.content_category<>'' THEN excluded.content_category ELSE assets.content_category END,
+              score=CASE WHEN ?24 AND excluded.score<>'' THEN excluded.score ELSE assets.score END,
+              state_hash=CASE WHEN ?24 AND excluded.state_hash<>'' THEN excluded.state_hash ELSE assets.state_hash END,
+              probe_hash=CASE WHEN ?25 AND excluded.probe_hash<>'' THEN excluded.probe_hash ELSE assets.probe_hash END,
               canonical_key=excluded.canonical_key,
-              extra_json=json_patch(assets.extra_json,excluded.extra_json),last_seen=datetime('now','localtime'),
-              last_alive=CASE WHEN excluded.probe_outcome IN ('web_alive','web_restricted','browser_render_required','virtual_host_required','alive_clean') THEN datetime('now','localtime') ELSE assets.last_alive END
+              extra_json=excluded.extra_json,last_seen=excluded.last_seen,last_alive=excluded.last_alive
         "#, params![asset_key,company,host,link,ip,port,protocol,domain,title,status_code,probe_outcome,probe_entry_state,review_tier,effective_content_category,score,
-            if is_probe { "" } else { state_hash.as_str() }, if is_probe { state_hash.as_str() } else { "" }, canonical_key, extra_json])
+            if is_probe { "" } else { state_hash.as_str() }, if is_probe { state_hash.as_str() } else { "" }, canonical_key, observation.extra_json, observation.seen, observation.last_alive,
+            observation.source_replace, observation.probe_replace, observation.source_current,
+            observation.probe_current])
             .map_err(|error| error.to_string())?;
         let asset_id: i64 = transaction
             .query_row(
@@ -629,29 +637,61 @@ fn import_csv_with_progress(
                 |row| row.get(0),
             )
             .map_err(|error| error.to_string())?;
-        if portal_known {
+        if observation.probe_replace {
             transaction
                 .execute(
                     "UPDATE assets SET has_login=?1, has_register=?2 WHERE id=?3",
                     params![
-                        i64::from(has_login == "1"),
-                        i64::from(has_register == "1"),
+                        if portal_known {
+                            i64::from(has_login == "1")
+                        } else {
+                            -1
+                        },
+                        if portal_known {
+                            i64::from(has_register == "1")
+                        } else {
+                            -1
+                        },
                         asset_id
                     ],
                 )
                 .map_err(|error| error.to_string())?;
         }
+        let project_seen: Option<String> = transaction
+            .query_row(
+                "SELECT last_seen FROM project_assets WHERE project_id=?1 AND asset_id=?2",
+                params![project_id, asset_id],
+                |row| row.get(0),
+            )
+            .optional()
+            .map_err(|error| error.to_string())?;
+        let project_seen = asset_observation::advance_seen(
+            project_seen.as_deref().unwrap_or(""),
+            field(&record, &index, &["collection_received_at"]),
+        );
+        let collection_binding = field(&record, &index, &["collection_binding_sha256"]);
+        let collection_binding = if !is_probe
+            && collection_binding.len() == 64
+            && collection_binding
+                .bytes()
+                .all(|byte| byte.is_ascii_hexdigit())
+        {
+            collection_binding.to_ascii_lowercase()
+        } else {
+            String::new()
+        };
         transaction.execute(r#"
-            INSERT INTO project_assets(project_id,asset_id,last_run_id) VALUES(?1,?2,?3)
-            ON CONFLICT(project_id,asset_id) DO UPDATE SET last_seen=datetime('now','localtime'),last_run_id=excluded.last_run_id
-        "#, params![project_id,asset_id,run_id]).map_err(|error| error.to_string())?;
+            INSERT INTO project_assets(project_id,asset_id,last_run_id,first_seen,last_seen,last_collection_binding) VALUES(?1,?2,?3,?4,?4,?5)
+            ON CONFLICT(project_id,asset_id) DO UPDATE SET last_seen=excluded.last_seen,last_run_id=excluded.last_run_id,
+              last_collection_binding=CASE WHEN excluded.last_collection_binding<>'' THEN excluded.last_collection_binding ELSE project_assets.last_collection_binding END
+        "#, params![project_id,asset_id,run_id,project_seen,collection_binding]).map_err(|error| error.to_string())?;
 
         let auto_excluded = field(&record, &index, &["auto_excluded"]) == "1";
         let exclude_reason = field(&record, &index, &["exclude_reason"]);
         // The UI intentionally leaves the old note when a user archives or
         // confirms an asset. Its event, not that note prefix, proves manual
         // control; automated re-import must not undo it.
-        if manually_managed_assets.contains(&asset_id) {
+        if manually_managed_assets.contains(&asset_id) || !observation.classification_current {
             // Technical observations above still update; manual project state
             // and opened-entry timestamps stay independent of this probe.
         } else if auto_excluded {
@@ -706,7 +746,11 @@ fn import_csv_with_progress(
                 params![project_id,asset_id,run_id],
             ).map_err(|error| error.to_string())?;
             inserted += 1;
-        } else if previous
+        } else if (if is_probe {
+            observation.probe_current
+        } else {
+            observation.source_current
+        }) && previous
             .as_ref()
             .is_some_and(|(_, old_hash)| old_hash != &state_hash)
         {
@@ -734,19 +778,21 @@ fn mark_missing(
     run_id: i64,
     collection: &Value,
 ) -> Result<bool, String> {
-    if collection.get("complete").and_then(Value::as_bool) != Some(true)
-        || collection.get("coverage_complete").and_then(Value::as_bool) != Some(true)
-    {
+    if !collection_summary::proven_complete(collection) {
         return Ok(false);
     }
+    let Some(binding) = collection_summary::binding(collection) else {
+        return Ok(false);
+    };
     let connection = db::open(db_path)?;
     connection.execute(r#"
         INSERT INTO asset_events(project_id,asset_id,run_id,event_type,summary)
         SELECT pa.project_id,pa.asset_id,?2,'missing','本次完整采集未再次发现；不等同于资产已下线'
         FROM project_assets pa
         WHERE pa.project_id=?1 AND pa.is_deleted=0 AND COALESCE(pa.last_run_id,0)<>?2
+          AND pa.last_collection_binding=?3
           AND NOT EXISTS(SELECT 1 FROM asset_events e WHERE e.run_id=?2 AND e.asset_id=pa.asset_id AND e.event_type='missing')
-    "#, params![project_id,run_id]).map_err(|error| error.to_string())?;
+    "#, params![project_id,run_id,binding]).map_err(|error| error.to_string())?;
     Ok(true)
 }
 
@@ -1031,6 +1077,13 @@ fn execute_job(
             &app, &db_path, run_id, project_id, &settings, &run_dir, &cancel,
         );
     }
+    collection_summary::save(
+        &db_path,
+        run_id,
+        &collection_summary::from_collection(
+            &serde_json::json!({"complete":false,"coverage_complete":false,"coverage_reasons":["collection_pending"]}),
+        ),
+    )?;
     let seeds_path = run_dir.join("seeds.csv");
     if seeds_path.exists() {
         job_resume::validate_seeds(&seeds_path)?;
@@ -1051,6 +1104,11 @@ fn execute_job(
         );
         crate::asset_fofa::request_fofa_account(fofa_key.trim(), fofa_proxy.trim()).map_err(
             |error| {
+                let failed = collection_summary::from_collection(&serde_json::json!({
+                    "complete":false,"coverage_complete":false,
+                    "coverage_reasons":["provider_precheck_failed"],
+                }));
+                let receipt_error = collection_summary::save(&db_path, run_id, &failed).err();
                 log_line(
                     &app,
                     &db_path,
@@ -1059,7 +1117,10 @@ fn execute_job(
                     "collect",
                     &format!("FOFA 预检失败：{error}"),
                 );
-                format!("FOFA 预检失败：{error}。采集尚未开始，请修正配置后重试")
+                match receipt_error {
+                    Some(persist) => format!("FOFA 预检失败：{error}；收集摘要保存失败：{persist}"),
+                    None => format!("FOFA 预检失败：{error}。采集尚未开始，请修正配置后重试"),
+                }
             },
         )?;
         log_line(
@@ -1095,11 +1156,34 @@ fn execute_job(
         profile: setting_str(&settings, "fofaProfile", "professional"),
         cache: setting_bool(&settings, "collectionCache", true),
     };
-    let collect_summary = native_workers::collect_fofa(
+    // This run/project and its output directory came from the persisted job.
+    // Canonical paths also support platform app-data roots with symlinked parents.
+    let canonical_run = run_dir.canonicalize().map_err(|error| error.to_string())?;
+    let jobs_root = canonical_run.parent().ok_or("采集任务目录没有父目录")?;
+    let storage_limits = collection_retention::Limits::default();
+    let collection_storage = match collection_retention::CollectionStorage::open_adopting_current(
+        jobs_root,
+        &canonical_run.join("collection"),
+        project_id,
+        run_id,
+        chrono::Utc::now().timestamp(),
+        storage_limits,
+    ) {
+        Ok(storage) => storage,
+        Err(error) => {
+            let mut failed = collection_summary::failed_receipt(&collect_dir);
+            failed.reasons.push("collection_storage_unavailable".into());
+            collection_summary::save(&db_path, run_id, &failed)
+                .map_err(|persist| format!("{error}；收集摘要保存失败：{persist}"))?;
+            return Err(error);
+        }
+    };
+    let collect_result = native_workers::collect_fofa_with_storage(
         &seeds_path,
         &collect_dir,
         collect_options,
         &cancel,
+        &collection_storage,
         |done, total, label| {
             let progress = 5.0 + (done as f64 / total.max(1) as f64) * 30.0;
             set_progress(
@@ -1116,7 +1200,54 @@ fn execute_job(
                 log_line(&app, &db_path, run_id, "warn", "collect", label);
             }
         },
-    )?;
+    );
+    // Derived inventory exports are collection artifacts too. Publish and admit
+    // them before closing the retention receipt, while the writer remains held.
+    let collect_result = collect_result.and_then(|summary| {
+        let inventory = native_workers::merge_url_inventory_with_storage(
+            &collect_dir.join("candidates.csv"),
+            &collect_dir.join("url_inventory.csv"),
+            &collection_storage,
+        )?;
+        log_line(
+            &app,
+            &db_path,
+            run_id,
+            "info",
+            "collect",
+            &format!("Rust 原生 URL 归并完成：{inventory}"),
+        );
+        Ok(summary)
+    });
+    let finalized = collection_storage.finish(chrono::Utc::now().timestamp());
+    let storage_report = finalized
+        .as_ref()
+        .ok()
+        .cloned()
+        .or_else(|| collection_storage.report().ok());
+    let collect_result = match (collect_result, finalized) {
+        (Ok(summary), Ok(_)) => Ok(summary),
+        (Err(error), Ok(_)) => Err(error),
+        (Ok(_), Err(error)) => Err(format!("收集文件保留记录未完成：{error}")),
+        (Err(error), Err(finalize)) => Err(format!("{error}；收集文件保留记录未完成：{finalize}")),
+    };
+    let collect_summary = match collect_result {
+        Ok(summary) => summary,
+        Err(error) => {
+            let mut failed = collection_summary::failed_receipt(&collect_dir);
+            failed.retention = storage_report
+                .as_ref()
+                .map(|report| collection_summary::retention(report, storage_limits));
+            collection_summary::save(&db_path, run_id, &failed)
+                .map_err(|persist| format!("{error}；收集摘要保存失败：{persist}"))?;
+            return Err(error);
+        }
+    };
+    let mut run_summary = collection_summary::from_collection(&collect_summary);
+    run_summary.retention = storage_report
+        .as_ref()
+        .map(|report| collection_summary::retention(report, storage_limits));
+    collection_summary::save(&db_path, run_id, &run_summary)?;
     log_line(
         &app,
         &db_path,
@@ -1124,18 +1255,6 @@ fn execute_job(
         "info",
         "collect",
         &format!("Rust 原生 FOFA 采集完成：{collect_summary}"),
-    );
-    let inventory_summary = native_workers::merge_url_inventory(
-        &collect_dir.join("candidates.csv"),
-        &collect_dir.join("url_inventory.csv"),
-    )?;
-    log_line(
-        &app,
-        &db_path,
-        run_id,
-        "info",
-        "collect",
-        &format!("Rust 原生 URL 归并完成：{inventory_summary}"),
     );
 
     set_progress(
@@ -1149,6 +1268,14 @@ fn execute_job(
     );
     let candidates = collect_dir.join("candidates.csv");
     let imported = import_csv(&app, &db_path, run_id, project_id, &candidates, 65.0)?;
+    let records = csv::ReaderBuilder::new()
+        .flexible(true)
+        .from_path(&candidates)
+        .map_err(|error| error.to_string())?
+        .records()
+        .count() as u64;
+    run_summary.imported_candidates = Some(records.saturating_sub(imported.invalid.max(0) as u64));
+    collection_summary::save(&db_path, run_id, &run_summary)?;
     log_line(
         &app,
         &db_path,
@@ -1246,7 +1373,7 @@ fn execute_job(
                 setting_f64(&settings, "perHostInterval", 1.5).clamp(0.0, 3600.0),
             ),
         };
-        native_workers::probe_assets(
+        let probe_summary = native_workers::probe_assets(
             &refined_dir,
             &candidates,
             &probe_dir,
@@ -1265,6 +1392,8 @@ fn execute_job(
                 );
             },
         )?;
+        run_summary.probed_assets = collection_summary::probe_count(&probe_summary);
+        collection_summary::save(&db_path, run_id, &run_summary)?;
         let optimized_dir = run_dir.join("optimized");
         set_progress(
             &app,
@@ -1301,7 +1430,7 @@ fn execute_job(
             run_id,
             "warn",
             "collect",
-            "采集受分页上限限制，覆盖不完整；本轮不判断历史资产失踪",
+            "本轮采集覆盖未被完整证明；不判断历史资产未再次发现",
         );
     }
     Ok(())
