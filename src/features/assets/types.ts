@@ -109,6 +109,8 @@ export interface AssetSummary {
   rejected: number;
   notApplicable: number;
   sentToAgent: number;
+  /** Legacy responses may omit unclassified/unknown manual-decision counts. */
+  unknown?: number;
 }
 
 export interface AssetPage {

@@ -180,6 +180,10 @@ const total = ref(0);
 const emptySummary = (): AssetSummary => ({ all: 0, pending: 0, uncertain: 0, confirmed: 0, rejected: 0, notApplicable: 0, sentToAgent: 0 });
 const memberTotal = ref(0);
 const summary = ref<AssetSummary>(emptySummary());
+const snapshotQueryKey = ref<string>();
+const readFailed = ref(false);
+const summaryAvailable = ref(false);
+const memberCountAvailable = ref(false);
 const selected = ref<Map<string, Asset>>(new Map());
 const titleRuleSelection = ref<{ text: string; x: number; y: number; asset: Asset }>();
 const ruleBusy = ref(false);
@@ -224,6 +228,20 @@ function restoredQuery(projectId?: number): AssetQuery {
   } catch { return defaults; }
 }
 const query = ref<AssetQuery>(restoredQuery(props.selectedProjectId));
+const hasSnapshot = computed(() => snapshotQueryKey.value !== undefined);
+const countsKnown = computed(() => hasSnapshot.value && !readFailed.value && snapshotQueryKey.value === JSON.stringify(query.value));
+const readState = computed(() => countsKnown.value ? loading.value ? "refreshing" : "ready"
+  : hasSnapshot.value ? "stale" : loading.value ? "loading" : "unknown");
+const countText = (value: number, available = true) => countsKnown.value && available ? value.toLocaleString()
+  : loading.value ? tr("读取中…", "Loading…") : tr("未知", "Unknown");
+const readStateText = computed(() => ({
+  loading: tr("正在读取资产及数量。", "Reading assets and counts."),
+  refreshing: tr("正在刷新，暂显示上次成功读取的快照。", "Refreshing; showing the last successful snapshot."),
+  stale: loading.value ? tr("正在读取当前筛选，旧行暂为上次成功快照，当前数量未知。", "Reading current filters; rows are from the last successful snapshot and current counts are unknown.")
+    : tr("当前数量未知；下方保留上次成功快照，请重试读取。", "Current counts are unknown. Rows below are the last successful snapshot; retry the read."),
+  unknown: tr("尚无可用的读取结果，资产数量未知，请重试。", "No read result is available. Asset counts are unknown; retry the read."),
+  ready: "",
+})[readState.value]);
 let queryContextProject = props.selectedProjectId;
 watch(query, value => { try { sessionStorage.setItem(stateKey(queryContextProject), JSON.stringify(value)); } catch { /* A storage quota failure must not interrupt review. */ } }, { deep:true, flush:"sync" });
 
@@ -256,30 +274,42 @@ watch(() => props.selectedProjectId, (projectId) => {
 watch(visibleColumns, (value) => localStorage.setItem("asset-columns", JSON.stringify(value)), { deep: true });
 
 let queryGeneration = 0, disposed = false;
+const validCount = (value: unknown): value is number => Number.isSafeInteger(value) && (value as number) >= 0;
+function validSummary(value: unknown): value is AssetSummary {
+  if (!value || typeof value !== "object") return false;
+  const row = value as Record<string, unknown>;
+  return ["all", "pending", "uncertain", "confirmed", "rejected", "notApplicable", "sentToAgent"].every(key => validCount(row[key]))
+    && (row.unknown === undefined || validCount(row.unknown));
+}
 async function refresh() {
   if (disposed) return;
   cancelRowDrag();
   const generation = ++queryGeneration;
   const requested = JSON.parse(JSON.stringify(query.value)) as AssetQuery;
+  readFailed.value = false;
   loading.value = true;
   try {
-    const page = await assetApi.listAssets(requested);
+    let page = await assetApi.listAssets(requested);
     if (generation !== queryGeneration) return;
+    if (JSON.stringify(query.value) !== JSON.stringify(requested)) return;
+    if (!Array.isArray(page.items) || !validCount(page.total)) throw Error("asset_page_counts_invalid");
+    if (!page.items.length && query.value.page > 1) {
+      query.value.page = Math.max(1, Math.ceil(page.total / query.value.pageSize));
+      requested.page = query.value.page;
+      page = await assetApi.listAssets(requested);
+      if (generation !== queryGeneration) return;
+    }
+    if (!Array.isArray(page.items) || !validCount(page.total) || page.items.length > page.total
+      || (page.memberTotal != null && (!validCount(page.memberTotal) || page.memberTotal < page.total))) throw Error("asset_page_counts_invalid");
     assets.value = page.items;
     total.value = page.total;
     memberTotal.value = page.memberTotal ?? page.total;
-    summary.value = page.summary || emptySummary();
-    if (!page.items.length && query.value.page > 1) {
-      query.value.page = Math.max(1, Math.ceil(page.total / query.value.pageSize));
-      const corrected = await assetApi.listAssets({ ...requested, page:query.value.page });
-      if (generation !== queryGeneration) return;
-      assets.value = corrected.items;
-      total.value = corrected.total;
-      memberTotal.value = corrected.memberTotal ?? corrected.total;
-      summary.value = corrected.summary || emptySummary();
-    }
+    memberCountAvailable.value = page.memberTotal != null || !requested.collapseIdenticalResponses;
+    summaryAvailable.value = validSummary(page.summary);
+    summary.value = summaryAvailable.value ? page.summary : emptySummary();
+    snapshotQueryKey.value = JSON.stringify(requested);
   } catch (error) {
-    if (generation === queryGeneration) emit("notify", "error", String(error));
+    if (generation === queryGeneration) { readFailed.value = true; emit("notify", "error", String(error)); }
   } finally {
     if (generation === queryGeneration) loading.value = false;
   }
@@ -452,7 +482,7 @@ function badgeClass(column: string, raw: string) {
   if (column === "entrySeen") return raw === "1" ? "decision-confirmed" : "status-unknown";
   return "";
 }
-function probeLabel(raw: string) { const item = probeOutcomeOptions.find((option) => option[0] === raw); return item ? tr(item[1], item[2]) : raw; }
+function probeLabel(raw: string) { const item = probeOutcomeOptions.find((option) => option[0] === raw); return item ? tr(item[1], item[2]) : raw?.trim() || tr("未知 · 尚无探测结果", "Unknown · no probe result"); }
 function sentinelLabel(asset: Asset) {
   if (asset.sentinelStatus === "not_sent") return tr("未发送", "Not sent");
   const item = sentinelStatusOptions.find((option) => option[0] === asset.sentinelStatus);
@@ -581,9 +611,10 @@ async function openAsset(asset: Asset) {
   try {
     const openedAt = await assetApi.markAssetEntryOpened(asset.projectId, asset.id);
     if (!current()) return;
-    // Seen state participates in response grouping. Re-read representatives and
-    // totals together after it changes instead of retaining the old group count.
-    if (query.value.collapseIdenticalResponses || query.value.responseRepresentativeAssetId) await refresh();
+    // Seen state affects grouping and seen-filter membership. Re-read rows and
+    // every count together rather than keeping a summary from before the mark.
+    if (query.value.collapseIdenticalResponses || query.value.responseRepresentativeAssetId
+      || (query.value.entrySeenView && query.value.entrySeenView !== "all")) await refresh();
     else stampEntryOpened(asset, openedAt);
   } catch (error) {
     if (current()) emit("notify", "error", String(error));
@@ -611,24 +642,26 @@ onUnmounted(() => { disposed = true; ++queryGeneration; cancelRowDrag(); });
 </script>
 
 <template>
-  <section ref="workspace" class="asset-workspace" :class="{'row-selecting':rowDragging,'has-selection':selectedRows.length}">
+  <section ref="workspace" class="asset-workspace" :class="{'row-selecting':rowDragging,'has-selection':selectedRows.length}" :data-asset-snapshot-state="readState">
+    <p v-if="readState !== 'ready'" class="asset-read-status" :role="readFailed ? 'alert' : 'status'" :data-asset-read-state="readState">{{readStateText}}</p>
     <div class="asset-summary-strip" :aria-label="tr('资产队列概览','Asset queue summary')">
       <button class="asset-summary-card summary-all" :class="{ active: query.decisionView === 'all' }" @click="setDecisionView('all')">
-        <span>{{tr('当前范围','Current scope')}}</span><strong>{{summary.all.toLocaleString()}}</strong><small>{{tr('不含回收站筛选之外的数据','Matches current filters')}}</small>
+        <span>{{tr('当前范围','Current scope')}}</span><strong data-asset-summary="all">{{countText(summary.all,summaryAvailable)}}</strong><small>{{tr('原始 URL · 人工结论分组前','Raw URLs · before decision filter')}}</small>
       </button>
       <button class="asset-summary-card summary-pending" :class="{ active: query.decisionView === 'pending' }" @click="setDecisionView('pending')">
-        <span>{{tr('未审核','Not reviewed')}}</span><strong>{{summary.pending.toLocaleString()}}</strong><small>{{tr('尚未做人工结论','No manual decision')}}</small>
+        <span>{{tr('未审核','Not reviewed')}}</span><strong data-asset-summary="pending">{{countText(summary.pending,summaryAvailable)}}</strong><small>{{tr('尚未做人工结论','No manual decision')}}</small>
       </button>
       <button class="asset-summary-card summary-uncertain" :class="{ active: query.decisionView === 'uncertain' }" @click="setDecisionView('uncertain')">
-        <span>{{tr('待补证据','Needs evidence')}}</span><strong>{{summary.uncertain.toLocaleString()}}</strong><small>{{tr('保留在复核队列','Kept in review')}}</small>
+        <span>{{tr('待补证据','Needs evidence')}}</span><strong data-asset-summary="uncertain">{{countText(summary.uncertain,summaryAvailable)}}</strong><small>{{tr('保留在复核队列','Kept in review')}}</small>
       </button>
       <button class="asset-summary-card summary-confirmed" :class="{ active: query.decisionView === 'confirmed' }" @click="setDecisionView('confirmed')">
-        <span>{{tr('已确认有效','Confirmed valid')}}</span><strong>{{summary.confirmed.toLocaleString()}}</strong><small>{{tr('已移出待审核队列','Removed from review')}}</small>
+        <span>{{tr('已确认有效','Confirmed valid')}}</span><strong data-asset-summary="confirmed">{{countText(summary.confirmed,summaryAvailable)}}</strong><small>{{tr('已移出待审核队列','Removed from review')}}</small>
       </button>
       <button class="asset-summary-card summary-sent" :class="{ active: query.sentinelView === 'sent' }" @click="query.sentinelView = query.sentinelView === 'sent' ? 'all' : 'sent'; search()">
-        <span>{{tr('已发起调查','Investigated')}}</span><strong>{{summary.sentToAgent.toLocaleString()}}</strong><small>{{tr('至少生成过一次任务','At least one scan')}}</small>
+        <span>{{tr('已发起调查','Investigated')}}</span><strong data-asset-summary="sentToAgent">{{countText(summary.sentToAgent,summaryAvailable)}}</strong><small>{{tr('至少生成过一次任务','At least one scan')}}</small>
       </button>
     </div>
+    <p v-if="countsKnown && summaryAvailable && (summary.unknown ?? 0) > 0" class="asset-read-status" data-asset-unknown-decisions>{{tr(`另有 ${summary.unknown} 条未知或未分类人工状态，未计作未审核或已确认。`,`${summary.unknown} manual decisions are unknown or unclassified; they are not counted as pending or confirmed.`)}}</p>
 
     <div class="asset-toolbar panel">
       <div class="asset-toolbar-primary">
@@ -726,10 +759,10 @@ onUnmounted(() => { disposed = true; ++queryGeneration; cancelRowDrag(); });
             </tr>
           </tbody>
         </table>
-        <div v-if="!loading && !assets.length" class="empty-state">{{tr('没有符合条件的资产','No matching assets')}}</div>
+        <div v-if="!loading && !assets.length" class="empty-state">{{countsKnown ? tr('没有符合条件的资产','No matching assets') : tr('资产读取结果未知，请重试。','Asset read result is unknown; retry the read.')}}</div>
         <div v-if="loading" class="table-loading"><span></span><span></span><span></span></div>
       </div>
-      <footer class="pagination"><span>{{tr(`共 ${total.toLocaleString()} 条`,`${total.toLocaleString()} total`)}}<small v-if="query.collapseIdenticalResponses && memberTotal>total">{{tr(`（${memberTotal.toLocaleString()} 个 URL，完全相同响应已折叠）`,` (${memberTotal.toLocaleString()} URLs, identical responses collapsed)`)}}</small></span><span v-if="selectedRows.length" class="pagination-selected">{{tr(`已跨页选择 ${selectedRows.length} 条`,`${selectedRows.length} selected across pages`)}}</span><select v-model="query.pageSize" @change="query.page=1;refresh()"><option :value="50">50 {{tr('/页','/page')}}</option><option :value="100">100 {{tr('/页','/page')}}</option><option :value="200">200 {{tr('/页','/page')}}</option></select><button :disabled="query.page<=1" @click="query.page--;refresh()"><ChevronLeft :size="16" /></button><span>{{query.page}} / {{pages}}</span><button :disabled="query.page>=pages" @click="query.page++;refresh()"><ChevronRight :size="16" /></button></footer>
+      <footer class="pagination"><span data-asset-count="total">{{countsKnown ? query.collapseIdenticalResponses ? tr(`${total.toLocaleString()} 个展示组`,`${total.toLocaleString()} display groups`) : tr(`${total.toLocaleString()} 个 URL`,`${total.toLocaleString()} URLs`) : loading ? tr('资产数量读取中…','Asset counts loading…') : tr('资产数量未知','Asset counts unknown')}}<small v-if="query.collapseIdenticalResponses" data-asset-count="members">{{countsKnown && memberCountAvailable ? tr(`（${memberTotal.toLocaleString()} 个原始 URL）`,` (${memberTotal.toLocaleString()} raw URLs)`) : tr('（原始 URL 数量未知）',' (raw URL count unknown)')}}</small></span><span v-if="selectedRows.length" class="pagination-selected">{{tr(`已跨页选择 ${selectedRows.length} 条`,`${selectedRows.length} selected across pages`)}}</span><select v-model="query.pageSize" @change="query.page=1;refresh()"><option :value="50">50 {{tr('/页','/page')}}</option><option :value="100">100 {{tr('/页','/page')}}</option><option :value="200">200 {{tr('/页','/page')}}</option></select><button :disabled="!countsKnown||loading||query.page<=1" @click="query.page--;refresh()"><ChevronLeft :size="16" /></button><span>{{countsKnown ? `${query.page} / ${pages}` : '— / —'}}</span><button :disabled="!countsKnown||loading||query.page>=pages" @click="query.page++;refresh()"><ChevronRight :size="16" /></button></footer>
     </div>
     <TitleRulePopover v-if="titleRuleSelection" :text="titleRuleSelection.text" :x="titleRuleSelection.x" :y="titleRuleSelection.y" :busy="ruleBusy" @apply="applyTitleRule" @close="titleRuleSelection=undefined" />
     <PageIsolationDialog v-if="pageRuleOpen" :projects="projects" :asset="pageRuleAsset" :project-id="query.projectId" :keyword="pageRuleKeyword" @close="pageRuleOpen=false" @changed="pageRulesChanged" @notify="(type,text)=>emit('notify',type,text)" />
@@ -748,6 +781,7 @@ onUnmounted(() => { disposed = true; ++queryGeneration; cancelRowDrag(); });
 .asset-entry { display:flex; align-items:center; gap:6px; min-width:0; }
 .asset-entry .asset-link { flex:1 1 auto; min-width:0; text-align:left; }
 .asset-evidence-note { color:var(--muted); font-size:10px; line-height:1.6; margin:0; }
+.asset-read-status { color:var(--muted); font-size:11px; line-height:1.6; margin:0; overflow-wrap:anywhere; }.asset-read-status[role="alert"] { color:var(--red); }
 .asset-response-group { display:inline-flex; flex:0 0 auto; align-items:center; gap:3px; padding:1px 5px; border:1px solid color-mix(in srgb,var(--blue) 18%,var(--line)); border-radius:5px; background:color-mix(in srgb,var(--blue) 6%,var(--app-surface)); color:var(--blue); font-size:9px; font-weight:600; line-height:16px; white-space:nowrap; transition:background .15s,border-color .15s; }
 .asset-response-group:hover { background:color-mix(in srgb,var(--blue) 12%,var(--app-surface)); border-color:color-mix(in srgb,var(--blue) 38%,var(--line)); }
 .asset-response-group:focus-visible { outline:2px solid var(--blue); outline-offset:2px; }

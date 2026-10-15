@@ -1,7 +1,7 @@
 // Real asset SFC setup + templates with synthetic local records. These checks
 // exercise presentation contracts, not live collection, SQLite or desktop IPC.
 const test = require('node:test');
-const { assert, flush, textOf, mountAssetAccuracy } = require('./asset_accuracy_ui_harness.cjs');
+const { assert, flush, textOf, deferred, mountAssetAccuracy } = require('./asset_accuracy_ui_harness.cjs');
 
 const SUMMARY = 'src/features/assets/components/CollectionRunSummary.vue';
 const OBSERVATION = 'src/features/assets/components/AssetObservation.vue';
@@ -558,4 +558,173 @@ test('asset filter labels describe historical observations while their rendered 
   assert.equal(reads.at(-1).sortBy, 'company');
   assert.match(h.text(), /Validity review does not confirm ownership or grant execution permission/);
   assert.match(h.text(), /they do not prove this run re-probed the asset/);
+});
+
+const queueSummary = (overrides = {}) => ({ all: 0, pending: 0, uncertain: 0, confirmed: 0, rejected: 0, notApplicable: 0, sentToAgent: 0, ...overrides });
+const assetPage = (query, overrides = {}) => ({ items: [], total: 0, memberTotal: 0, page: query.page, pageSize: query.pageSize, summary: queueSummary(), ...overrides });
+const snapshotState = h => one(h, 'data-asset-snapshot-state').props['data-asset-snapshot-state'];
+const summaryCount = (h, name) => textOf(one(h, 'data-asset-summary', name));
+const assetCount = (h, name) => textOf(one(h, 'data-asset-count', name));
+const assetProps = { projects: queryProps([]).projects, selectedProjectId: 91 };
+async function refreshAssets(h) {
+  const button = h.nodes().find(n => n.type === 'button' && textOf(n).trim() === 'Refresh');
+  assert.ok(button); assert.equal(typeof button.props.onClick, 'function'); await button.props.onClick(); await flush();
+}
+async function searchAssets(h, text) {
+  const input = h.nodes().find(n => n.type === 'input' && n.props.placeholder === 'Search project, company, domain, IP, title or asset key');
+  assert.ok(input); input.props['onUpdate:modelValue'](text); input.props.onKeyup({ key: 'Enter' }); await flush();
+}
+
+test('first asset read loading and failure never masquerade as a real zero, while an explicit retry can prove zero', async t => {
+  const first = deferred(); let reads = 0;
+  const h = await mount(t, ASSETS, assetProps, { commands: {
+    list_assets: ({ query }) => ++reads === 1 ? first.promise : assetPage(query),
+  } });
+  assert.equal(snapshotState(h), 'loading'); assert.equal(summaryCount(h, 'all'), 'Loading…');
+  assert.match(assetCount(h, 'total'), /Asset counts loading/); assert.doesNotMatch(h.text(), /No matching assets/);
+  first.reject(new Error('Synthetic initial read failure')); await flush();
+  assert.equal(snapshotState(h), 'unknown'); assert.equal(summaryCount(h, 'all'), 'Unknown');
+  assert.match(assetCount(h, 'total'), /Asset counts unknown/); assert.doesNotMatch(h.text(), /No matching assets|0 display groups/);
+  await refreshAssets(h);
+  assert.equal(snapshotState(h), 'ready'); assert.equal(summaryCount(h, 'all'), '0');
+  assert.match(assetCount(h, 'total'), /0 display groups/); assert.match(assetCount(h, 'members'), /0 raw URLs/);
+  assert.match(h.text(), /No matching assets/); assert.equal(reads, 2);
+});
+
+test('new-filter read failures retain rows as stale evidence but never attach old counts to the current filter', async t => {
+  const second = deferred(); let reads = 0;
+  const h = await mount(t, ASSETS, assetProps, { commands: {
+    list_assets: ({ query }) => ++reads === 1 ? assetPage(query, { items: [asset({}, { title: 'Synthetic previous snapshot' })], total: 7, memberTotal: 12, summary: queueSummary({ all: 90, pending: 52, confirmed: 30, rejected: 5, notApplicable: 3 }) })
+      : reads === 2 ? second.promise : assetPage(query),
+  } });
+  assert.equal(summaryCount(h, 'all'), '90');
+  await searchAssets(h, 'new-filter');
+  assert.equal(snapshotState(h), 'stale'); assert.equal(summaryCount(h, 'all'), 'Loading…');
+  assert.match(h.text(), /Synthetic previous snapshot/); assert.match(h.text(), /last successful snapshot/);
+  second.reject(new Error('Synthetic new filter failed')); await flush();
+  assert.equal(snapshotState(h), 'stale'); assert.equal(summaryCount(h, 'all'), 'Unknown');
+  assert.match(assetCount(h, 'total'), /Asset counts unknown/); assert.doesNotMatch(assetCount(h, 'total'), /7 display groups|12 raw URLs/);
+  assert.match(h.text(), /Synthetic previous snapshot/); assert.doesNotMatch(h.text(), /No matching assets/);
+  await refreshAssets(h); assert.equal(snapshotState(h), 'ready'); assert.equal(summaryCount(h, 'all'), '0');
+  assert.doesNotMatch(h.text(), /Synthetic previous snapshot/); assert.match(h.text(), /No matching assets/);
+});
+
+test('same-query refresh explicitly labels the old successful snapshot until the new authoritative count arrives', async t => {
+  const second = deferred(); let reads = 0;
+  const h = await mount(t, ASSETS, assetProps, { commands: {
+    list_assets: ({ query }) => ++reads === 1 ? assetPage(query, { total: 7, memberTotal: 7, summary: queueSummary({ all: 7, pending: 7 }) }) : second.promise,
+  } });
+  const refreshing = refreshAssets(h); await flush();
+  assert.equal(snapshotState(h), 'refreshing'); assert.equal(summaryCount(h, 'all'), '7');
+  assert.match(h.text(), /Refreshing; showing the last successful snapshot/);
+  second.resolve(assetPage({ page: 1, pageSize: 50 }, { total: 9, memberTotal: 9, summary: queueSummary({ all: 9, pending: 9 }) })); await refreshing;
+  assert.equal(snapshotState(h), 'ready'); assert.equal(summaryCount(h, 'all'), '9');
+});
+
+test('a late old-filter count cannot overwrite the committed newer-filter count', async t => {
+  const pending = [];
+  const h = await mount(t, ASSETS, assetProps, { commands: {
+    list_assets: ({ query }) => { if (!query.search) return assetPage(query); const wait = deferred(); pending.push({ query, wait }); return wait.promise; },
+  } });
+  await searchAssets(h, 'older'); await searchAssets(h, 'newer'); assert.equal(pending.length, 2);
+  pending[1].wait.resolve(assetPage(pending[1].query, { total: 8, memberTotal: 8, summary: queueSummary({ all: 8, pending: 8 }) })); await flush();
+  assert.equal(snapshotState(h), 'ready'); assert.equal(summaryCount(h, 'all'), '8');
+  pending[0].wait.resolve(assetPage(pending[0].query, { total: 999, memberTotal: 999, summary: queueSummary({ all: 999, pending: 999 }) })); await flush();
+  assert.equal(snapshotState(h), 'ready'); assert.equal(summaryCount(h, 'all'), '8'); assert.doesNotMatch(assetCount(h, 'total'), /999/);
+});
+
+test('the same query keeps display groups, raw filtered URLs and pre-decision summary denominators distinct', async t => {
+  const reads = [];
+  const h = await mount(t, ASSETS, assetProps, { commands: {
+    list_assets: ({ query }) => { reads.push(query); return assetPage(query, {
+      items: [asset({}, { id: 1 }), asset({}, { id: 2 })], total: query.collapseIdenticalResponses ? 2 : 52,
+      memberTotal: 52, summary: queueSummary({ all: 90, pending: 52, confirmed: 30, rejected: 5, notApplicable: 3 }),
+    }); },
+  } });
+  assert.equal(reads[0].probeView, 'browser_review'); assert.equal(reads[0].decisionView, 'review');
+  assert.equal(reads[0].deletedView, 'active'); assert.equal(reads[0].collapseIdenticalResponses, true);
+  assert.match(assetCount(h, 'total'), /2 display groups/); assert.match(assetCount(h, 'members'), /52 raw URLs/);
+  assert.equal(summaryCount(h, 'all'), '90'); assert.match(h.text(), /Raw URLs · before decision filter/);
+  const label = h.nodes().find(n => n.type === 'label' && textOf(n).includes('Show one identical response'));
+  const checkbox = label.children.find(n => n.type === 'input'); assert.ok(checkbox);
+  checkbox.props['onUpdate:modelValue'](false); checkbox.props.onChange(); await flush();
+  assert.equal(reads.at(-1).collapseIdenticalResponses, false); assert.equal(reads.at(-1).decisionView, 'review');
+  assert.match(assetCount(h, 'total'), /52 URLs/); assert.equal(h.matching('data-asset-count', 'members').length, 0);
+  assert.equal(summaryCount(h, 'all'), '90');
+});
+
+test('legacy missing queue summaries or raw member counts are unknown rather than synthesized from folded totals', async t => {
+  const h = await mount(t, ASSETS, assetProps, { commands: {
+    list_assets: ({ query }) => ({ items: [asset()], total: 2, page: query.page, pageSize: query.pageSize }),
+  } });
+  assert.equal(snapshotState(h), 'ready'); assert.equal(summaryCount(h, 'all'), 'Unknown');
+  assert.match(assetCount(h, 'total'), /2 display groups/); assert.match(assetCount(h, 'members'), /raw URL count unknown/);
+});
+
+test('invalid negative or contradictory asset counts do not become available or render zero', async t => {
+  const h = await mount(t, ASSETS, assetProps, { commands: {
+    list_assets: () => ({ items: [], total: -1, memberTotal: 0, summary: queueSummary() }),
+  } });
+  assert.equal(snapshotState(h), 'unknown'); assert.equal(summaryCount(h, 'all'), 'Unknown');
+  assert.match(assetCount(h, 'total'), /Asset counts unknown/); assert.doesNotMatch(h.text(), /No matching assets/);
+});
+
+test('unknown manual-decision records remain a separate business bucket, not a read failure or pending count', async t => {
+  const h = await mount(t, ASSETS, assetProps, { commands: {
+    list_assets: ({ query }) => assetPage(query, { total: 5, memberTotal: 5,
+      summary: queueSummary({ all: 5, pending: 1, confirmed: 1, rejected: 1, unknown: 2 }) }),
+  } });
+  assert.equal(snapshotState(h), 'ready'); assert.equal(summaryCount(h, 'all'), '5'); assert.equal(summaryCount(h, 'pending'), '1');
+  assert.match(textOf(one(h, 'data-asset-unknown-decisions')), /2 manual decisions are unknown or unclassified/);
+  assert.equal(h.nodes().filter(n => n.type === 'button' && textOf(n).includes('unknown or unclassified')).length, 0);
+});
+
+test('opening an unfolded unseen asset rereads rows and every same-filter count after the persisted seen mark', async t => {
+  const opened = [], reads = [], reread = deferred(); let marked = false;
+  const url = 'https://fixture.example.test/';
+  const h = await mount(t, ASSETS, assetProps, { openUrl: async value => opened.push(value), commands: {
+    list_assets: ({ query }) => {
+      reads.push(query);
+      if (marked) return reread.promise;
+      return assetPage(query, { items: [asset({}, { host: url })], total: 1, memberTotal: 1,
+        summary: queueSummary({ all: 1, pending: 1 }) });
+    },
+    mark_asset_entry_opened: args => {
+      assert.deepEqual(args, { projectId: 91, assetId: 11 }); marked = true; return '2026-10-15T13:00:00Z';
+    },
+  } });
+  const foldLabel = h.nodes().find(n => n.type === 'label' && textOf(n).includes('Show one identical response'));
+  const fold = foldLabel.children.find(n => n.type === 'input');
+  fold.props['onUpdate:modelValue'](false); fold.props.onChange(); await flush();
+  const seen = h.nodes().find(n => n.type === 'select' && n.children.some(child => child.type === 'option' && child.props.value === 'unseen'));
+  assert.ok(seen); seen.props['onUpdate:modelValue']('unseen'); seen.props.onChange(); await flush();
+  const before = reads.length, sameQuery = reads.at(-1);
+  assert.equal(sameQuery.collapseIdenticalResponses, false); assert.equal(sameQuery.entrySeenView, 'unseen');
+  assert.equal(summaryCount(h, 'all'), '1'); assert.match(assetCount(h, 'total'), /1 URLs/);
+  const host = h.nodes().find(n => n.type === 'button' && n.props.class === 'asset-link' && textOf(n) === url);
+  assert.ok(host); const click = host.props.onClick(); await flush();
+  assert.deepEqual(opened, [url]); assert.equal(h.calls.filter(([name]) => name === 'mark_asset_entry_opened').length, 1);
+  assert.equal(reads.length, before + 1); assert.deepEqual(reads.at(-1), sameQuery);
+  assert.equal(snapshotState(h), 'refreshing'); assert.equal(summaryCount(h, 'all'), '1');
+  assert.match(h.text(), /Refreshing; showing the last successful snapshot/);
+  reread.resolve(assetPage(sameQuery)); await click; await flush();
+  assert.equal(snapshotState(h), 'ready'); assert.equal(summaryCount(h, 'all'), '0');
+  assert.equal(summaryCount(h, 'pending'), '0'); assert.match(assetCount(h, 'total'), /0 URLs/);
+  assert.match(h.text(), /No matching assets/);
+  assert.equal(h.nodes().filter(n => n.type === 'button' && n.props.class === 'asset-link' && textOf(n) === url).length, 0);
+});
+
+test('empty probe outcomes stay explicitly unknown even when a historical HTTP status is 200', async t => {
+  const h = await mount(t, ASSETS, assetProps, { commands: {
+    list_assets: ({ query }) => assetPage(query, { items: [asset({}, { probeOutcome: '', statusCode: '200' })], total: 1, memberTotal: 1, summary: queueSummary({ all: 1, pending: 1 }) }),
+  } });
+  const cell = h.nodes().find(n => n.type === 'td' && n.props.class === 'col-probeOutcome'); assert.ok(cell);
+  assert.equal(textOf(cell), 'Unknown · no probe result'); assert.doesNotMatch(textOf(cell), /Web accessible/);
+});
+
+for (const locale of ['zh', 'en']) test(`the saved exact asset-statistics activity uses its ${locale} label without parsing sample counts`, async t => {
+  const summary = 'Exact inventory 77; returned sample 20. Unknown states remain separate.';
+  const h = await mount(t, 'src/features/conversations/ConversationToolActivity.vue', { activity: [{ id: 'stats-1', name: 'assets_get_stats', status: 'completed', summary, round: 1 }] }, { locale });
+  assert.match(h.text(), locale === 'zh' ? /统计项目资产/ : /Count project assets/);
+  assert.ok(h.text().includes(summary)); assert.doesNotMatch(h.text(), /assets_get_stats/);
 });
