@@ -142,7 +142,7 @@ fn g0_history_window_reports_real_truncation_at_the_boundary() {
         save(&connection, &settings_with(141, 100 + version), version).unwrap();
     }
     assert_eq!(current_version(&connection, 141), 251);
-    let page = |limit: i64| super::super::exposure_setting_versions_in(&connection, 141, limit).unwrap();
+    let page = |limit: i64| super::exposure_setting_versions_in(&connection, 141, limit).unwrap();
     let full = page(500);
     assert_eq!(full["limit"], json!(200), "窗口上限 200");
     assert_eq!(full["items"].as_array().unwrap().len(), 200);
@@ -162,7 +162,7 @@ fn g0_history_window_reports_real_truncation_at_the_boundary() {
     assert_eq!(flagged["items"][0]["corrupt"], json!(true));
     assert!(flagged["items"][0]["settings"].is_null(), "{flagged}");
     assert_eq!(flagged["truncated"], json!(true));
-    let empty = super::super::exposure_setting_versions_in(&connection, 999, 20).unwrap();
+    let empty = super::exposure_setting_versions_in(&connection, 999, 20).unwrap();
     assert_eq!((empty["items"].as_array().unwrap().len(), &empty["truncated"]), (0, &json!(false)));
 }
 
@@ -172,14 +172,14 @@ fn g0_history_window_reports_real_truncation_at_the_boundary() {
 fn g0_schema_failures_are_reported_and_existing_data_is_kept() {
     let (db, connection) = temp_db(141);
     save(&connection, &settings_with(141, 4_000), 0).unwrap();
-    assert!(super::super::exposure_connection(&db.path).is_ok(), "健康的库可以打开");
+    assert!(super::exposure_connection(&db.path).is_ok(), "健康的库可以打开");
     // 损坏：一个附加表被同名视图占位，迁移无法补列。
     connection
         .execute_batch("DROP TABLE exposure_review_events; CREATE VIEW exposure_review_events AS SELECT 1 AS id;")
         .unwrap();
-    let error = super::super::exposure_connection(&db.path).expect_err("损坏结构必须报错");
+    let error = super::exposure_connection(&db.path).expect_err("损坏结构必须报错");
     assert!(error.starts_with("[exposure_schema_unavailable]"), "{error}");
-    let scan = super::super::exposure_scan_settings(&connection, 141).expect_err("不能带着损坏结构开始采集");
+    let scan = super::exposure_scan_settings(&connection, 141).expect_err("不能带着损坏结构开始采集");
     assert!(scan.contains("[exposure_schema_unavailable]"), "{scan}");
     assert_eq!(current_version(&connection, 141), 1, "原数据保留");
     assert_eq!(super::settings::load(&connection, 141).unwrap().max_requests, 4_000);
@@ -188,9 +188,9 @@ fn g0_schema_failures_are_reported_and_existing_data_is_kept() {
     let path = crate::db::initialize(&root.join("app")).expect("临时库");
     let readonly = crate::db::open(&path).expect("连接");
     readonly.pragma_update(None, "query_only", "ON").unwrap();
-    let error = super::super::exposure_schema_ready(&readonly).expect_err("不可写结构必须报错");
+    let error = super::exposure_schema_ready(&readonly).expect_err("不可写结构必须报错");
     assert!(error.starts_with("[exposure_schema_unavailable]"), "{error}");
-    let error = super::super::exposure_scan_settings(&readonly, 141).expect_err("不可写结构不能开始采集");
+    let error = super::exposure_scan_settings(&readonly, 141).expect_err("不可写结构不能开始采集");
     assert!(error.contains("[exposure_schema_unavailable]"), "{error}");
     drop(readonly);
     let _ = std::fs::remove_dir_all(root);
@@ -205,27 +205,27 @@ fn g0_corrupt_saved_settings_refuse_view_and_scan_but_can_be_repaired() {
     connection
         .execute("UPDATE exposure_settings SET settings_json='{not json' WHERE project_id=141", [])
         .unwrap();
-    let view = super::super::exposure_settings_view_in(&connection, 141).expect_err("损坏配置不能显示为默认值");
+    let view = super::exposure_settings_view_in(&connection, 141).expect_err("损坏配置不能显示为默认值");
     assert!(view.contains("[exposure_settings_corrupt]"), "{view}");
-    let scan = super::super::exposure_scan_settings(&connection, 141).expect_err("损坏配置不能按默认值采集");
+    let scan = super::exposure_scan_settings(&connection, 141).expect_err("损坏配置不能按默认值采集");
     assert!(scan.contains("[exposure_settings_corrupt]"), "{scan}");
-    let invalid = super::super::save_exposure_settings_in(&connection, 141, 1, &json!({"exposureMaxRequests": 0}));
+    let invalid = super::save_exposure_settings_in(&connection, 141, 1, &json!({"exposureMaxRequests": 0}));
     assert!(invalid.is_err(), "无效新值仍被拒");
     assert_eq!(current_version(&connection, 141), 1);
-    let repaired = super::super::save_exposure_settings_in(&connection, 141, 1, &json!({"exposureMaxRequests": 300})).unwrap();
+    let repaired = super::save_exposure_settings_in(&connection, 141, 1, &json!({"exposureMaxRequests": 300})).unwrap();
     assert_eq!(repaired, 2);
-    let view = super::super::exposure_settings_view_in(&connection, 141).unwrap();
+    let view = super::exposure_settings_view_in(&connection, 141).unwrap();
     assert_eq!((view["exposureMaxRequests"].clone(), view["storedVersion"].clone()), (json!(300), json!(2)));
     let archived: String = connection
         .query_row("SELECT settings_json FROM exposure_setting_versions WHERE project_id=141 AND version=1", [], |row| row.get(0))
         .unwrap();
     assert_eq!(archived, "{not json", "损坏原值原样留档");
-    let stale = super::super::save_exposure_settings_in(&connection, 141, 1, &json!({"exposureMaxRequests": 301})).unwrap_err();
+    let stale = super::save_exposure_settings_in(&connection, 141, 1, &json!({"exposureMaxRequests": 301})).unwrap_err();
     assert!(stale.contains("[exposure_setting_conflict]"), "{stale}");
-    let archived = super::super::save_exposure_settings_in(&connection, 141, 2, &json!({}));
+    let archived = super::save_exposure_settings_in(&connection, 141, 2, &json!({}));
     assert!(archived.is_ok());
     connection.execute("UPDATE projects SET status='archived' WHERE id=141", []).unwrap();
-    let refused = super::super::save_exposure_settings_in(&connection, 141, 3, &json!({})).unwrap_err();
+    let refused = super::save_exposure_settings_in(&connection, 141, 3, &json!({})).unwrap_err();
     assert!(refused.contains("[exposure_project_invalid]"), "{refused}");
 }
 
@@ -236,22 +236,22 @@ fn g0_corrupt_saved_settings_refuse_view_and_scan_but_can_be_repaired() {
 fn g0_shared_psl_and_directory_are_reachable_read_only() {
     let (_db, connection) = temp_db(141);
     let changes_before = connection.total_changes();
-    let zj = crate::commands::ownership_domain_parts("www.zj.10086.cn").expect("可解析");
+    let zj = crate::commands::ownership::ownership_domain_parts("www.zj.10086.cn").expect("可解析");
     assert_eq!(zj.registrable.as_deref(), Some("10086.cn"));
-    let pages = crate::commands::ownership_domain_parts("team.github.io").expect("可解析");
+    let pages = crate::commands::ownership::ownership_domain_parts("team.github.io").expect("可解析");
     assert_eq!(pages.registrable.as_deref(), Some("team.github.io"));
     assert_eq!(pages.section.as_str(), "private");
-    assert!(crate::commands::ownership_domain_parts("10.0.0.8").is_none(), "IP 没有注册域");
-    assert_eq!(crate::commands::ownership_domain_parts("com.cn").and_then(|parts| parts.registrable), None);
+    assert!(crate::commands::ownership::ownership_domain_parts("10.0.0.8").is_none(), "IP 没有注册域");
+    assert_eq!(crate::commands::ownership::ownership_domain_parts("com.cn").and_then(|parts| parts.registrable), None);
     for host in ["team.github.io", "www.zj.10086.cn", "a.b.gov.cn", "shop.example.co.uk"] {
         // G1-1: registered_domain now reads the shared PSL; the legacy rule is kept by name.
         let legacy = super::clusters::legacy_last_two_labels(host);
-        let shared = crate::commands::ownership_domain_parts(host).and_then(|parts| parts.registrable).unwrap_or_default();
-        eprintln!("G0_MEASURE host={host} legacy_registered_domain={legacy} shared_psl={shared} psl_version={}", crate::commands::OWNERSHIP_PSL_VERSION);
+        let shared = crate::commands::ownership::ownership_domain_parts(host).and_then(|parts| parts.registrable).unwrap_or_default();
+        eprintln!("G0_MEASURE host={host} legacy_registered_domain={legacy} shared_psl={shared} psl_version={}", crate::commands::ownership::OWNERSHIP_PSL_VERSION);
     }
-    assert!(crate::commands::org_directory_version(&connection).unwrap() >= 0);
-    let entities = crate::commands::load_org_entities(&connection).unwrap();
+    assert!(crate::commands::ownership::org_directory_version(&connection).unwrap() >= 0);
+    let entities = crate::commands::ownership::load_org_entities(&connection).unwrap();
     assert!(entities.iter().all(|entity| entity.directory_version >= 0));
-    assert!(crate::commands::load_project_org_binding(&connection, 141).unwrap().is_none(), "未绑定项目没有单位");
+    assert!(crate::commands::ownership::load_project_org_binding(&connection, 141).unwrap().is_none(), "未绑定项目没有单位");
     assert_eq!(connection.total_changes(), changes_before, "共享读取不写库");
 }

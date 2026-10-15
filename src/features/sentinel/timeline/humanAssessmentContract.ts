@@ -1,4 +1,4 @@
-import type { NativeScanStatus, RootHumanAssessmentObligation } from "../../../types";
+import type { NativeScanStatus, RootHumanAssessmentObligation } from "../types";
 const object = (v: unknown): v is Record<string, unknown> => !!v && typeof v === "object" && !Array.isArray(v);
 const exact = (v: unknown, keys: readonly string[]): v is Record<string, unknown> => object(v)
   && Object.keys(v).length === keys.length && keys.every(key => Object.prototype.hasOwnProperty.call(v, key));

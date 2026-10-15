@@ -71,7 +71,7 @@ pub(super) fn verify_original_tool_supply(db: &Connection, root: &str) -> Result
     let Some(selection) = selection else { return Ok(()); };
     let sealed = crate::tool_supply::frozen_plan::read_original_seal_on(db, root)?
         .ok_or("deleted_audit_original_tool_supply_missing")?;
-    let policy = crate::commands::capture_original_tool_selection_policy_on(db, &scan, attempt)?;
+    let policy = crate::scanning::scope_contract::capture_original_tool_selection_policy_on(db, &scan, attempt)?;
     let policy: serde_json::Value = serde_json::from_str(policy.canonical_policy()).map_err(|e| e.to_string())?;
     let request = policy["toolSupplySelection"]["prepared"]["request"]["requestId"]
         .as_str().ok_or("deleted_audit_original_tool_selection_missing")?;

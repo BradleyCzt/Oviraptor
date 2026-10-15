@@ -46,7 +46,7 @@ impl NativeCoordinatorFrame {
         // proof, exact frozen evidence/cap set and original message/terminal rows.
         // No rows are signed or adopted by this Root advisory consumer.
         let source =
-            crate::commands::business_logic_output_receipt::read_original_on(db, actor, child)?
+            crate::scanning::business_logic_output_receipt::read_original_on(db, actor, child)?
                 .ok_or("root_business_logic_output_original_receipt_missing")?;
         Ok(Self {
             kind: "business-logic-output",

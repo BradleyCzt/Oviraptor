@@ -74,7 +74,9 @@ async function mountTrace(overrides = {}, options = {}) {
       if (name === '@tauri-apps/plugin-dialog') return { open: async () => null };
       if (!name.startsWith('.')) return require(name);
       const resolved = path.resolve(path.dirname(filename), name);
-      if (resolved === path.join(sourceRoot, 'api')) return { api };
+      if (resolved === path.join(sourceRoot, 'features/sentinel/api')) return { sentinelApi: api };
+      if (resolved === path.join(sourceRoot, 'features/sentinel/learningApi')) return { scanningLearningApi: api };
+      if (resolved === path.join(sourceRoot, 'features/skills/catalogApi')) return { instructionCatalogApi: api, knowledgeCatalogApi: api };
       if (resolved === path.join(sourceRoot, 'i18n')) return { useI18n: () => ({ tr: (zh) => zh }) };
       return load(path.extname(resolved) ? resolved : `${resolved}.ts`);
     };

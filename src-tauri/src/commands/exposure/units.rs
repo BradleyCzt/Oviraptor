@@ -91,7 +91,7 @@ pub struct UnitProjection {
     pub notes: Vec<String>,
 }
 
-fn unit_ref(entity: &crate::commands::OrgEntityView) -> UnitRef {
+fn unit_ref(entity: &crate::commands::ownership::OrgEntityView) -> UnitRef {
     UnitRef {
         entity_id: entity.id,
         legal_name: entity.legal_name.clone(),
@@ -104,8 +104,8 @@ fn unit_ref(entity: &crate::commands::OrgEntityView) -> UnitRef {
 /// A professional subsidiary, headquarters, group, overseas entity, supplier, unknown kind,
 /// missing parent or cycle ends it without one.
 pub fn place_unit(
-    unit: &crate::commands::OrgEntityView,
-    by_id: &HashMap<i64, &crate::commands::OrgEntityView>,
+    unit: &crate::commands::ownership::OrgEntityView,
+    by_id: &HashMap<i64, &crate::commands::ownership::OrgEntityView>,
 ) -> (String, Option<UnitRef>, Option<String>) {
     let bucket = match unit.entity_kind.as_str() {
         "province_company" => "province",
@@ -157,12 +157,12 @@ fn storage(error: impl std::fmt::Display) -> String {
 
 /// Builds the projection. Read-only: no row is written, the shared directory is not copied.
 pub fn project_units(connection: &Connection, project_id: i64) -> Result<UnitProjection, String> {
-    let directory_version = crate::commands::org_directory_version(connection).map_err(storage)?;
-    let entities = crate::commands::load_org_entities(connection).map_err(storage)?;
-    let binding = crate::commands::load_project_org_binding(connection, project_id).map_err(storage)?;
-    let by_id: HashMap<i64, &crate::commands::OrgEntityView> =
+    let directory_version = crate::commands::ownership::org_directory_version(connection).map_err(storage)?;
+    let entities = crate::commands::ownership::load_org_entities(connection).map_err(storage)?;
+    let binding = crate::commands::ownership::load_project_org_binding(connection, project_id).map_err(storage)?;
+    let by_id: HashMap<i64, &crate::commands::ownership::OrgEntityView> =
         entities.iter().map(|entity| (entity.id, entity)).collect();
-    let scope = crate::commands::org_binding_scope(&entities, binding.as_ref());
+    let scope = crate::commands::ownership::org_binding_scope(&entities, binding.as_ref());
     let mut notes = Vec::new();
 
     let (members, candidate_linked, confirmed, pending_authorization, eligible): (i64, i64, i64, i64, i64) = connection
@@ -237,7 +237,7 @@ pub fn project_units(connection: &Connection, project_id: i64) -> Result<UnitPro
             }
         }
     };
-    let ownership = crate::commands::ownership_asset_unit_projection(connection, project_id).map_err(storage)?;
+    let ownership = crate::commands::ownership::ownership_asset_unit_projection(connection, project_id).map_err(storage)?;
     let asset_units: HashMap<i64, i64> = ownership.edges.iter().map(|edge| (edge.asset_id, edge.owner_entity_id)).collect();
     let mut per_unit_counts: std::collections::BTreeMap<i64, i64> = std::collections::BTreeMap::new();
     for entity_id in asset_units.values() {

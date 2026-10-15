@@ -1,12 +1,16 @@
-// Current profile API. Existing inert fields remain stored without entering
-// model resolution or runtime execution. Included from workspace_projects.rs.
+//! Configuration persistence. Preserve stored settings using the database policy;
+//! profile storage does not resolve credentials or start business execution.
+use crate::{db, models::{ConfigProfile, ConfigProfileInput}, AppState};
+use rusqlite::{params, OptionalExtension};
+use serde_json::Value as JsonValue;
+use tauri::State;
 #[tauri::command]
 pub fn list_config_profiles(state: State<AppState>) -> Result<Vec<ConfigProfile>, String> {
     let connection = db::open(&state.db_path)?;
     read_config_profiles(&connection)
 }
 
-fn read_config_profiles(connection: &rusqlite::Connection) -> Result<Vec<ConfigProfile>, String> {
+pub(super) fn read_config_profiles(connection: &rusqlite::Connection) -> Result<Vec<ConfigProfile>, String> {
     let mut statement = connection.prepare(
         "SELECT id,name,description,is_default,settings_json,created_at,updated_at FROM config_profiles ORDER BY is_default DESC, updated_at DESC"
     ).map_err(|error| error.to_string())?;
@@ -17,7 +21,7 @@ fn read_config_profiles(connection: &rusqlite::Connection) -> Result<Vec<ConfigP
                 name: row.get(1)?,
                 description: row.get(2)?,
                 is_default: row.get::<_, i64>(3)? != 0,
-                settings: db::normalize_settings(&json(row.get(4)?)),
+                settings: db::normalize_settings(&serde_json::from_str(&row.get::<_, String>(4)?).unwrap_or_else(|_| serde_json::json!({}))),
                 created_at: row.get(5)?,
                 updated_at: row.get(6)?,
             })
@@ -36,7 +40,7 @@ pub fn save_config_profile(
     persist_config_profile(&mut connection, input)
 }
 
-fn persist_config_profile(
+pub(super) fn persist_config_profile(
     connection: &mut rusqlite::Connection,
     input: ConfigProfileInput,
 ) -> Result<i64, String> {
@@ -85,7 +89,7 @@ pub fn delete_config_profile(state: State<AppState>, profile_id: i64) -> Result<
     delete_config_profile_inner(&connection,profile_id)
 }
 
-fn delete_config_profile_inner(connection: &rusqlite::Connection,profile_id:i64)->Result<(),String> {
+pub(super) fn delete_config_profile_inner(connection: &rusqlite::Connection,profile_id:i64)->Result<(),String> {
     let tx=rusqlite::Transaction::new_unchecked(connection,rusqlite::TransactionBehavior::Immediate)
         .map_err(|error|error.to_string())?;
     let (is_default,raw):(i64,String)=tx.query_row("SELECT is_default,settings_json FROM config_profiles WHERE id=?1",[profile_id],
@@ -100,4 +104,29 @@ fn delete_config_profile_inner(connection: &rusqlite::Connection,profile_id:i64)
     let remains:bool=tx.query_row("SELECT EXISTS(SELECT 1 FROM config_profiles WHERE id=?1)",[profile_id],|row|row.get(0)).map_err(|error|error.to_string())?;
     if changed!=1 || remains {return Err("配置删除未确认，已回滚".into());}
     tx.commit().map_err(|error|error.to_string())
+}
+
+#[cfg(test)]
+pub(crate) mod test_support {
+    use crate::configuration_models::{ConfigProfile, ConfigProfileInput};
+
+    pub(crate) fn read_config_profiles(
+        connection: &rusqlite::Connection,
+    ) -> Result<Vec<ConfigProfile>, String> {
+        super::read_config_profiles(connection)
+    }
+
+    pub(crate) fn persist_config_profile(
+        connection: &mut rusqlite::Connection,
+        input: ConfigProfileInput,
+    ) -> Result<i64, String> {
+        super::persist_config_profile(connection, input)
+    }
+
+    pub(crate) fn delete_config_profile_inner(
+        connection: &rusqlite::Connection,
+        profile_id: i64,
+    ) -> Result<(), String> {
+        super::delete_config_profile_inner(connection, profile_id)
+    }
 }

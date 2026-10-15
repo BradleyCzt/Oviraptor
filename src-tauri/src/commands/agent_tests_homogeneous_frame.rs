@@ -318,7 +318,7 @@ fn a_projected_rejection_continues_the_round_instead_of_marking_it_incomplete() 
     // 才让本轮继续；未裁决、读取失败或 legacy 任务一律仍按 incomplete 处理。
     use crate::agent_runtime::multi_agent::homogeneous::{directive_gate, store};
     let answered = |path: &std::path::Path, run: &str| {
-        crate::commands::human_deferral_answered_by_reject(path, run)
+        crate::scanning::human_deferral_answered_by_reject(path, run)
     };
     let (dir, connection, lease) = homogeneous_wiring_fixture("homogeneous_workers");
     store::activate_task_for_lease(&connection, &lease)
@@ -372,7 +372,7 @@ fn a_projected_rejection_continues_the_round_instead_of_marking_it_incomplete() 
 fn the_homogeneous_human_hook_waits_until_every_directive_is_decided() {
     // DESIGN §5.5：同质 root 的引导裁决以 gated 表为准；legacy root 仍走原判定。
     use crate::agent_runtime::multi_agent::homogeneous::{directive_gate, store};
-    use crate::commands::homogeneous_directives_decided;
+    use crate::scanning::homogeneous_directives_decided;
     let (legacy_dir, legacy_db, legacy_lease) = homogeneous_wiring_fixture("legacy_role_pipeline");
     assert_eq!(
         homogeneous_directives_decided(&legacy_db, &legacy_lease.root_run_id).expect("判定"),
@@ -647,7 +647,7 @@ fn the_heartbeat_sweep_reclaims_expired_homogeneous_carriers() {
         path,
         task.evidence_revision_base,
     );
-    crate::commands::native_homogeneous_apply_after_paid_tick(
+    crate::scanning::runtime_test_support::native_homogeneous_apply_after_paid_tick(
         &db,
         &f.actor,
         &homogeneous_decision(
@@ -677,7 +677,7 @@ fn the_heartbeat_sweep_reclaims_expired_homogeneous_carriers() {
     let task_id = task.task_id.clone();
     drop(db);
     let db = db::open(&f.context.db_path).unwrap();
-    crate::commands::native_homogeneous_apply_after_paid_tick(
+    crate::scanning::runtime_test_support::native_homogeneous_apply_after_paid_tick(
         &db,
         &f.actor,
         &homogeneous_decision(

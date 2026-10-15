@@ -195,6 +195,6 @@ test('g3 an intel evidence package names its grade and a grade read failure stay
   assert.match(c.intelGradeLine(read), /样本支撑/);
   assert.equal(c.readEvidence(base).intelGrade, null);
   assert.equal(c.intelGradeLine(c.readEvidence(base)), '');
-  const surface = readSource('src/components/ExposureSurface.vue');
+  const surface = readSource('src/features/assets/exposure/ExposureSurface.vue');
   assert.match(surface, /intelGradeLine\(evidencePackage\)/);
 });

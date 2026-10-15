@@ -34,7 +34,7 @@ function mount(recover = async () => receipt(), initial = {}) {
   new Function('require', 'exports', transpile(script.content))((name) => {
     if (name === 'vue') return vue;
     if (name === '../../../i18n') return { useI18n: () => ({ tr: (zh) => zh }) };
-    if (name === '../../../api') return { api: new Proxy({}, { get(_, key) {
+    if (name === '../api') return { sentinelApi: new Proxy({}, { get(_, key) {
       assert.equal(key, 'recoverNativeSourcePauseResult');
       return async (...args) => { calls.push(args); return recover(...args); };
     } }) };

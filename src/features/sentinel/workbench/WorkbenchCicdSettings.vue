@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { GitBranch, ShieldCheck } from "@lucide/vue";
-import type { WorkbenchScanInput } from "../../../types";
+import type { WorkbenchScanInput } from "../types";
 
 defineProps<{
   form: Pick<WorkbenchScanInput, "ciProvider" | "repositoryUrl" | "branch" | "commitSha" | "buildId" | "environment" | "maxCritical" | "maxHigh" | "blockRelease">;

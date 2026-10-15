@@ -1,0 +1,1 @@
+.query-layout{display:grid;grid-template-columns:minmax(0,1fr) 350px;gap:18px}.query-builder-panel{padding-bottom:20px}.query-builder-panel>.form-grid,.query-builder-panel>.input-toolbar,.query-builder-panel>.target-input,.query-builder-panel>.input-summary,.query-builder-panel>.query-actions{margin-inline:19px}

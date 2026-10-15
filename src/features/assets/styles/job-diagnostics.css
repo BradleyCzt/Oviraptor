@@ -1,0 +1,5 @@
+
+
+/* Preserve detailed subprocess diagnostics in the task center. */
+.run-error{display:block;max-width:100%;margin-top:6px;white-space:pre-wrap;overflow-wrap:anywhere;word-break:break-word;line-height:1.55}
+.run-live-message{display:block;max-width:760px;margin-top:6px;color:#58708f;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font:9px/1.45 IBM Plex Mono,monospace}

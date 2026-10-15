@@ -16,8 +16,11 @@ impl Fixture {
         connection
             .pragma_update(None, "journal_mode", "WAL")
             .unwrap();
+        // Pump/signal tests use the real event table and their own synthetic
+        // emitter below. Stop before production emitters: those triggers need
+        // the complete Agent schema, which is outside this queue fixture.
         let (event_table, _) = super::COLLABORATION_EVENT_SCHEMA
-            .split_once("-- Durable queue preferences")
+            .split_once("CREATE TRIGGER")
             .unwrap();
         connection.execute_batch(event_table).unwrap();
         connection

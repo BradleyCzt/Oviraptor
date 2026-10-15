@@ -1,0 +1,2 @@
+
+.model-editor-actions{display:flex;align-items:center;gap:7px}.model-test-message{display:flex;align-items:center;gap:5px;margin:10px 0 0;padding:8px 10px;border-radius:7px;font-size:9px;line-height:1.5}.model-test-message.passed{background:#e8f7ef;color:#13774f}.model-test-message.failed{background:#fff0f0;color:#b33c3c}.model-test-message.idle{background:#f3f3f5;color:#6e6e73}

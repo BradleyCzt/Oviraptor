@@ -1,4 +1,4 @@
-import type { NativeScanStatus } from "../../../types";
+import type { NativeScanStatus } from "../types";
 import { validTimelineRows } from "./projectionContract";
 
 // IPC types do not validate runtime values. Keep the received event window

@@ -1,0 +1,15 @@
+
+@media(max-width:760px){.agent-governance-grid,.prompt-audit-grid{grid-template-columns:1fr}}
+
+/* macOS-inspired application chrome and compact accounting surfaces */
+html,body,#app{background:#f5f5f7;color:#1d1d1f}
+.app-shell{background:#f5f5f7}
+.sidebar{background:rgba(246,246,248,.88);color:#3c3c43;border-right:1px solid rgba(60,60,67,.14);backdrop-filter:saturate(180%) blur(22px);-webkit-backdrop-filter:saturate(180%) blur(22px);box-shadow:1px 0 18px rgba(0,0,0,.035)}
+.brand{padding-bottom:22px}.brand-mark{background:#1d1d1f;box-shadow:0 4px 12px rgba(0,0,0,.14)}.brand-copy strong{color:#1d1d1f}.brand-copy span{color:#8a8a90}
+.nav-list button,.sidebar-fixed-links button{color:#6e6e73;border-radius:8px}.nav-list button:hover,.sidebar-fixed-links button:hover{background:rgba(118,118,128,.12);color:#1d1d1f}.nav-list button.active,.sidebar-fixed-links button.active{background:rgba(0,122,255,.12);color:#0066cc}.nav-list button.active:before{left:8px;width:3px;background:#007aff}.nav-list button.accent{background:#007aff;color:#fff;box-shadow:0 4px 12px rgba(0,122,255,.2)}
+.sidebar-project{border-top-color:rgba(60,60,67,.12)}.sidebar-label{color:#8a8a90}.current-project{background:rgba(118,118,128,.1);color:#3c3c43}.sidebar-footer{color:#8a8a90}
+.main-area{background:#f5f5f7}.topbar{background:rgba(255,255,255,.78);border-bottom-color:rgba(60,60,67,.14);backdrop-filter:saturate(180%) blur(20px);-webkit-backdrop-filter:saturate(180%) blur(20px)}
+.topbar-actions .global-search,.project-switcher,.toolbar-select,.top-icon{background:rgba(118,118,128,.08);border-color:rgba(60,60,67,.16);color:#3c3c43}
+.content-area{padding-top:25px}.panel,.stat-card,.project-card{background:rgba(255,255,255,.86);border-color:rgba(60,60,67,.13);box-shadow:0 1px 2px rgba(0,0,0,.04),0 8px 24px rgba(0,0,0,.035)}
+.button.primary{background:#007aff;box-shadow:0 4px 12px rgba(0,122,255,.18)}.button.secondary{background:#3a3a3c}.button.ghost,.icon-button{background:rgba(255,255,255,.82);border-color:rgba(60,60,67,.16)}
+.field input,.field select,.field textarea,.condition-row input,.condition-row select{background:rgba(118,118,128,.06);border-color:rgba(60,60,67,.16)}.field input:focus,.field select:focus,.field textarea:focus,.condition-row input:focus,.condition-row select:focus{border-color:#007aff;box-shadow:0 0 0 3px rgba(0,122,255,.14)}

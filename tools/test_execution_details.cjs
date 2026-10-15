@@ -100,6 +100,7 @@ async function mountDetails(overrides = {}, eventOptions = {}) {
   new Function('require', 'exports', transpile(source))(name => {
     if (name === 'vue') return vue;
     if (name === '../api') return { sentinelApi: api };
+        if (name === '../../skills/catalogApi') return { knowledgeCatalogApi: api };
     if (name === './useLiveRunnerLog') return live.module;
     if (name === '../results/historicalPreviewContract') return historicalContract;
     throw Error(`Unexpected detail import ${name}`);

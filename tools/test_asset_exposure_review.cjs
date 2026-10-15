@@ -298,7 +298,7 @@ test('the panel renders review state without any collection control', async () =
   assert.doesNotMatch(source, /startExposureScan|resumeExposureScan|cancelExposureScan/,
     '复核面板不得持有启动、恢复或停止采集的能力');
   assert.match(source, /import \{ exposureApi \} from "\.\/api"/, '只能走暴露面自己的 IPC 包装');
-  const pageSource = readSource('src/components/ExposureSurface.vue');
+  const pageSource = readSource('src/features/assets/exposure/ExposureSurface.vue');
   assert.match(pageSource, /ExposureReviewPanel/, '页面必须挂上复核整改视图');
   assert.match(pageSource, /只列出当前已读到的/, '选择器要说明它只覆盖已读到的一页');
 });

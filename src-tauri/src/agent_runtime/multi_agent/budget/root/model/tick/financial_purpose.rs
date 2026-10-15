@@ -34,7 +34,7 @@ pub(crate) fn binding_on(db: &Connection, root: &str) -> Result<Option<Value>, S
     if !exists {
         return Ok(None);
     }
-    let birth = crate::commands::verify_financial_continuation_birth_on(db, root)?;
+    let birth = crate::scanning::financial_continuation::verify_financial_continuation_birth_on(db, root)?;
     Ok(Some(json!({"version":1,"approvalId":birth["approvalId"],
         "proposalHash":birth["proposalHash"],"birthHash":store::stable_hash(&birth.to_string()),
         "sourceRootRunId":birth["sourceRootRunId"],"sourceAttemptNumber":birth["sourceAttemptNumber"],
@@ -116,7 +116,7 @@ pub(super) fn verify_on(
     {
         return Err("financial_continuation_messages_invalid".into());
     }
-    let birth = crate::commands::verify_financial_continuation_birth_on(db, root)?;
+    let birth = crate::scanning::financial_continuation::verify_financial_continuation_birth_on(db, root)?;
     if basis["scan"] != birth["scanId"]
         || basis["target"] != birth["financialSource"]["targetKey"]
         || basis["planHash"] != birth["newPlanHash"]
@@ -124,7 +124,7 @@ pub(super) fn verify_on(
     {
         return Err("financial_continuation_basis_changed".into());
     }
-    crate::commands::native_coordinator_require_original_model_on(
+    crate::scanning::financial_continuation::native_coordinator_require_original_model_on(
         db,
         birth["sourceRootRunId"]
             .as_str()

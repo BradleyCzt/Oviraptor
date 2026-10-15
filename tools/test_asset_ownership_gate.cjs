@@ -12,7 +12,7 @@ const vue = require('vue');
 const { renderToString } = require('@vue/server-renderer');
 const { parse, compileScript, compileTemplate } = require('@vue/compiler-sfc');
 
-const GATE = 'src/components/AssetOwnershipGate.vue';
+const GATE = 'src/features/assets/components/AssetOwnershipGate.vue';
 const readSource = relative => fs.readFileSync(path.join(__dirname, '..', relative), 'utf8');
 const transpile = source => ts.transpileModule(source, {
   compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020 },
@@ -23,7 +23,8 @@ const transpile = source => ts.transpileModule(source, {
 function compileGate(api) {
   const requireModule = name => {
     if (name === 'vue') return vue;
-    if (name === '../api') return { api };
+    if (name === '../api') return { assetApi: api };
+    if (name === '../ownershipDirectoryApi') return { ownershipAuthorizationApi: api };
     if (name === '@lucide/vue') return new Proxy({}, { get: () => () => null });
     if (name.endsWith('.css')) return {};
     // Child panels (e.g. the O1 project setup card) are outside this O0 gate test; they are

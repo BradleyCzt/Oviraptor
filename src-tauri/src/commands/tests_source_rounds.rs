@@ -9,7 +9,7 @@ fn source_round_fixture() -> (PathBuf,rusqlite::Connection,AgentRunContext,
     let child=scheduler::schedule_child(&connection,&lease,role,AgentLane::ReadOnlyAnalysis,"source_tools_ready",
         &slice,1,&source::tool_capabilities(role).unwrap(),24_000,3).unwrap();
     scheduler::mark_child_running(&connection,&lease,&child).unwrap();
-    let mut context=crate::commands::agent_tests::test_context(&root.join("oviraptor.sqlite3"),&lease.target_key,Vec::new());
+    let mut context=crate::scanning::agent_tests::test_context(&root.join("oviraptor.sqlite3"),&lease.target_key,Vec::new());
     context.scan_id=record.scan_id;context.attempt_number=1;
     context.run=Some(AgentRunLedger {db_path:context.db_path.clone(),run_id:child.run_id.clone()});
     context.execution_plan.schema_version=255;
@@ -86,10 +86,10 @@ fn source_rounds_unknown_and_budget_cannot_be_retried_or_bypassed() {
     assert!(rounds::start_authorized(&connection,&lease,&child,2,&request,8_000,check).is_err());
     let Start::Dispatch(call)=rounds::start_authorized(&connection,&lease,&child,1,&request,8_000,check).unwrap() else {panic!()};
     rounds::record_uncertain(&connection,&call,"transport disconnected").unwrap();
-    let before_unknown=crate::commands::web_mode_test_rows(&connection);
+    let before_unknown=crate::scanning::web_mode_test_rows(&connection);
     let unknown=rounds::start_authorized(&connection,&lease,&child,1,&request,8_000,check).unwrap_err();
     assert_eq!(unknown,"source_tool_original_finance_unavailable","original unknown fee is rejected before a round can be replayed");
-    crate::commands::web_mode_assert_rows(&connection,&before_unknown);
+    crate::scanning::web_mode_assert_rows(&connection,&before_unknown);
     assert!(rounds::record_received(&connection,&call,&source_round_result("r1","repo.inventory",json!({}))).is_err());
     let reserved:(i64,i64)=connection.query_row("SELECT reserved_tokens,reserved_requests FROM agent_budget_ledger WHERE root_run_id=?1",[&lease.root_run_id],|r|Ok((r.get(0)?,r.get(1)?))).unwrap();
     assert_eq!(reserved,(24_000,3));
@@ -286,7 +286,7 @@ fn source_rounds_received_usage_is_charged_before_tools_and_not_again_at_settlem
         let b=budget::balance(&db,&lease.root_run_id,Some(&child.assignment_id),dimension).unwrap();assert_eq!(b.consumed,spent,"{dimension}");
     }
     let changes=db.total_changes();rounds::record_received(&db,&call,&result).unwrap();assert_eq!(db.total_changes(),changes);
-    crate::commands::settle_child_usage(&db,&lease,&child,&result.usage).unwrap();
+    crate::scanning::settle_child_usage(&db,&lease,&child,&result.usage).unwrap();
     for (dimension,spent) in budget::DIMENSIONS[..4].iter().zip([12,2,8,1]) {
         let b=budget::balance(&db,&lease.root_run_id,Some(&child.assignment_id),dimension).unwrap();assert_eq!((b.reserved,b.consumed,b.indeterminate),(0,spent,0));
     }

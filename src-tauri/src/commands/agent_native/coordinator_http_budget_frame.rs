@@ -135,7 +135,11 @@ fn native_http_budget_protocol_enabled_on(
         return Err("root_http_budget_original_protocol_missing".into());
     }
     crate::agent_runtime::web_mode::root::verify_birth(db, root, &original)?;
-    let bootstrap = declaration.bootstrap_dispatch().unwrap_or(JsonValue::Null);
+    // A verified original Native birth may predate bootstrap protocols. It
+    // declares no HTTP advisory; physical HTTP admission remains independent.
+    let Some(bootstrap) = declaration.bootstrap_dispatch() else {
+        return Ok(false);
+    };
     if bootstrap.get("httpBudgetConsumptionRule").is_none()
         && bootstrap["schemaVersion"]
             .as_i64()

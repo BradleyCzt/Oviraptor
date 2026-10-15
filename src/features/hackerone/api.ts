@@ -1,5 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
-import type { HackerOneDetail, HackerOneEvent, HackerOneProgram } from "../../types";
+import type { HackerOneDetail, HackerOneEvent, HackerOneProgram } from "./types";
 
 export const hackerOneApi = {
   listHackerOnePrograms: (search = "") =>

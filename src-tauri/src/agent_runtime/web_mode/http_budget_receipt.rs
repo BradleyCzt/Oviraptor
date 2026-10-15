@@ -15,7 +15,7 @@ impl FreshHttpBudgetReceipt {
     // Only the actual transport's private pre-send witness can enter this path.
     pub(crate) fn from_transport_on(
         db: &Connection,
-        witness: &crate::commands::http_budget_receipt::FreshHttpBudgetClaim,
+        witness: &crate::scanning::http_budget_receipt::FreshHttpBudgetClaim,
         status: u16,
     ) -> Result<Self, String> {
         let (original, value) = witness.received_fact_on(db, status)?;

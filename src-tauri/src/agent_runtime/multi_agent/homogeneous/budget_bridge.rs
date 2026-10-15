@@ -35,7 +35,7 @@ pub(crate) fn admit(
             let task = store::load_task_by_root_run(tx,&lease.root_run_id)?.ok_or_else(||error("homogeneous_task_missing".into()))?;
             let slice = store::load_slice(tx,&body.slice_id)?.ok_or_else(||error("homogeneous_slice_missing".into()))?;
             let _ = task;
-            let minimum=crate::commands::homogeneous_execution::slice_minimum(tx,lease,&slice).map_err(error)?;
+            let minimum=crate::scanning::homogeneous_execution::slice_minimum(tx,lease,&slice).map_err(error)?;
             if body.reserved_requests<minimum.1 || body.reserved_tokens<minimum.0 {
                 return Err(error("homogeneous_worker_model_reservation_insufficient".into()));
             }

@@ -1,0 +1,14 @@
+.status-web_alive,
+.status-alive_clean,
+.decision-confirmed,
+.tier-p1 { background:#e7f7f0; color:#14875f; }
+.status-web_restricted,
+.status-virtual_host_required,
+.status-browser_render_required { background:#fff4e5; color:#b86d13; }
+.status-web_abnormal,
+.status-tcp_alive_non_http { background:#edf3ff; color:#286bcd; }
+.status-blocked_content { background:#fff0f0; color:#c94d4d; }
+.status-unreachable,
+.status-skipped,
+.decision-rejected,
+.decision-not_applicable { background:#f1f2f5; color:#6d7581; }

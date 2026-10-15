@@ -260,7 +260,7 @@ fn external_surface_output_interruption_assert(
     drop(wires);
     let tx = db.unchecked_transaction().unwrap();
     assert!(
-        crate::commands::external_surface_output_receipt::read_original_on(&tx, actor, &child)
+        crate::scanning::external_surface_output_receipt::read_original_on(&tx, actor, &child)
             .unwrap()
             .is_some(),
         "closed original source remains readable after scope loss"
@@ -332,7 +332,7 @@ fn external_surface_output_actual_paid_publication_reentry_after_pause_has_zero_
     assert_eq!(f.h.site_seen.lock().unwrap().len(), 1);
     let tx = db.unchecked_transaction().unwrap();
     let source =
-        crate::commands::external_surface_output_receipt::read_original_on(&tx, actor, &child)
+        crate::scanning::external_surface_output_receipt::read_original_on(&tx, actor, &child)
             .unwrap()
             .unwrap();
     let id = source.receipt_id().to_string();
@@ -355,7 +355,7 @@ fn external_surface_output_actual_paid_publication_reentry_after_pause_has_zero_
     native_coordinator_external_surface_output_feedback(&f.h.context, actor, &child).unwrap();
     let tx = db.unchecked_transaction().unwrap();
     assert_eq!(
-        crate::commands::external_surface_output_receipt::read_original_on(&tx, actor, &child)
+        crate::scanning::external_surface_output_receipt::read_original_on(&tx, actor, &child)
             .unwrap()
             .unwrap()
             .receipt_id(),

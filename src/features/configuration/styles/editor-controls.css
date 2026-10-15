@@ -1,0 +1,6 @@
+
+
+/* Configuration editor controls stay on one line, including at compact widths. */
+.model-profile-editor>header>.model-editor-actions{display:flex;flex-direction:row;align-items:center;justify-content:flex-end;gap:8px;flex:0 0 auto}
+.model-editor-actions .model-test-button{min-width:104px}.model-editor-actions .icon-button{flex:0 0 auto}
+.agent-policy-controls{min-width:0;margin:0;padding:0;border:0}.agent-policy-controls:disabled{opacity:.58}.agent-policy-controls:disabled input,.agent-policy-controls:disabled select{cursor:not-allowed}

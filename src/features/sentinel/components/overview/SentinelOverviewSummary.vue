@@ -2,7 +2,7 @@
 import { computed } from "vue";
 import { Activity, Bug, Cpu, Network, ShieldAlert } from "@lucide/vue";
 import { useI18n } from "../../../../i18n";
-import type { SentinelOverviewStats, SentinelScan } from "../../../../types";
+import type { SentinelOverviewStats, SentinelScan } from "../../types";
 import { createSentinelLabels, formatCompactNumber, formatNumber } from "../../presentation";
 
 // Read-only projection: the Board owns requests, retained snapshots and scope.

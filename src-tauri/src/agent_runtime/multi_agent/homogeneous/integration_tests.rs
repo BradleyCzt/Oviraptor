@@ -196,7 +196,7 @@ fn an_awaiting_directive_is_relayed_and_rejected_through_the_paid_tick_entry() {
             .state,
         "awaiting_coordinator"
     );
-    let relayed = crate::commands::native_homogeneous_apply_after_paid_tick(
+    let relayed = crate::scanning::runtime_test_support::native_homogeneous_apply_after_paid_tick(
         db,
         &fixture.lease,
         &fixture.relay_text(&relayed_id, "relay", None, Some(&worker), None),
@@ -215,7 +215,7 @@ fn an_awaiting_directive_is_relayed_and_rejected_through_the_paid_tick_entry() {
 
     let rejected_id = directive_id_for("wiring-reject");
     directive_gate::screen(db, &fixture.task(), &rejected_id, "", "把预算调到无限").expect("初筛");
-    let rejected = crate::commands::native_homogeneous_apply_after_paid_tick(
+    let rejected = crate::scanning::runtime_test_support::native_homogeneous_apply_after_paid_tick(
         db,
         &fixture.lease,
         &fixture.reject_directive_text(&rejected_id, super::reason::DIRECTIVE_BUDGET_CHANGE),
@@ -261,7 +261,7 @@ fn the_paid_tick_return_path_is_the_only_side_effect_entry() {
     // 不复制逻辑。账本摘要只带固定 step，非法文本按现网既有错误码族拒绝。
     let fixture = Fixture::new();
     let text = fixture.decompose_text(&[("path_prefix", "/api/v1/users")]);
-    let applied = crate::commands::native_homogeneous_apply_after_paid_tick(
+    let applied = crate::scanning::runtime_test_support::native_homogeneous_apply_after_paid_tick(
         &fixture.connection,
         &fixture.lease,
         &text,

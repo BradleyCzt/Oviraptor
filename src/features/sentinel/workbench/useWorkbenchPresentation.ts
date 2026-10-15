@@ -1,6 +1,6 @@
 import { computed, ref, watch, type Ref } from "vue";
 import { open } from "@tauri-apps/plugin-dialog";
-import type { AgentSkill } from "../../../types";
+import type { AgentSkill } from "../../skills/catalogTypes";
 import type { WorkbenchMode } from "./useWorkbenchTaskCreation";
 
 type PresentationForm = {

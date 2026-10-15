@@ -1,6 +1,6 @@
 import { onBeforeUnmount, ref, watch } from "vue";
-import { api } from "../../../api";
-import type { SentinelRunnerLogView } from "../../../types";
+import { sentinelApi } from "../api";
+import type { SentinelRunnerLogView } from "../types";
 import { useLiveRunnerLog, type LogScope } from "./useLiveRunnerLog";
 
 // The global log panel uses the same committed-snapshot delivery as task detail.
@@ -29,7 +29,7 @@ export function useRunnerLogPanel(selected: () => LogScope, active: () => boolea
     const current = () => !disposed && request === generation && key() === currentKey;
     loading.value = true;
     try {
-      const view = await api.readSentinelRunnerLog(scope.scanId, scope.attempt || undefined, 300);
+      const view = await sentinelApi.readSentinelRunnerLog(scope.scanId, scope.attempt || undefined, 300);
       if (!current()) return;
       if (view.scanId !== scope.scanId || (scope.attempt > 0 && view.attempt !== scope.attempt)) {
         throw new Error("Log snapshot scope mismatch");

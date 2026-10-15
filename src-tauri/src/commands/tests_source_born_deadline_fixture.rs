@@ -35,7 +35,7 @@ fn source_born_deadline_checkpoint_fixture(
                 .unwrap(),
                 30_000
             );
-            let before = crate::commands::web_mode_test_rows(db);
+            let before = crate::scanning::web_mode_test_rows(db);
             let deadline = std::time::Instant::now() + Duration::from_secs(40);
             loop {
                 match crate::agent_runtime::multi_agent::budget::clock::remaining(
@@ -55,7 +55,7 @@ fn source_born_deadline_checkpoint_fixture(
                     .is_err(),
                 "the test must not extend the born C beyond its Root clock"
             );
-            crate::commands::web_mode_assert_rows(db, &before);
+            crate::scanning::web_mode_assert_rows(db, &before);
             let original =
                 crate::agent_runtime::multi_agent::budget::root::RootOwner::load_original(
                     db,

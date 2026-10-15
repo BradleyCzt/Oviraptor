@@ -1,6 +1,6 @@
 import { onUnmounted, readonly, ref, type Ref } from "vue";
-import { api } from "../../../api";
-import type { AgentTraceDetail, AgentTraceSummary } from "../../../types";
+import { sentinelApi } from "../api";
+import type { AgentTraceDetail, AgentTraceSummary } from "../types";
 import { isTraceDetailForTask } from "./traceDetailContract";
 
 // Manual reads and polling share one selection revision, including A -> B -> A.
@@ -41,7 +41,7 @@ export function useTraceSelection(
     detailLoading.value = Boolean(scanId);
     if (!scanId) return;
     try {
-      const latest = await api.getAgentTrace(scanId);
+      const latest = await sentinelApi.getAgentTrace(scanId);
       if (current(requestRevision)) publish(latest, scanId);
     } catch {
       if (current(requestRevision)) reportError("运行轨迹读取失败，请重试");
@@ -67,7 +67,7 @@ export function useTraceSelection(
     const requestRevision = revision;
     pollInFlight = true;
     try {
-      const latest = await api.getAgentTrace(scanId);
+      const latest = await sentinelApi.getAgentTrace(scanId);
       if (current(requestRevision)) publish(latest, scanId);
     } catch {
       // A failed/background read retains the last verified view, without error spam.

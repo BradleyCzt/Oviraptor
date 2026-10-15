@@ -258,7 +258,7 @@ async function mount(overrides = {}, options = {}) {
       return loadWorkspaceModule('src/features/sentinel/components/RootDecisionSummary.vue');
     if (name === './AgentIdentityMaterial.vue')
       return loadWorkspaceModule('src/features/sentinel/components/AgentIdentityMaterial.vue',
-        { '../../../api': { api } });
+        { '../api': { sentinelApi: api } });
     if (name === '../timeline/projectionContract') return projectionExports;
     if (name === '../timeline/humanAssessmentContract') return loadWorkspaceModule('src/features/sentinel/timeline/humanAssessmentContract.ts');
     if (name === '../../../i18n') return { useI18n: () => ({ tr: (zh) => zh }) };

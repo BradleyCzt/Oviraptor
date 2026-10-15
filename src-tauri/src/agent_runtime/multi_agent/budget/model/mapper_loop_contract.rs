@@ -58,7 +58,7 @@ pub(crate) fn require_protocol_on(db: &Connection, actor: &CoordinatorLease) -> 
         .require_original_coordinator(db, actor)?;
     let mode = web_mode::root::read(db, &actor.root_run_id)?
         .ok_or("mapper_loop_original_protocol_missing")?;
-    let proof = crate::commands::original_root_capture_mode(db, &actor.root_run_id)?;
+    let proof = crate::scanning::scope_contract::original_root_capture_mode(db, &actor.root_run_id)?;
     web_mode::root::verify_birth(db, &actor.root_run_id, &proof)?;
     let protocol = mode
         .bootstrap_dispatch()
@@ -175,26 +175,37 @@ fn verify_wire(actor: &CoordinatorLease, fact: &Value) -> Result<i64, String> {
         return Err(invalid.into());
     }
     let request = &fact["request"];
-    if !keys(
-        request,
-        &[
-            "messages",
-            "tools",
-            "temperature",
-            "model",
-            "endpointHash",
-            "proxyHash",
-            "local",
-            "maxOutputTokens",
-            "maxContextTokens",
-        ],
-    ) || request["temperature"].as_f64() != Some(0.0)
+    let mut request_keys = vec![
+        "messages",
+        "tools",
+        "temperature",
+        "model",
+        "endpointHash",
+        "proxyHash",
+        "local",
+        "maxOutputTokens",
+        "maxContextTokens",
+    ];
+    // Historical v15 facts omit providerOptions. Read their original bytes;
+    // only current facts carry the exact options derived for this frozen cap.
+    let provider_options = request.get("providerOptions");
+    if provider_options.is_some() {
+        request_keys.push("providerOptions");
+    }
+    if !keys(request, &request_keys)
+        || request["temperature"].as_f64() != Some(0.0)
         || request["maxOutputTokens"] != 512
         || request["model"].as_str().is_none_or(str::is_empty)
         || !hash(&request["endpointHash"])
         || !hash(&request["proxyHash"])
         || !request["local"].is_boolean()
         || request["maxContextTokens"].as_u64().is_none()
+        || provider_options.is_some_and(|options| {
+            options != &crate::agent_runtime::model::profile::bounded_wire_options(
+                request["model"].as_str().unwrap_or_default(),
+                Some(512),
+            )
+        })
     {
         return Err(invalid.into());
     }

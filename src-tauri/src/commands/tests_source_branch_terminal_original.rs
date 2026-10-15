@@ -3,7 +3,7 @@ fn source_branch_actual_unfinished_tools_cannot_publish_completed_with_gaps() {
     use crate::agent_runtime::multi_agent::budget;
     use std::sync::atomic::Ordering;
     let round = AtomicUsize::new(0);
-    let (port, seen, stop) = crate::commands::agent_tests::spawn_endpoint(Arc::new(
+    let (port, seen, stop) = crate::scanning::agent_tests::spawn_endpoint(Arc::new(
         move |request| {
             let body: JsonValue =
                 serde_json::from_str(request.split_once("\r\n\r\n").unwrap().1).unwrap();
@@ -132,7 +132,7 @@ fn source_branch_production_report(
 ) {
     use std::sync::atomic::Ordering;
     let number = AtomicUsize::new(0);
-    let (port, seen, stop) = crate::commands::agent_tests::spawn_endpoint(Arc::new(
+    let (port, seen, stop) = crate::scanning::agent_tests::spawn_endpoint(Arc::new(
         move |request| {
             if unknown {
                 return (

@@ -237,7 +237,7 @@ pub(crate) fn require_external_surface_probe_headroom_on(
 /// retain the ordinary refusal; this creates neither a receipt nor a refund.
 pub(crate) fn require_external_surface_presend_headroom_on(
     tx: &Transaction<'_>,
-    proof: &crate::commands::external_surface_response_receipt::ClaimedPublicSurfaceWitness,
+    proof: &crate::scanning::external_surface_response_receipt::ClaimedPublicSurfaceWitness,
 ) -> Result<(), String> {
     let actor = proof.verify_unsent_on(tx)?;
     require_external_surface_headroom_on(tx, actor, false, Some(proof))
@@ -247,7 +247,7 @@ fn require_external_surface_headroom_on(
     tx: &Transaction<'_>,
     actor: &super::super::lease::CoordinatorLease,
     new_assignment: bool,
-    fresh: Option<&crate::commands::external_surface_response_receipt::ClaimedPublicSurfaceWitness>,
+    fresh: Option<&crate::scanning::external_surface_response_receipt::ClaimedPublicSurfaceWitness>,
 ) -> Result<(), String> {
     if !external_surface_obligations::enabled_on(tx, &actor.root_run_id)? {
         return Ok(());

@@ -54,6 +54,7 @@ impl Fixture {
             json!(base64::engine::general_purpose::STANDARD.encode(key.sign(&bytes).as_ref()));
         serde_json::to_vec(&envelope).unwrap()
     }
+    #[cfg(target_os = "macos")]
     fn owned_approve(&self, decision: &[u8]) -> Result<String, String> {
         let db = Connection::open(&self.path).map_err(|e| e.to_string())?;
         let preparation = crate::db::begin_environment_preparation(&self.path)?;
@@ -76,6 +77,7 @@ impl Drop for Fixture {
     }
 }
 #[test]
+#[cfg(target_os = "macos")]
 fn approved_package_owned_writer_actual_new_decision_and_source_readonly() {
     let f = Fixture::new();
     let decision = f.new_signed_decision();
@@ -128,6 +130,7 @@ fn approved_package_owned_writer_actual_new_decision_and_source_readonly() {
     );
 }
 #[test]
+#[cfg(target_os = "macos")]
 fn approved_package_owned_writer_actual_original_missing_cache_reuses_immutable_decision() {
     let f = Fixture::new();
     assert!(!f.config.original_package_cache_root().exists());
@@ -140,3 +143,6 @@ fn approved_package_owned_writer_actual_original_missing_cache_reuses_immutable_
     let after:Vec<(String,String,String)>=db.prepare("SELECT decision_id,canonical_envelope,canonical_manifest FROM tool_administrator_decisions ORDER BY decision_id").unwrap().query_map([],|r|Ok((r.get(0)?,r.get(1)?,r.get(2)?))).unwrap().collect::<rusqlite::Result<_>>().unwrap();
     assert_eq!(rows, after);
 }
+
+#[cfg(all(unix, not(target_os = "macos")))]
+include!("approved_package_approval_platform_tests.rs");

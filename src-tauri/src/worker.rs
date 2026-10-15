@@ -312,11 +312,11 @@ fn handle_worker_request(app: &AppHandle, mut stream: TcpStream, token: &str) {
     let state = app.state::<AppState>();
     let result: Result<Value, String> = match (method.as_str(), path) {
         ("GET", "/v1/health") => worker_health(&state),
-        ("GET", "/v1/environment") => commands::check_environment(app.clone(), state.clone(), None)
+        ("GET", "/v1/environment") => commands::environment::check_environment(app.clone(), state.clone(), None)
             .and_then(|report| serde_json::to_value(report).map_err(|error| error.to_string())),
         ("GET", "/v1/projects") => worker_projects(&state),
         ("GET", "/v1/scans") => {
-            commands::list_sentinel_scans_inner(&state.db_path, None, Some(500), None, None)
+            crate::scanning::worker_bridge::list_sentinel_scans_inner(&state.db_path, None, Some(500), None, None)
                 .and_then(|items| serde_json::to_value(items).map_err(|error| error.to_string()))
         }
         _ => {
@@ -330,7 +330,7 @@ fn handle_worker_request(app: &AppHandle, mut stream: TcpStream, token: &str) {
                 parts[2]
                     .parse::<i64>()
                     .map_err(|_| "项目 ID 无效".to_string())
-                    .and_then(|project_id| commands::sentinel_project_bundle(&state, project_id))
+                    .and_then(|project_id| crate::scanning::worker_bridge::sentinel_project_bundle(&state, project_id))
             } else if method == "POST"
                 && parts.len() == 4
                 && parts[0] == "v1"
@@ -338,11 +338,11 @@ fn handle_worker_request(app: &AppHandle, mut stream: TcpStream, token: &str) {
             {
                 let scan_id = parts[2].to_string();
                 match parts[3] {
-                    "pause" => commands::pause_sentinel_scan(state.clone(), scan_id)
+                    "pause" => crate::scanning::worker_bridge::pause_sentinel_scan(state.clone(), scan_id)
                         .and_then(|item| serde_json::to_value(item).map_err(|e| e.to_string())),
-                    "resume" => commands::resume_sentinel_scan(app.clone(), state.clone(), scan_id)
+                    "resume" => crate::scanning::worker_bridge::resume_sentinel_scan(app.clone(), state.clone(), scan_id)
                         .and_then(|item| serde_json::to_value(item).map_err(|e| e.to_string())),
-                    "cancel" => commands::cancel_sentinel_scan(state.clone(), scan_id)
+                    "cancel" => crate::scanning::worker_bridge::cancel_sentinel_scan(state.clone(), scan_id)
                         .map(|_| json!({ "ok": true })),
                     _ => Err("不支持的任务操作".into()),
                 }
@@ -823,7 +823,7 @@ fn sync_worker_node_inner(state: State<AppState>, node_id: i64) -> Result<i64, S
             )?;
             // Remote exports have no local execution authority. Feed the shared
             // historical importer directly, without a plaintext temporary file.
-            imported += commands::import_sentinel_snapshot_bytes(
+            imported += crate::scanning::worker_bridge::import_sentinel_snapshot_bytes(
                 &state.db_path,
                 &state.app_data_dir,
                 &serde_json::to_vec(&bundle).map_err(|error| error.to_string())?,

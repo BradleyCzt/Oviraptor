@@ -1,4 +1,4 @@
-import type { SentinelFinding, SentinelScan, SentinelScanAttempt } from "../../types";
+import type { SentinelFinding, SentinelScan, SentinelScanAttempt } from "./types";
 
 type Translator = (zh: string, en: string) => string;
 const mapped = (map: Record<string, string>, value: string, fallback = value) =>

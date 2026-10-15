@@ -61,9 +61,18 @@
             .collect()
     }
 
+    // Empty optional source directories are not retained by Git. Absence is
+    // allowed only for these roots; present entries retain the strict walker.
+    const RESIDUAL_OPTIONAL_SOURCE_SCOPES: &[&str] = &["scripts", "public"];
+
     fn residual_matches(root: &Path, scope: &str, patterns: &[String], regexes: &[regex::Regex]) -> std::collections::BTreeMap<String, usize> {
         let mut files = Vec::new();
-        residual_walk(&root.join(scope), &mut files);
+        let path = root.join(scope);
+        match fs::symlink_metadata(&path) {
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound
+                && RESIDUAL_OPTIONAL_SOURCE_SCOPES.contains(&scope) => return std::collections::BTreeMap::new(),
+            _ => residual_walk(&path, &mut files),
+        }
         files.sort();
         let mut found = std::collections::BTreeMap::new();
         for path in files {
@@ -96,6 +105,46 @@
 
     fn residual_root() -> PathBuf {
         PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("..")
+    }
+
+    #[test]
+    fn residual_optional_source_roots_are_absent_or_fully_audited() {
+        let registry = residual_registry();
+        let pattern = registry["rules"][0]["patterns"][0].as_str().unwrap().to_string();
+        let root = std::env::temp_dir().join(format!("oviraptor-residual-optional-{}", Uuid::new_v4()));
+        fs::create_dir_all(&root).unwrap();
+        for scope in RESIDUAL_OPTIONAL_SOURCE_SCOPES {
+            assert!(residual_matches(&root, scope, std::slice::from_ref(&pattern), &[]).is_empty());
+            let relative = format!("{scope}/nested/input.rs");
+            let path = root.join(&relative);
+            fs::create_dir_all(path.parent().unwrap()).unwrap();
+            fs::write(path, &pattern).unwrap();
+            let found = residual_matches(&root, scope, std::slice::from_ref(&pattern), &[]);
+            assert_eq!(found.get(&relative), Some(&1));
+        }
+        for required in ["src", "tools"] {
+            assert!(std::panic::catch_unwind(|| residual_matches(&root, required, &[], &[])).is_err());
+        }
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn residual_optional_source_roots_still_reject_root_and_nested_symlinks() {
+        let root = std::env::temp_dir().join(format!("oviraptor-residual-optional-link-{}", Uuid::new_v4()));
+        fs::create_dir_all(&root).unwrap();
+        for scope in RESIDUAL_OPTIONAL_SOURCE_SCOPES {
+            let path = root.join(scope);
+            std::os::unix::fs::symlink("missing", &path).unwrap();
+            assert!(std::panic::catch_unwind(|| residual_matches(&root, scope, &[], &[])).is_err());
+            fs::remove_file(&path).unwrap();
+            let nested = path.join("nested/link.rs");
+            fs::create_dir_all(nested.parent().unwrap()).unwrap();
+            std::os::unix::fs::symlink("missing", &nested).unwrap();
+            assert!(std::panic::catch_unwind(|| residual_matches(&root, scope, &[], &[])).is_err());
+            fs::remove_file(nested).unwrap();
+        }
+        fs::remove_dir_all(root).unwrap();
     }
 
     #[test]

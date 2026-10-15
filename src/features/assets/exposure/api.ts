@@ -9,14 +9,7 @@
 // back to them while the paginated commands are being wired end to end.
 
 import { invoke } from "@tauri-apps/api/core";
-import type {
-  AssetPage,
-  AssetQuery,
-  ExposureFinding,
-  ExposureRun,
-  ExposureSourceResult,
-  ExposureSummary,
-} from "../../../types";
+import type { AssetPage, AssetQuery, ExposureFinding, ExposureRun, ExposureSourceResult, ExposureSummary } from "../types";
 import type {
   JsonLike,
   ExposureEvidence,

@@ -152,6 +152,6 @@ test('g2 the settings editor carries the owner list, refuses to save malformed o
   const panel = readSource('src/features/assets/exposure/ExposureSettingsPanel.vue');
   assert.match(panel, /integration_pending：后端未报告 GitHub 能力/);
   assert.match(panel, /没有凭据时代码搜索不发任何请求/);
-  const surface = readSource('src/components/ExposureSurface.vue');
+  const surface = readSource('src/features/assets/exposure/ExposureSurface.vue');
   assert.match(surface, /sourceStatusView\(source\)\.reason/);
 });

@@ -1,3 +1,14 @@
+//! Operator runtime preparation. The durable preparation lease remains the
+//! only fence for installs and explicit recovery; workers do not acquire tools.
+use crate::{
+    db,
+    models::{EnvironmentDependency, EnvironmentReport},
+    worker_resources::{resolve_frontend_recon_worker, verify_bundled_worker},
+    AppState,
+};
+use std::{path::Path, process::Command};
+use tauri::{AppHandle, Emitter, State};
+
 #[tauri::command]
 pub fn check_environment(
     app: AppHandle,
@@ -52,28 +63,44 @@ pub fn check_environment(
     dependencies.push(EnvironmentDependency {
         name: "Bundled browser worker integrity".into(),
         command: "release-pinned JS".into(),
-        version: if bundled_browser.is_ok() { env!("CARGO_PKG_VERSION") } else { "unavailable" }.into(),
+        version: if bundled_browser.is_ok() {
+            env!("CARGO_PKG_VERSION")
+        } else {
+            "unavailable"
+        }
+        .into(),
         available: bundled_browser.is_ok(),
-        detail: bundled_browser.as_ref().err().cloned().unwrap_or_else(||
-            "随包浏览器脚本与当前应用版本一致；宿主 Node/浏览器及网络尚未隔离".into()),
+        detail: bundled_browser.as_ref().err().cloned().unwrap_or_else(|| {
+            "随包浏览器脚本与当前应用版本一致；宿主 Node/浏览器及网络尚未隔离".into()
+        }),
     });
-    let bundled_ast = bundled_browser.as_ref()
+    let bundled_ast = bundled_browser
+        .as_ref()
         .map_err(Clone::clone)
-        .and_then(|browser| verify_bundled_worker(&browser.with_file_name("8_js_ast_analyzer.cjs")));
+        .and_then(|browser| {
+            verify_bundled_worker(&browser.with_file_name("8_js_ast_analyzer.cjs"))
+        });
     dependencies.push(EnvironmentDependency {
         name: "Bundled AST and parser integrity".into(),
         command: "release-pinned JS".into(),
-        version: if bundled_ast.is_ok() { env!("CARGO_PKG_VERSION") } else { "unavailable" }.into(),
+        version: if bundled_ast.is_ok() {
+            env!("CARGO_PKG_VERSION")
+        } else {
+            "unavailable"
+        }
+        .into(),
         available: bundled_ast.is_ok(),
-        detail: bundled_ast.err().unwrap_or_else(||
-            "AST worker 和 Babel parser 均与当前应用版本一致；仍依赖宿主 Node".into()),
+        detail: bundled_ast.err().unwrap_or_else(|| {
+            "AST worker 和 Babel parser 均与当前应用版本一致；仍依赖宿主 Node".into()
+        }),
     });
     dependencies.push(EnvironmentDependency {
         name: "Isolated browser/AST sandbox".into(),
         command: "sandbox adapter".into(),
         version: "unsupported_sandbox".into(),
         available: false,
-        detail: "尚无经验证的独立进程/网络隔离及固定 Node/Chrome 能力包；脚本完整性不等于沙箱".into(),
+        detail: "尚无经验证的独立进程/网络隔离及固定 Node/Chrome 能力包；脚本完整性不等于沙箱"
+            .into(),
     });
     Ok(EnvironmentReport {
         os: if cfg!(target_os = "macos") {
@@ -105,7 +132,9 @@ impl EnvironmentInstallOutput<'_> {
         let id = self.journal.append(stage, stream, message)?;
         // The event is only a wakeup. The committed journal row is the display
         // source of truth and remains available after listener failure.
-        let _ = self.app.emit("environment-install-log", serde_json::json!({ "id": id }));
+        let _ = self
+            .app
+            .emit("environment-install-log", serde_json::json!({ "id": id }));
         Ok(())
     }
 }
@@ -123,7 +152,9 @@ fn run_environment_install_step(
             journal_error = output.record(stage, stream, line).err();
         }
     });
-    if let Some(error) = journal_error { return Err(error); }
+    if let Some(error) = journal_error {
+        return Err(error);
+    }
     if let Err(error) = result {
         let message = crate::log_display::text(&format!("{description}失败：\n{error}"), 8000);
         output.record(stage, "error", &message)?;
@@ -136,7 +167,9 @@ fn run_environment_install_step(
 /// Installation is an administrator preparation action, never a way for an
 /// active task to acquire new tools. The durable preparation lease additionally
 /// fences all scan activation transitions in the database.
-fn ensure_environment_install_idle(connection: &rusqlite::Connection) -> Result<(), String> {
+pub(super) fn ensure_environment_install_idle(
+    connection: &rusqlite::Connection,
+) -> Result<(), String> {
     let active: i64 = connection
         .query_row(
             "SELECT EXISTS(SELECT 1 FROM sentinel_scans WHERE status IN ('queued','scanning','pausing'))",
@@ -145,7 +178,9 @@ fn ensure_environment_install_idle(connection: &rusqlite::Connection) -> Result<
         )
         .map_err(|error| format!("无法确认任务状态，拒绝安装环境依赖：{error}"))?;
     if active != 0 {
-        return Err("存在等待或正在执行的扫描任务；请先完成或暂停并移出队列，再由管理员安装环境依赖".into());
+        return Err(
+            "存在等待或正在执行的扫描任务；请先完成或暂停并移出队列，再由管理员安装环境依赖".into(),
+        );
     }
     Ok(())
 }
@@ -257,11 +292,7 @@ fn install_environment_dependencies_while_locked(
     if cfg!(target_os = "windows") {
         return install_windows_environment(output, state, profile_id);
     }
-    output.record(
-        "prepare",
-        "status",
-        "开始检查并安装 Oviraptor 运行环境",
-    )?;
+    output.record("prepare", "status", "开始检查并安装 Oviraptor 运行环境")?;
     let brew = ["/opt/homebrew/bin/brew", "/usr/local/bin/brew", "brew"]
         .into_iter()
         .find(|candidate| {
@@ -274,11 +305,7 @@ fn install_environment_dependencies_while_locked(
     let mut messages = Vec::new();
     let brew = match brew {
         Some(path) => {
-            output.record(
-                "homebrew",
-                "success",
-                &format!("已找到 Homebrew：{path}"),
-            )?;
+            output.record("homebrew", "success", &format!("已找到 Homebrew：{path}"))?;
             path
         }
         None => {
@@ -290,12 +317,7 @@ fn install_environment_dependencies_while_locked(
         .args(["install", "node"])
         .env("HOMEBREW_NO_AUTO_UPDATE", "1")
         .env("HOMEBREW_NO_ENV_HINTS", "1");
-    run_environment_install_step(
-        output,
-        "packages",
-        "安装 Node.js",
-        brew_install,
-    )?;
+    run_environment_install_step(output, "packages", "安装 Node.js", brew_install)?;
     messages.push("Node.js 安装完成".to_string());
 
     let tailscale_app = Path::new("/Applications/Tailscale.app");
@@ -319,4 +341,13 @@ fn install_environment_dependencies_while_locked(
     let result = messages.join("；");
     output.record("complete", "success", &result)?;
     Ok(result)
+}
+
+#[cfg(test)]
+pub(crate) mod test_support {
+    pub(crate) fn ensure_environment_install_idle(
+        connection: &rusqlite::Connection,
+    ) -> Result<(), String> {
+        super::ensure_environment_install_idle(connection)
+    }
 }

@@ -3,6 +3,11 @@ fn protection_assert_original_finish_phase_delta(
     db: &rusqlite::Connection,
     before: std::collections::BTreeMap<String, usize>,
 ) -> usize {
+    if db.is_autocommit() {
+        let snapshot = db.unchecked_transaction().unwrap();
+        return protection_assert_original_finish_phase_delta(f, &snapshot, before);
+    }
+    assert_eq!(before.get("http-budget-consumption").copied().unwrap_or(0), 0);
     let after = followup_original_root_phase_counts(
         db,
         &f.actor.root_run_id,
@@ -19,7 +24,68 @@ fn protection_assert_original_finish_phase_delta(
         (1, 1),
         "HTTP assessment has its own known paid publication"
     );
+    let advisories: Vec<(String, String, i64)> = db.prepare(
+        "SELECT q.call_id,q.fact_json,json_extract(p.fact_json,'$.eventSequence') FROM agent_root_tick_receipts q JOIN agent_root_tick_receipts p ON p.root_run_id=q.root_run_id AND p.call_id=q.call_id AND p.phase='publication' WHERE q.root_run_id=?1 AND q.phase='request' AND json_extract(q.fact_json,'$.request.basis.phase')='http-budget-consumption'"
+    ).unwrap().query_map([&f.actor.root_run_id], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)))
+        .unwrap().collect::<rusqlite::Result<_>>().unwrap();
+    assert_eq!(advisories.len(), 1, "only one original HTTP advisory may be excluded from the protection business count");
+    for (call, raw, event) in &advisories {
+        let saved: JsonValue = serde_json::from_str(raw).unwrap();
+        let fact = &saved["request"]["basis"]["changedFact"]["semantic"];
+        assert_eq!(fact["rootRunId"], f.actor.root_run_id);
+        assert_eq!(fact["scanId"], f.actor.scan_id);
+        assert_eq!(fact["targetKey"], f.actor.target_key);
+        assert_eq!(fact["protocol"], "original_received_http_target_cost_advisory_v1");
+        assert_eq!(fact["advisoryOnly"], true);
+        assert_eq!(fact["executionGrant"], false);
+        assert_eq!(fact["additionalScopeGranted"], false);
+        assert_eq!(fact["targetRequestsGranted"], 0);
+        assert_eq!(fact["targetRequests"], 1);
+        let original: i64 = db.query_row(
+            "SELECT count(*) FROM agent_http_budget_receipts WHERE root_run_id=?1 AND receipt_id=?2 AND source_id=?3 AND run_id=?4 AND scan_id=?5 AND attempt_number=?6 AND target_url=?7 AND response_status=?8",
+            params![f.actor.root_run_id, fact["receiptId"].as_str().unwrap(), fact["sourceId"].as_str().unwrap(),
+                fact["childRunId"].as_str().unwrap(), f.actor.scan_id, f.actor.attempt_number,
+                f.actor.target_key, fact["status"].as_i64().unwrap()], |row| row.get(0),
+        ).unwrap();
+        assert_eq!(original, 1, "the advisory must cite the original received target bill");
+        let target_fee: Vec<(String, i64)> = db.prepare(
+            "SELECT kind,amount FROM agent_budget_entries WHERE root_run_id=?1 AND assignment_id=?2 AND lease_attempt_id=?3 AND source_id=?4 AND dimension='target_requests' ORDER BY rowid"
+        ).unwrap().query_map(
+            params![f.actor.root_run_id, fact["assignmentId"].as_str().unwrap(), fact["workerAttemptId"].as_str().unwrap(), fact["sourceId"].as_str().unwrap()],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        ).unwrap().collect::<rusqlite::Result<_>>().unwrap();
+        assert_eq!(target_fee, vec![("reserve".into(), 1), ("forfeit".into(), 1), ("reconcile".into(), 1)]);
+        let fee: (i64, i64) = db.query_row(
+            "SELECT count(*),coalesce(sum(amount),0) FROM agent_budget_entries WHERE root_run_id=?1 AND assignment_id='' AND source_id=?2 AND dimension='model_requests' AND kind='consume'",
+            params![f.actor.root_run_id, call], |row| Ok((row.get(0)?, row.get(1)?)),
+        ).unwrap();
+        assert_eq!(fee, (1, 1), "the separate advisory has one known original Root fee");
+        let publication = crate::agent_runtime::multi_agent::budget::root::model::tick::Tick::project_publication(
+            db, &f.actor.root_run_id, *event,
+        ).unwrap();
+        assert_eq!(publication.record["advisoryOnly"], true);
+        assert_eq!(publication.record["summary"]["suggestions"], json!(["assess:http_budget_consumption"]));
+        assert!(publication.record.get("localTools").is_none());
+    }
     after.values().sum::<usize>() - before.values().sum::<usize>()
+}
+
+// Keep the original one-call protection business delta; classify only the
+// separate, fully paid HTTP advisory proven above. The protection publication
+// may still be rejected by the test's original fault or malformed response.
+fn protection_paid_financial_assessment_count(
+    f: &ProtectionOriginalFixture,
+    db: &rusqlite::Connection,
+    before: std::collections::BTreeMap<String, usize>,
+) -> usize {
+    let added = protection_assert_original_finish_phase_delta(f, db, before);
+    assert_eq!(added, 2);
+    let financial: i64 = db.query_row(
+        "SELECT count(*) FROM agent_root_tick_receipts WHERE root_run_id=?1 AND phase='request' AND json_extract(fact_json,'$.request.basis.phase')='http-budget-consumption'",
+        [&f.actor.root_run_id], |row| row.get(0),
+    ).unwrap();
+    assert_eq!(financial, 1);
+    usize::try_from(financial).expect("the exact one original financial advisory fits usize")
 }
 
 fn protection_paid_root_calls(f: &ProtectionOriginalFixture) -> usize {
@@ -39,6 +105,7 @@ fn protection_paid_actual_finish_assesses_original_receipt_once_and_full_reentry
     let mut f = ProtectionOriginalFixture::new("protection-paid-once");
     let db = db::open(&f.h.db_path).unwrap();
     let calls = protection_paid_root_calls(&f);
+    let phases = followup_original_root_phase_counts(&db, &f.actor.root_run_id, &f.h.model_seen.lock().unwrap());
     let cost = crate::agent_runtime::multi_agent::budget::balance(
         &db,
         &f.actor.root_run_id,
@@ -48,7 +115,8 @@ fn protection_paid_actual_finish_assesses_original_receipt_once_and_full_reentry
     .unwrap()
     .consumed;
     multi_agent_finish_execution(&f.h.context, f.session.as_mut().unwrap(), &f.outcome).unwrap();
-    assert_eq!(protection_paid_root_calls(&f), calls + 1);
+    let financial = protection_paid_financial_assessment_count(&f, &db, phases);
+    assert_eq!(protection_paid_root_calls(&f) - financial, calls + 1);
     assert_eq!(
         crate::agent_runtime::multi_agent::budget::balance(
             &db,
@@ -57,7 +125,7 @@ fn protection_paid_actual_finish_assesses_original_receipt_once_and_full_reentry
             "model_requests"
         )
         .unwrap()
-        .consumed,
+        .consumed - financial as i64,
         cost + 1
     );
     assert_eq!(
@@ -128,6 +196,7 @@ fn protection_paid_actual_wrong_step_keeps_bill_without_publication_or_target_di
         ProtectionOriginalFixture::with_protection_reply("protection-paid-wrong-step", Some(reply));
     let db = db::open(&f.h.db_path).unwrap();
     let calls = protection_paid_root_calls(&f);
+    let phases = followup_original_root_phase_counts(&db, &f.actor.root_run_id, &f.h.model_seen.lock().unwrap());
     let cost = crate::agent_runtime::multi_agent::budget::balance(
         &db,
         &f.actor.root_run_id,
@@ -139,7 +208,8 @@ fn protection_paid_actual_wrong_step_keeps_bill_without_publication_or_target_di
     let error = multi_agent_finish_execution(&f.h.context, f.session.as_mut().unwrap(), &f.outcome)
         .unwrap_err();
     assert_eq!(error, "root_protection_step_not_bounded");
-    assert_eq!(protection_paid_root_calls(&f), calls + 1);
+    let financial = protection_paid_financial_assessment_count(&f, &db, phases);
+    assert_eq!(protection_paid_root_calls(&f) - financial, calls + 1);
     assert_eq!(
         crate::agent_runtime::multi_agent::budget::balance(
             &db,
@@ -148,7 +218,7 @@ fn protection_paid_actual_wrong_step_keeps_bill_without_publication_or_target_di
             "model_requests"
         )
         .unwrap()
-        .consumed,
+        .consumed - financial as i64,
         cost + 1
     );
     assert_eq!(
@@ -164,7 +234,7 @@ fn protection_paid_actual_wrong_step_keeps_bill_without_publication_or_target_di
         error
     );
     assert_eq!(super::tests::application_table_snapshot(&db), before);
-    assert_eq!(protection_paid_root_calls(&f), calls + 1);
+    assert_eq!(protection_paid_root_calls(&f) - financial, calls + 1);
     assert_eq!(f.h.site_seen.lock().unwrap().len(), 1);
 }
 
@@ -182,6 +252,7 @@ fn protection_paid_publication_fault_case(ignore: bool) {
     };
     db.execute_batch(&format!("CREATE TRIGGER protection_paid_publication_fault BEFORE INSERT ON agent_root_tick_receipts WHEN NEW.phase='publication' AND EXISTS(SELECT 1 FROM agent_root_tick_receipts r WHERE r.root_run_id=NEW.root_run_id AND r.call_id=NEW.call_id AND r.phase='request' AND json_extract(r.fact_json,'$.request.basis.phase')='protection-changed') BEGIN SELECT {raise}; END;")).unwrap();
     let calls = protection_paid_root_calls(&f);
+    let phases = followup_original_root_phase_counts(&db, &f.actor.root_run_id, &f.h.model_seen.lock().unwrap());
     let cost = crate::agent_runtime::multi_agent::budget::balance(
         &db,
         &f.actor.root_run_id,
@@ -194,7 +265,8 @@ fn protection_paid_publication_fault_case(ignore: bool) {
         multi_agent_finish_execution(&f.h.context, f.session.as_mut().unwrap(), &f.outcome)
             .is_err()
     );
-    assert_eq!(protection_paid_root_calls(&f), calls + 1);
+    let financial = protection_paid_financial_assessment_count(&f, &db, phases);
+    assert_eq!(protection_paid_root_calls(&f) - financial, calls + 1);
     assert_eq!(
         crate::agent_runtime::multi_agent::budget::balance(
             &db,
@@ -203,7 +275,7 @@ fn protection_paid_publication_fault_case(ignore: bool) {
             "model_requests"
         )
         .unwrap()
-        .consumed,
+        .consumed - financial as i64,
         cost + 1
     );
     assert_eq!(
@@ -217,7 +289,7 @@ fn protection_paid_publication_fault_case(ignore: bool) {
             native_coordinator_protection_feedback(&f.h.context, &f.actor, &f.receipt).is_err()
         );
         assert_eq!(super::tests::application_table_snapshot(&db), paid);
-        assert_eq!(protection_paid_root_calls(&f), calls + 1);
+        assert_eq!(protection_paid_root_calls(&f) - financial, calls + 1);
     }
     db.execute_batch("DROP TRIGGER protection_paid_publication_fault")
         .unwrap();
@@ -234,7 +306,7 @@ fn protection_paid_publication_fault_case(ignore: bool) {
     native_coordinator_protection_feedback(&f.h.context, &f.actor, &f.receipt).unwrap();
     multi_agent_finish_execution(&f.h.context, f.session.as_mut().unwrap(), &f.outcome).unwrap();
     assert_eq!(super::tests::application_table_snapshot(&db), before);
-    assert_eq!(protection_paid_root_calls(&f), calls + 1);
+    assert_eq!(protection_paid_root_calls(&f) - financial, calls + 1);
     assert_eq!(f.h.site_seen.lock().unwrap().len(), 1);
 }
 #[test]

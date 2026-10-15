@@ -51,7 +51,7 @@ fn financial_continuation_actual_subprocess_received_invoice_before_terminal_is_
     let output = std::process::Command::new(std::env::current_exe().unwrap())
         .args([
             "--exact",
-            "commands::agent_tests::a02_test_received_invoice_subprocess_driver",
+            "scanning::agent_tests::a02_test_received_invoice_subprocess_driver",
             "--test-threads=1",
         ])
         .env(

@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { Eye, Save } from "@lucide/vue";
 import { useI18n } from "../../../i18n";
-import type { SentinelValidationWorkItem } from "../../../types";
+import type { SentinelValidationWorkItem } from "../types";
 import {
   createSentinelLabels,
   json,

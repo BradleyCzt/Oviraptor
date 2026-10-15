@@ -43,7 +43,7 @@ fn require_dimensions(db: &Connection, root: &str) -> Result<(), String> {
 
 pub(crate) fn require_determinate_for_fresh_public_surface_on(
     db:&Connection,
-    proof:&crate::commands::external_surface_response_receipt::ClaimedPublicSurfaceWitness,
+    proof:&crate::scanning::external_surface_response_receipt::ClaimedPublicSurfaceWitness,
 )->Result<(),String> {
     let actor=proof.verify_unsent_on(db)?;
     require_dimensions(db,&actor.root_run_id)?;

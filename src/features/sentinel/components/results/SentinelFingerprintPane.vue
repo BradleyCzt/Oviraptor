@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { Fingerprint, Layers3, Server, Shield } from "@lucide/vue";
-import type { SentinelFinding } from "../../../../types";
+import type { SentinelFinding } from "../../types";
 import {
   displayName,
   displayVersion,

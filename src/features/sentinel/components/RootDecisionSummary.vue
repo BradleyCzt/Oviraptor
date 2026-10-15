@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed } from "vue";
-import type { AgentTraceEvent, AgentTimelineItem } from "../../../types";
+import type { AgentTraceEvent, AgentTimelineItem } from "../types";
 import { chatDecisionDisplay } from "../timeline/rootDecisionContract";
 import { useI18n } from "../../../i18n";
 import { decisionSuggestion, localToolLabel, rootDecisionDisplay } from "../traces/rootDecisionContract";

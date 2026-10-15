@@ -1,7 +1,7 @@
 import { computed, ref } from "vue";
 import { sentinelApi } from "../api";
 import { validTaskPage } from "../results/taskPageContract";
-import type { AgentDialogSelection, SentinelScan } from "../../../types";
+import type { AgentDialogSelection, SentinelScan } from "../types";
 
 type DialogProps = Readonly<{ projectId?: number; initialScanId?: string }>;
 

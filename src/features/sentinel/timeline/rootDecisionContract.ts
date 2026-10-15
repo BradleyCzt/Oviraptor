@@ -1,4 +1,4 @@
-import type { AgentTimelineItem, HumanDirectiveDecisionContext } from "../../../types";
+import type { AgentTimelineItem, HumanDirectiveDecisionContext } from "../types";
 import type { RootDecisionDisplay, DecisionUsage, PublicDecisionSummary } from "../traces/rootDecisionContract";
 import { localToolNames } from "../traces/rootDecisionContract";
 const object = (v: unknown): v is Record<string, unknown> => !!v && typeof v === "object" && !Array.isArray(v);

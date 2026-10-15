@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed } from "vue";
-import type { AgentRequestAccounting } from "../../../types";
+import type { AgentRequestAccounting } from "../types";
 
 const props = defineProps<{ accounting?: unknown }>();
 const usage = computed(() => {

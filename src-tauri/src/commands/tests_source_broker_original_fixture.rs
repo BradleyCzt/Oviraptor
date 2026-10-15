@@ -114,7 +114,7 @@ fn source_broker_original_probe_continued(
     let rounds = configured_rounds.clone();
     let analyst_round = AtomicUsize::new(0);
     let mapper_round = AtomicUsize::new(0);
-    let (port, seen, stop) = crate::commands::agent_tests::spawn_endpoint(Arc::new(
+    let (port, seen, stop) = crate::scanning::agent_tests::spawn_endpoint(Arc::new(
         move |request| {
             let body: JsonValue =
                 serde_json::from_str(request.split_once("\r\n\r\n").unwrap().1).unwrap();

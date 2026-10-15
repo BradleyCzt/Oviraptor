@@ -52,13 +52,8 @@ impl Scope {
     }
 }
 
-#[derive(Debug)]
-pub(crate) struct Event {
-    pub stream: &'static str,
-    pub stream_sequence: i64,
-    pub message: String,
-    pub gap: bool,
-}
+// The journal supplies scan scope; the process mechanism supplies bounded output.
+pub(crate) use crate::execution_service::OutputEvent as Event;
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]

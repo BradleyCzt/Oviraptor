@@ -89,9 +89,9 @@ pub(crate) fn received_original_for_output_on(
             return Err("specialist_output_original_contract_binding_invalid".into());
         }
     } else {
-        let directory = crate::commands::resolve_agent_evidence_location(db, &actor.root_run_id)?;
+        let directory = crate::scanning::evidence_bridge::resolve_agent_evidence_location(db, &actor.root_run_id)?;
         let collection =
-            crate::commands::native_business_logic_input_collection_on(db, actor, &directory)?;
+            crate::scanning::evidence_bridge::native_business_logic_input_collection_on(db, actor, &directory)?;
         let (trigger, revision): (String, i64) = db
             .query_row(
                 "SELECT trigger_code,evidence_revision FROM agent_assignments WHERE id=?1",
@@ -101,7 +101,7 @@ pub(crate) fn received_original_for_output_on(
             .map_err(|e| e.to_string())?;
         if task != *collection.task()
             || input != *collection.input()
-            || messages[0]["content"] != crate::commands::BUSINESS_LOGIC_READONLY_SYSTEM
+            || messages[0]["content"] != crate::scanning::evidence_bridge::BUSINESS_LOGIC_READONLY_SYSTEM
             || trigger != "business_logic_frozen_evidence_ready"
             || revision != 1
         {

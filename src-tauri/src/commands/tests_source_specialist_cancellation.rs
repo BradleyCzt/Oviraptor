@@ -204,7 +204,7 @@ fn source_specialists_inflight_child_cancel_aborts_transport_without_completing_
     let (arrived_tx, arrived_rx) = mpsc::channel();
     let (release_tx, release_rx) = mpsc::channel();
     let release = Arc::new(Mutex::new(release_rx));
-    let (port, _seen, stop) = crate::commands::agent_tests::spawn_endpoint(Arc::new(move |_| {
+    let (port, _seen, stop) = crate::scanning::agent_tests::spawn_endpoint(Arc::new(move |_| {
         let _ = arrived_tx.send(());
         let _ = release
             .lock()

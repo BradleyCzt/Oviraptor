@@ -70,7 +70,7 @@ function mountEvidence(t, read = {}) {
   const composable = loadModule('src/features/assets/exposure/useExposureEvidence.ts', name => {
     if (name === 'vue') return vue;
     // G2 the page itself now reads source labels from the real contracts module.
-    if (name === './contracts' || name === '../features/assets/exposure/contracts') return contracts;
+    if (name === './contracts' || name === './contracts') return contracts;
     throw Error(`Unexpected evidence import: ${name}`);
   });
   const events = [];
@@ -124,7 +124,7 @@ function mountEvidenceWithout(t) {
   const composable = loadModule('src/features/assets/exposure/useExposureEvidence.ts', name => {
     if (name === 'vue') return vue;
     // G2 the page itself now reads source labels from the real contracts module.
-    if (name === './contracts' || name === '../features/assets/exposure/contracts') return contracts;
+    if (name === './contracts' || name === './contracts') return contracts;
     throw Error(`Unexpected evidence import: ${name}`);
   });
   let state;
@@ -270,8 +270,8 @@ test('the exposure page offers the pending tab, the evidence control and no auto
   const contracts = loadContracts();
   const surface = loadModule('src/features/assets/exposure/useExposureSurface.ts', name => name === 'vue' ? vue : name === './contracts' ? contracts : (() => { throw Error(name); })());
   const evidence = loadModule('src/features/assets/exposure/useExposureEvidence.ts', name => name === 'vue' ? vue : name === './contracts' ? contracts : (() => { throw Error(name); })());
-  const filename = path.join(__dirname, '../src/components/ExposureSurface.vue');
-  const { descriptor } = parse(readSource('src/components/ExposureSurface.vue'), { filename });
+  const filename = path.join(__dirname, '../src/features/assets/exposure/ExposureSurface.vue');
+  const { descriptor } = parse(readSource('src/features/assets/exposure/ExposureSurface.vue'), { filename });
   const script = compileScript(descriptor, { id: 'ExposureSurface.vue' });
   const template = compileTemplate({ source: descriptor.template.content, filename, id: 'ExposureSurface.vue', compilerOptions: { bindingMetadata: script.bindings } });
   assert.deepEqual(template.errors, [], '暴露面模板必须能编译');
@@ -288,27 +288,27 @@ test('the exposure page offers the pending tab, the evidence control and no auto
   let coverageDrill;
   const imports = name => {
     if (name === 'vue') return vue;
-    if (name === '../api') return { api };
-    if (name === '../features/assets/exposure/useExposureSurface') return surface;
-    if (name === '../features/assets/exposure/useExposureEvidence') return evidence;
-    if (name === '../features/assets/exposure/api' || name === './api') return { exposureApi: api };
+    if (name === '../api') return { assetApi: api };
+    if (name === './useExposureSurface') return surface;
+    if (name === './useExposureEvidence') return evidence;
+    if (name === './api' || name === './api') return { exposureApi: api };
     if (name === '../features/assets/exposure/useExposureSettings' || name === './useExposureSettings') return settingsModule;
     // G2 the page itself now reads source labels from the real contracts module.
-    if (name === './contracts' || name === '../features/assets/exposure/contracts') return contracts;
+    if (name === './contracts' || name === './contracts') return contracts;
     if (name === '@lucide/vue') return new Proxy({}, { get: () => () => null });
     if (name.endsWith('.css')) return {};
     // §E2 the settings panel is a real child of the page: compile it, never stub it.
-    if (name === '../features/assets/exposure/ExposureSettingsPanel.vue') return panel;
-    if (name === '../features/assets/exposure/ExposureSettingsPanel.vue') return panel;
+    if (name === './ExposureSettingsPanel.vue') return panel;
+    if (name === './ExposureSettingsPanel.vue') return panel;
     if (name === '../features/assets/exposure/useExposureClusters' || name === './useExposureClusters') return clusterModule;
-    if (name === '../features/assets/exposure/ExposureClustersPanel.vue') return clusterPanel;
+    if (name === './ExposureClustersPanel.vue') return clusterPanel;
     if (name === '../features/assets/exposure/useExposureReview' || name === './useExposureReview') return reviewModule;
-    if (name === '../features/assets/exposure/ExposureReviewPanel.vue') return reviewPanel;
-    if (name === '../features/assets/exposure/incidents' || name === './incidents') return incidentsModule;
+    if (name === './ExposureReviewPanel.vue') return reviewPanel;
+    if (name === './incidents' || name === './incidents') return incidentsModule;
     if (name === './useExposureIncidents') return incidentsComposable;
-    if (name === '../features/assets/exposure/ExposureIncidentsPanel.vue') return incidentsPanel;
+    if (name === './ExposureIncidentsPanel.vue') return incidentsPanel;
     if (name === './useExposureCoverage') return coverageComposable;
-    if (name === '../features/assets/exposure/ExposureCoverageDrill.vue') return coverageDrill;
+    if (name === './ExposureCoverageDrill.vue') return coverageDrill;
     throw Error(`Unexpected exposure page import: ${name}`);
   };
   const panelFile = path.join(__dirname, '../src/features/assets/exposure/ExposureSettingsPanel.vue');
@@ -381,7 +381,7 @@ test('the exposure page offers the pending tab, the evidence control and no auto
 
   // 恢复入口只在有数据时出现，所以这里钉住它的装配位置：总览必须能直接恢复中断的轮次，
   // 且必须走带 expectedProjectId 的接口，而不是重新开一轮。
-  const source = readSource('src/components/ExposureSurface.vue');
+  const source = readSource('src/features/assets/exposure/ExposureSurface.vue');
   const overview = source.slice(source.indexOf(`view === 'overview'" class="exposure-summary"`));
   const resumeSection = overview.slice(0, overview.indexOf('<section v-if="view === \'runs\'"'));
   assert.match(resumeSection, /按冻结计划恢复该轮/, '中断的轮次必须在总览就能恢复');

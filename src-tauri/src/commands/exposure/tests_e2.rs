@@ -30,7 +30,7 @@ fn database(root: &Path) -> Connection {
 
 fn edited(connection: &Connection, project: i64) -> JsonValue {
     // Exactly what the command门面 does when it hands settings to the orchestrator.
-    super::super::exposure_scan_settings(connection, project).expect("配置必须可读")
+    super::exposure_scan_settings(connection, project).expect("配置必须可读")
 }
 
 /// A stand-in for the adapters: it records which work items the loop actually let through,

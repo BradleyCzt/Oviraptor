@@ -82,7 +82,7 @@ pub(crate) fn capture_before_on<'proof, 'tx, 'conn>(
     if prior {
         return Err("mapper_loop_expired_fresh_delivery_required".into());
     }
-    let original = crate::commands::original_root_capture_mode(tx, &actor.root_run_id)?;
+    let original = crate::scanning::scope_contract::original_root_capture_mode(tx, &actor.root_run_id)?;
     let issuer =
         WithdrawalIssuer::from_verified_birth_on(tx, &actor.root_run_id, original.clone())?;
     let floor = tx
@@ -168,7 +168,7 @@ pub(crate) fn read_original_on(
     if canonical != *raw || store::stable_hash(raw) != *id {
         return Err("mapper_loop_expired_original_hash_changed".into());
     }
-    let original = crate::commands::original_root_capture_mode(db, &actor.root_run_id)?;
+    let original = crate::scanning::scope_contract::original_root_capture_mode(db, &actor.root_run_id)?;
     let issuer = WithdrawalIssuer::from_verified_birth_on(db, &actor.root_run_id, original)?;
     issuer.verify_mapper_loop_expired_receipt(&encoded(&value)?, signature)?;
     let financial = read_closed_original_on(db, actor, child)?;

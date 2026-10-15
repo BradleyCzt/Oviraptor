@@ -2,7 +2,7 @@
 import { computed, onBeforeUnmount, ref, watch } from "vue";
 import { Activity, Archive, Eye, MessageCircle, Pause, Play, RefreshCw, RotateCcw, Trash2, X } from "@lucide/vue";
 import { useI18n } from "../../../i18n";
-import type { SentinelScan } from "../../../types";
+import type { SentinelScan } from "../types";
 import { sentinelApi } from "../api";
 import { useTaskExecutionDetails } from "../execution/useTaskExecutionDetails";
 import { useHistoricalImportLedger } from "../results/useHistoricalImportLedger";

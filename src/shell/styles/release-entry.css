@@ -1,0 +1,6 @@
+
+
+/* The release entry stays compact beside the local-storage status. */
+.sidebar-footer>button{flex:0 0 auto;height:24px;padding:0 7px;border:1px solid #ffffff20;border-radius:6px;background:#ffffff0a;color:#aebbd0;font:700 9px/1 ui-monospace,SFMono-Regular,Menlo,monospace;letter-spacing:0}
+.sidebar-footer>button:hover{border-color:#ffffff3d;background:#ffffff14;color:#fff}
+.sidebar-footer>span{min-width:0;white-space:nowrap}

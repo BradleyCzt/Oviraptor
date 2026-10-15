@@ -69,7 +69,8 @@ async function mount(getStatus, recover, close, administrative, options = {}) {
   const exports = {};
   new Function('require', 'exports', 'setTimeout', 'clearTimeout', transpile(script.content))((name) => {
     if (name === 'vue') return vue;
-    if (name === '../../../api') return { api };
+    if (name === '../api') return { sentinelApi: api };
+    if (name === '../reconciliation/api') return { rootCostReconciliationApi: api };
     if (name === '../../../i18n') return { useI18n: () => ({ tr: (zh) => zh }) };
     if (name === './nativeRunStatusLabels') return labelsExports;
     if (name === '../../../composables/useCommittedRefresh') return live.committed;

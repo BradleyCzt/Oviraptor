@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { onUnmounted, ref, watch } from "vue";
-import { api } from "../../../api";
-import type { ScanIdentityMaterial } from "../../../types";
+import { sentinelApi } from "../api";
+import type { ScanIdentityMaterial } from "../types";
 import { useI18n } from "../../../i18n";
 
 const props = defineProps<{ projectId?: number; scanId: string }>();
@@ -20,7 +20,7 @@ async function load() {
   if (!projectId || !scanId) { loading.value = false; return; }
   loading.value = true;
   try {
-    const result = await api.getSentinelScanIdentityMaterial(projectId, scanId);
+    const result = await sentinelApi.getSentinelScanIdentityMaterial(projectId, scanId);
     if (!disposed && current === generation) materials.value = result;
   } catch (cause) {
     if (!disposed && current === generation) error.value = String(cause);

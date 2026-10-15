@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import type { AgentTargetExecution } from "../../../types";
+import type { AgentTargetExecution } from "../types";
 import { agentBackendLabel, agentModeLabel } from "../execution/presentation";
 import AgentRequestUsage from "./AgentRequestUsage.vue";
 import AgentRequestReview from "./AgentRequestReview.vue";

@@ -448,6 +448,9 @@ pub fn initialize(app_data_dir: &Path) -> Result<PathBuf, String> {
     connection
         .execute_batch(NEUTRAL_KNOWLEDGE_SCHEMA)
         .map_err(|error| error.to_string())?;
+    // Register the Skill package schema only. Bundled resources are installed
+    // lazily when the Skills manager is opened, never during Chat startup.
+    crate::skill_packages::initialize(&mut connection)?;
     migrate_agent_run_orchestration_columns(&mut connection)?;
     worker_namespaces::migrate(&mut connection)?;
     migrate_evidence_revision_schema(&connection)?;

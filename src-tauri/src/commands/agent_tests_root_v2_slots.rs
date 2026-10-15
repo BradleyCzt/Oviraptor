@@ -29,6 +29,7 @@ fn root_v2_slot_declaration(
 }
 
 include!("agent_tests_root_v2_slot_fresh_fixture.rs");
+include!("agent_tests_root_v2_slot_http_legacy.rs");
 
 fn root_v2_slot_harness(tag: &str, batches: i64) -> AgentHarness {
     let mut h = root_v2_slot_fresh_harness(tag, batches);

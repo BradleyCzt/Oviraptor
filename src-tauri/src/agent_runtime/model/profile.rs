@@ -32,6 +32,18 @@ pub struct GatewayProfile {
     pub max_context_tokens: u64,
 }
 
+/// Derive the exact options for both live requests and frozen request readers.
+/// This requires no provider, credential or mutable runtime state.
+pub(crate) fn bounded_wire_options(model: &str, max_output_tokens: Option<u64>) -> JsonValue {
+    if matches!(model, "deepseek-v4-flash" | "deepseek-v4-pro" | "deepseek-flash")
+        && max_output_tokens.is_some_and(|cap| cap > 0 && cap <= 2_048)
+    {
+        serde_json::json!({"thinking":{"type":"disabled"}})
+    } else {
+        serde_json::json!({})
+    }
+}
+
 impl GatewayProfile {
     pub fn resolve(
         resolved: &ResolvedModelProfile,
@@ -82,13 +94,7 @@ impl GatewayProfile {
     /// and can spend that entire reservation without returning any content.
     /// Larger/unbounded calls retain the configured provider default.
     pub fn bounded_wire_options(&self) -> JsonValue {
-        if matches!(self.model.as_str(), "deepseek-v4-flash" | "deepseek-v4-pro" | "deepseek-flash")
-            && self.max_output_tokens.is_some_and(|cap| cap > 0 && cap <= 2_048)
-        {
-            serde_json::json!({"thinking":{"type":"disabled"}})
-        } else {
-            serde_json::json!({})
-        }
+        bounded_wire_options(&self.model, self.max_output_tokens)
     }
 
     pub fn bearer(&self) -> Option<&str> {

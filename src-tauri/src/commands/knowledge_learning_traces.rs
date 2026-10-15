@@ -124,12 +124,7 @@ pub fn analyze_agent_trace(
         "INSERT INTO agent_knowledge_entries(scan_id,project_id,title,summary,patterns_json,skill_instructions,source_hash) VALUES(?1,?2,?3,?4,?5,?6,?7) ON CONFLICT(scan_id) DO UPDATE SET project_id=excluded.project_id,title=excluded.title,summary=excluded.summary,patterns_json=excluded.patterns_json,skill_instructions=excluded.skill_instructions,source_hash=excluded.source_hash,updated_at=datetime('now','localtime')",
         params![scan_id,project_id,title,summary,patterns.to_string(),skill_instructions,source_hash],
     ).map_err(|error| error.to_string())?;
-    connection
-        .query_row(
-            &format!("SELECT {KNOWLEDGE_COLUMNS} FROM agent_knowledge_entries WHERE scan_id=?1"),
-            [&scan_id],
-            knowledge_row,
-        )
+    crate::skills_catalog::knowledge::knowledge_for_source(&connection, &scan_id)
         .map_err(|error| error.to_string())
 }
 
@@ -366,134 +361,6 @@ pub fn aggregate_agent_knowledge(
         "INSERT INTO agent_knowledge_entries(scan_id,title,summary,patterns_json,skill_instructions,source_hash) VALUES(?1,?2,?3,?4,?5,?6) ON CONFLICT(scan_id) DO UPDATE SET title=excluded.title,summary=excluded.summary,patterns_json=excluded.patterns_json,skill_instructions=excluded.skill_instructions,source_hash=excluded.source_hash,updated_at=datetime('now','localtime')",
         params![aggregate_id,title,summary,patterns.to_string(),skill_instructions,source_hash],
     ).map_err(|error| error.to_string())?;
-    connection
-        .query_row(
-            &format!("SELECT {KNOWLEDGE_COLUMNS} FROM agent_knowledge_entries WHERE scan_id=?1"),
-            [&aggregate_id],
-            knowledge_row,
-        )
+    crate::skills_catalog::knowledge::knowledge_for_source(&connection, &aggregate_id)
         .map_err(|error| error.to_string())
-}
-
-#[tauri::command]
-pub fn convert_agent_knowledge_to_instruction(
-    state: State<AppState>,
-    knowledge_id: i64,
-) -> Result<i64, String> {
-    let connection = db::open(&state.db_path)?;
-    let (title, summary, instructions, patterns_json, linked_skill): (String, String, String, String, Option<i64>) = connection
-        .query_row(
-            "SELECT title,summary,skill_instructions,patterns_json,skill_id FROM agent_knowledge_entries WHERE id=?1",
-            [knowledge_id],
-            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?, row.get(4)?)),
-        )
-        .map_err(|_| "知识条目不存在".to_string())?;
-    if let Some(skill_id) = linked_skill {
-        return Ok(skill_id);
-    }
-    let patterns = json(patterns_json);
-    let quality_score = patterns
-        .get("qualityScore")
-        .and_then(JsonValue::as_i64)
-        .unwrap_or(0);
-    let knowledge_kind = patterns
-        .get("knowledgeKind")
-        .and_then(JsonValue::as_str)
-        .unwrap_or("");
-    if knowledge_kind.is_empty() {
-        return Err(
-            "这是旧版未评分知识，请先从轨迹重新生成候选或执行同类聚合，再转换为 Skill".into(),
-        );
-    }
-    if quality_score < 70 {
-        return Err(format!(
-            "知识质量 {quality_score}/100，低于转换 Skill 所需的 70 分；请补充证据或使用多任务聚合"
-        ));
-    }
-
-    // A scored knowledge entry is already a deterministic, target-neutral
-    // method card. Conversion must not vary with the model provider currently
-    // configured, nor spend another refinement request.
-    let refined = serde_json::json!({
-        "addSections": [{"title": "沉淀知识", "content": instructions}],
-        "decision": "create_new",
-        "reasoning": "deterministic knowledge conversion"
-    });
-    let mut target_skill_id = refined.get("targetSkillId").and_then(JsonValue::as_i64);
-    let mut base_instructions = String::new();
-    let mut name = format!("知识 · {}", title)
-        .chars()
-        .take(72)
-        .collect::<String>();
-    if let Some(id) = target_skill_id {
-        if let Ok((builtin, old_name, old_instructions)) = connection.query_row(
-            "SELECT builtin,name,instructions FROM agent_skills WHERE id=?1",
-            [id],
-            |row| {
-                Ok((
-                    row.get::<_, i64>(0)?,
-                    row.get::<_, String>(1)?,
-                    row.get::<_, String>(2)?,
-                ))
-            },
-        ) {
-            if builtin == 0 {
-                name = old_name;
-                base_instructions = old_instructions;
-            } else {
-                target_skill_id = None;
-                name = format!("{} · 增强版", old_name);
-                base_instructions = old_instructions;
-            }
-        } else {
-            target_skill_id = None;
-        }
-    }
-    let merged = apply_skill_patch(&base_instructions, &refined);
-    if merged.trim().is_empty() {
-        return Err("全局去重后没有可沉淀的 Skill 内容".into());
-    }
-    let normalized = skill_compare_text(&merged);
-    if target_skill_id.is_none() {
-        let duplicate = connection
-            .prepare("SELECT id,instructions FROM agent_skills")
-            .ok()
-            .and_then(|mut statement| {
-                statement
-                    .query_map([], |row| {
-                        Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?))
-                    })
-                    .ok()
-                    .and_then(|rows| {
-                        rows.flatten()
-                            .find(|(_, existing)| skill_compare_text(existing) == normalized)
-                    })
-            });
-        target_skill_id = duplicate.map(|(id, _)| id);
-    }
-    let skill_id = if let Some(id) = target_skill_id {
-        connection.execute("UPDATE agent_skills SET instructions=?1,description=CASE WHEN trim(description)='' THEN ?2 ELSE description END,updated_at=datetime('now','localtime') WHERE id=?3 AND builtin=0", params![merged,summary,id]).map_err(|error| error.to_string())?;
-        id
-    } else {
-        let mut candidate_name = name.clone();
-        if connection
-            .query_row(
-                "SELECT COUNT(*) FROM agent_skills WHERE name=?1",
-                [&candidate_name],
-                |row| row.get::<_, i64>(0),
-            )
-            .unwrap_or(0)
-            > 0
-        {
-            candidate_name = format!(
-                "{} · {}",
-                name.chars().take(60).collect::<String>(),
-                knowledge_id
-            );
-        }
-        connection.execute("INSERT INTO agent_skills(name,description,instructions,builtin,enabled) VALUES(?1,?2,?3,0,1)", params![candidate_name,summary,merged]).map_err(|error| error.to_string())?;
-        connection.last_insert_rowid()
-    };
-    connection.execute("UPDATE agent_knowledge_entries SET skill_id=?1,updated_at=datetime('now','localtime') WHERE id=?2", params![skill_id,knowledge_id]).map_err(|error| error.to_string())?;
-    Ok(skill_id)
 }

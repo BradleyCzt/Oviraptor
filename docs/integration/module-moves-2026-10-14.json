@@ -1,0 +1,260 @@
+{
+  "baseline": "d61454cdf73c52d190d3d4a26d6733356a6495af",
+  "originalLocalBase": "8fddee2321b313a8a6372d0895dd4c1f533ba57c",
+  "note": "Path/declaration hints only; local changes must be integrated semantically against original-base blobs, not blindly patched onto moved files.",
+  "componentMoves": [
+    [
+      "src/components/AssetWorkspace.vue",
+      "src/features/assets/components/AssetWorkspace.vue"
+    ],
+    [
+      "src/components/AssetOwnershipGate.vue",
+      "src/features/assets/components/AssetOwnershipGate.vue"
+    ],
+    [
+      "src/components/OwnershipProjectSetup.vue",
+      "src/features/assets/components/OwnershipProjectSetup.vue"
+    ],
+    [
+      "src/components/OwnershipReviewGroups.vue",
+      "src/features/assets/components/OwnershipReviewGroups.vue"
+    ],
+    [
+      "src/components/QueryPanel.vue",
+      "src/features/assets/components/QueryPanel.vue"
+    ],
+    [
+      "src/components/TitleRulePopover.vue",
+      "src/features/assets/components/TitleRulePopover.vue"
+    ],
+    [
+      "src/components/ExposureSurface.vue",
+      "src/features/assets/exposure/ExposureSurface.vue"
+    ],
+    [
+      "src/components/HackerOneBoard.vue",
+      "src/features/hackerone/components/HackerOneBoard.vue"
+    ],
+    [
+      "src/components/AgentWorkbench.vue",
+      "src/features/sentinel/components/AgentWorkbench.vue"
+    ],
+    [
+      "src/components/SentinelBoard.vue",
+      "src/features/sentinel/components/SentinelBoard.vue"
+    ],
+    [
+      "src/components/ProjectDialog.vue",
+      "src/features/workspaces/components/ProjectDialog.vue"
+    ],
+    [
+      "src/components/ConfigDialog.vue",
+      "src/features/configuration/components/ConfigDialog.vue"
+    ],
+    [
+      "src/components/WorkerSettingsPanel.vue",
+      "src/features/runtime/components/WorkerSettingsPanel.vue"
+    ],
+    [
+      "src/components/AppSettingsDialog.vue",
+      "src/shell/components/AppSettingsDialog.vue"
+    ],
+    [
+      "src/components/ReleaseNotesDialog.vue",
+      "src/shell/components/ReleaseNotesDialog.vue"
+    ],
+    [
+      "src/components/ModalShell.vue",
+      "src/shared/components/ModalShell.vue"
+    ],
+    [
+      "src/components/InlineConfirm.vue",
+      "src/shared/components/InlineConfirm.vue"
+    ]
+  ],
+  "skillMoves": [
+    [
+      "src/features/sentinel/workbench/WorkbenchSkillsCatalog.vue",
+      "src/features/skills/SkillInstructionsCatalog.vue"
+    ],
+    [
+      "src/features/sentinel/workbench/useWorkbenchSkills.ts",
+      "src/features/skills/useSkillsCatalog.ts"
+    ]
+  ],
+  "typeOwners": [
+    {
+      "file": "src/features/assets/types.ts",
+      "declarations": [
+        "Target",
+        "DashboardStats",
+        "Asset",
+        "ExposureFinding",
+        "ExposureSummary",
+        "ExposureRun",
+        "ExposureSourceResult",
+        "FilterCondition",
+        "AssetQuery",
+        "AssetSummary",
+        "AssetPage",
+        "AssetSelection",
+        "AssetOwnershipProfile",
+        "AssetOwnershipSummary",
+        "AssetOwnershipAssessmentResult",
+        "ContentRuleApplyResult",
+        "JobRun",
+        "InterruptedJob",
+        "LogEntry",
+        "AssetEvent",
+        "JobProgressEvent"
+      ]
+    },
+    {
+      "file": "src/features/configuration/types.ts",
+      "declarations": [
+        "ConfigProfile",
+        "ModelProfileTestResult",
+        "FofaApiTestResult"
+      ]
+    },
+    {
+      "file": "src/features/environment/types.ts",
+      "declarations": [
+        "EnvironmentDependency",
+        "EnvironmentReport",
+        "EnvironmentPreparationStatus"
+      ]
+    },
+    {
+      "file": "src/features/hackerone/types.ts",
+      "declarations": [
+        "HackerOneProgram",
+        "HackerOneScope",
+        "HackerOneExclusion",
+        "HackerOneDetail",
+        "HackerOneEvent"
+      ]
+    },
+    {
+      "file": "src/features/runtime/types.ts",
+      "declarations": [
+        "LocalWorkerSettings",
+        "RemoteWorkerNode",
+        "WorkerHealth"
+      ]
+    },
+    {
+      "file": "src/features/sentinel/types.ts",
+      "declarations": [
+        "NativeSourceFinding",
+        "NativeSourceCoverageDecision",
+        "NativeSourceCoverageSummary",
+        "NativeSourceFindingsPage",
+        "BrowserAuthSession",
+        "ScanIdentityMaterial",
+        "SentinelScan",
+        "SentinelScanAttempt",
+        "SentinelRunnerLogView",
+        "AgentTraceToolStat",
+        "AgentTraceSummary",
+        "AgentTraceEvent",
+        "AgentTraceDetail",
+        "ModelPromptAudit",
+        "WorkbenchScanInput",
+        "AppSecVulnerability",
+        "AppSecVulnerabilitySource",
+        "AppSecScanContext",
+        "AppSecScanResult",
+        "SentinelTarget",
+        "SentinelFuseEntry",
+        "SentinelCheckpoint",
+        "AgentRequestAccounting",
+        "AgentRequestDisposition",
+        "AgentRequestReview",
+        "AgentRequestReviewItem",
+        "AgentRequestReviewPage",
+        "AgentRequestReviewInput",
+        "AgentTargetExecution",
+        "SentinelFinding",
+        "HistoricalImportPreview",
+        "HistoricalImportRun",
+        "SentinelOpportunity",
+        "InvestigationNode",
+        "InvestigationEdge",
+        "InvestigationAction",
+        "InvestigationApiModel",
+        "InvestigationHypothesis",
+        "InvestigationIdentityDiff",
+        "InvestigationRelatedService",
+        "InvestigationMetrics",
+        "InvestigationGraph",
+        "InvestigationOverview",
+        "SentinelOverviewStats",
+        "InvestigationValidation",
+        "SentinelValidation",
+        "SentinelValidationWorkItem",
+        "CapabilityBundle",
+        "RoleConfigDraft",
+        "GapFollowupReview",
+        "AdministrativeClosureReceipt",
+        "AdministrativeClosurePreview",
+        "ClosureHandoffReceipt",
+        "ClosureHandoffPreview",
+        "ClosureHandoffInput",
+        "NativeBudgetDimension",
+        "NativeBudgetDiagnostics",
+        "RootHumanAssessmentObligation",
+        "RootHumanAssessmentSnapshot",
+        "NativeScanStatus",
+        "AgentTimelinePage",
+        "GapFollowupPreview",
+        "GapFollowupDraftInput",
+        "GapFollowupSubmission",
+        "AgentDialogSelection",
+        "AgentDialogView",
+        "AgentDialogViewInput",
+        "HumanDirectiveDecisionContext",
+        "RootDecisionRecord",
+        "AgentTimelineItem",
+        "AgentAttemptMailboxMessage",
+        "AgentAttemptMailboxPage",
+        "AgentAttemptToolInvocation",
+        "AgentAttemptToolPage",
+        "OrderedAssessmentAction",
+        "OrderedAssessmentPlan",
+        "OrderedAssessmentExecution",
+        "HumanDirectiveDraft",
+        "PostScanDirectiveResult",
+        "HumanDirectiveReviewReceipt",
+        "HumanDirectiveReviewResult"
+      ]
+    },
+    {
+      "file": "src/features/skills/catalogTypes.ts",
+      "declarations": [
+        "AgentSkill",
+        "SecurityRuleChange",
+        "SecurityRulePack",
+        "AgentKnowledgeEntry",
+        "AgentLearningCandidate"
+      ]
+    },
+    {
+      "file": "src/features/workspaces/types.ts",
+      "declarations": [
+        "Project",
+        "ProjectImpact",
+        "StaleProject",
+        "StartupStatus"
+      ]
+    },
+    {
+      "file": "src/shell/types.ts",
+      "declarations": [
+        "ViewKey",
+        "AppSettings",
+        "ToastMessage"
+      ]
+    }
+  ]
+}

@@ -1,4 +1,4 @@
-import type { HistoricalImportPreview } from "../../../types";
+import type { HistoricalImportPreview } from "../types";
 
 // Validates the normalized read-only API projection, never the original JSON.
 // Multiple historical attempts are valid; they cannot select a native attempt.

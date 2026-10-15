@@ -1,0 +1,15 @@
+{
+  "tested_commit": "b2492bb94ce7aca1b102ffefc7b047dee819a2fe",
+  "source_diff_files": 55,
+  "mapped_local_delta_paths": 51,
+  "mapped_candidate_paths": 52,
+  "additional_required_test_files": [
+    "tools/plugin_workspace_harness.cjs",
+    "tools/test_plugin_workspaces.cjs",
+    "tools/test_rust_business_boundaries.cjs"
+  ],
+  "source_tree_unchanged_after_validation": true,
+  "file_statuses_add_or_modify_only": true,
+  "no_local_data_or_build_artifact_paths": true,
+  "documentation_relative_links_valid": true
+}

@@ -21,8 +21,8 @@ function compile(relative, id) {
   new Function('require', 'exports', transpile(template.code))(require, exports);
   return { script: transpile(script.content), render: exports.render };
 }
-const board = compile('../../src/components/SentinelBoard.vue', 'delete-board');
-const inline = compile('../../src/components/InlineConfirm.vue', 'delete-confirm');
+const board = compile('../../src/features/sentinel/components/SentinelBoard.vue', 'delete-board');
+const inline = compile('../../src/shared/components/InlineConfirm.vue', 'delete-confirm');
 const inlineExports = {};
 new Function('require', 'exports', inline.script)((name) => name === 'vue' ? vue : { AlertTriangle: () => null }, inlineExports);
 const InlineConfirm = { ...inlineExports.default, render: inline.render };
@@ -115,31 +115,31 @@ async function mount(deleteResult = async () => {}, extraApi = {}, environment =
   const exports = {};
   new Function('require', 'exports', 'window', 'sessionStorage', 'document', board.script)((name) => {
     if (name === 'vue') return vue;
-    if (name === '../api') return { api };
-    if (name === '../i18n') return { useI18n: () => ({ tr: (zh) => zh }) };
-    if (name === '../features/sentinel/presentation') return presentation;
-    if (name === '../features/sentinel/fuse/presentation') return fusePresentation;
-    if (name === '../features/sentinel/fuse/useFuseDetails') return fuseDetails;
-    if (name === '../features/sentinel/fuse/useFuseDisposition') return fuseDisposition;
-    if (name === '../features/sentinel/results/useApiResults') return apiResults;
-    if (name === '../features/sentinel/results/useBoardLifecycle') return boardLifecycle;
-    if (name === '../features/sentinel/results/useTaskSearch') return taskSearch;
-    if (name === '../features/sentinel/results/useScanPages') return scanPages;
-    if (name === '../features/sentinel/traces/useTaskTrace') return taskTrace;
-    if (name === '../features/sentinel/overview/useTokenUsage') return tokenUsage;
-    if (name === '../features/sentinel/overview/useInvestigationSummary') return investigationSummary;
-    if (name === '../features/sentinel/components/overview/SentinelTokenOverview.vue') return { default: TokenOverview };
-    if (name === '../features/sentinel/components/overview/SentinelOverviewSummary.vue') return { default: OverviewSummary };
-    if (name === '../features/sentinel/components/overview/SentinelOverviewSidebar.vue') return { default: OverviewSidebar };
-    if (name === '../features/sentinel/components/overview/SentinelTaskOverview.vue') return { default: TaskOverview };
-    if (name === '../features/sentinel/components/results/SentinelTraceTimeline.vue') return { default: TraceTimeline };
+    if (name === '../api') return { sentinelApi: api };
+    if (name === '../../../i18n') return { useI18n: () => ({ tr: (zh) => zh }) };
+    if (name === '../presentation') return presentation;
+    if (name === '../fuse/presentation') return fusePresentation;
+    if (name === '../fuse/useFuseDetails') return fuseDetails;
+    if (name === '../fuse/useFuseDisposition') return fuseDisposition;
+    if (name === '../results/useApiResults') return apiResults;
+    if (name === '../results/useBoardLifecycle') return boardLifecycle;
+    if (name === '../results/useTaskSearch') return taskSearch;
+    if (name === '../results/useScanPages') return scanPages;
+    if (name === '../traces/useTaskTrace') return taskTrace;
+    if (name === '../overview/useTokenUsage') return tokenUsage;
+    if (name === '../overview/useInvestigationSummary') return investigationSummary;
+    if (name === './overview/SentinelTokenOverview.vue') return { default: TokenOverview };
+    if (name === './overview/SentinelOverviewSummary.vue') return { default: OverviewSummary };
+    if (name === './overview/SentinelOverviewSidebar.vue') return { default: OverviewSidebar };
+    if (name === './overview/SentinelTaskOverview.vue') return { default: TaskOverview };
+    if (name === './results/SentinelTraceTimeline.vue') return { default: TraceTimeline };
     if (name === '@tauri-apps/api/event') return { listen: environment.listen || (async () => () => {}) };
     if (name === '@tauri-apps/plugin-opener') return { openUrl: () => { throw new Error('No external IO'); } };
     if (name === '@lucide/vue') return new Proxy({}, { get: () => () => null });
-    if (name === './InlineConfirm.vue') return { default: InlineConfirm };
+    if (name === '../../../shared/components/InlineConfirm.vue') return { default: InlineConfirm };
     // The board lazy-loads these unrelated panels; this harness exercises its
     // own setup/template and keeps the panels outside this deletion boundary.
-    if (name === '../features/sentinel/components/lazyPanels') return {
+    if (name === './lazyPanels') return {
       AgentDialog: () => null, AgentTraceHub: () => null,
       AgentWorkbench: () => null, SentinelSourceResults: () => null,
       SentinelTaskCenter: () => null,

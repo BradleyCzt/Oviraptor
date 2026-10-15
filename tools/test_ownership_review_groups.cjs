@@ -11,7 +11,7 @@ const ts = require('typescript');
 const vue = require('vue');
 const { parse, compileScript, compileTemplate } = require('@vue/compiler-sfc');
 
-const FILE = 'src/components/OwnershipReviewGroups.vue';
+const FILE = 'src/features/assets/components/OwnershipReviewGroups.vue';
 const readSource = relative => fs.readFileSync(path.join(__dirname, '..', relative), 'utf8');
 const transpile = source => ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020 } }).outputText;
 const LANES = { conflict: '证据冲突', counter_evidence: '存在反证', consistent: '规则一致', insufficient: '证据不足', unknown: '未知', manual: '已有人工结论' };
@@ -20,7 +20,7 @@ const NAVS = { unknown: '未知', province: '省公司' };
 function compileComponent(api) {
   const requireModule = name => {
     if (name === 'vue') return vue;
-    if (name === '../features/assets/ownershipDirectoryApi') return { ownershipReviewApi: api, OWNERSHIP_LANE_LABELS: LANES, OWNERSHIP_NAV_LABELS: NAVS };
+    if (name === '../ownershipDirectoryApi') return { ownershipReviewApi: api, OWNERSHIP_LANE_LABELS: LANES, OWNERSHIP_NAV_LABELS: NAVS };
     throw Error(`Unexpected review groups import: ${name}`);
   };
   const filename = path.join(__dirname, '..', FILE);

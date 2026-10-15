@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { onBeforeUnmount, ref, watch } from "vue";
-import type { NativeSourceFindingsPage } from "../../../types";
+import type { NativeSourceFindingsPage } from "../types";
 import { sentinelApi } from "../api";
 
 const props = defineProps<{ scanId: string; attemptNumber: number }>();

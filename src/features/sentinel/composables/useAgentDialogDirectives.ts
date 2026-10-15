@@ -1,7 +1,7 @@
 import { computed, ref, watch, type Ref } from "vue";
 import { sentinelApi } from "../api";
 import { orderedAssessmentPlan, orderedAssessmentExecution, orderedPlanCoherent } from "../directives/orderedAssessmentPlan";
-import type { AgentTimelineItem, HumanDirectiveDraft, NativeScanStatus } from "../../../types";
+import type { AgentTimelineItem, HumanDirectiveDraft, NativeScanStatus } from "../types";
 
 type TaskView = { scanId: string; isCurrent: () => boolean };
 type HistoricalReceipt = NonNullable<NativeScanStatus["historicalReceiptItems"]>[number];

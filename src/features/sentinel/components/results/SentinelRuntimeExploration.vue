@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { Activity } from "@lucide/vue";
-import type { SentinelFinding } from "../../../../types";
+import type { SentinelFinding } from "../../types";
 import { json, text } from "../../presentation";
 
 defineProps<{

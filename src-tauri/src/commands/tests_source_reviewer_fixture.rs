@@ -47,7 +47,7 @@ fn source_reviewer_execution_fixture_configured_before_birth(response_mode: &'st
 ) -> (PathBuf,rusqlite::Connection,crate::agent_runtime::multi_agent::lease::CoordinatorLease,Result<JsonValue,String>) {
     let (scope,configure)=configuration;
     let no_candidates=response_mode.starts_with("no_candidates");
-    let (port,seen,stop)=crate::commands::agent_tests::spawn_endpoint(std::sync::Arc::new(move |request| {
+    let (port,seen,stop)=crate::scanning::agent_tests::spawn_endpoint(std::sync::Arc::new(move |request| {
         let body:JsonValue=serde_json::from_str(request.split("\r\n\r\n").nth(1).unwrap()).unwrap();
         let last=body["messages"].as_array().unwrap().last().unwrap();
         let input:JsonValue=last["content"].as_str().and_then(|s|serde_json::from_str(s).ok()).unwrap_or(JsonValue::Null);

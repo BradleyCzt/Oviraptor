@@ -242,7 +242,7 @@ fn source_guidance_response_delivery_is_atomic_and_replay_is_verified() {
 #[test]
 fn source_guidance_real_transport_sends_frozen_input_not_later_messages() {
     use crate::agent_runtime::{contract::AgentRole,multi_agent::{source,scheduler,directive::source_guidance as guidance}};
-    let (port,seen,stop)=crate::commands::agent_tests::spawn_endpoint(std::sync::Arc::new(|_|(200,"application/json",
+    let (port,seen,stop)=crate::scanning::agent_tests::spawn_endpoint(std::sync::Arc::new(|_|(200,"application/json",
         json!({"choices":[{"message":{"role":"assistant","content":"guided source assessment"},"finish_reason":"stop"}],"usage":{"prompt_tokens":10,"completion_tokens":10,"total_tokens":20}}).to_string())));
     let environment=source_specialist_test_environment(port);
     let (root,db,record,lease)=source_specialist_true_born_model_fixture(&environment);
@@ -529,7 +529,7 @@ fn source_guidance_production_entry_consumes_chat_at_next_real_phase() {
     let ids=Arc::new(Mutex::new(Vec::<String>::new()));
     let count=Arc::new(AtomicUsize::new(0));
     let (server_path,server_ids,server_count)=(path.clone(),ids.clone(),count.clone());
-    let (port,seen,stop)=crate::commands::agent_tests::spawn_endpoint(Arc::new(move |request| {
+    let (port,seen,stop)=crate::scanning::agent_tests::spawn_endpoint(Arc::new(move |request| {
         let body:JsonValue=serde_json::from_str(request.split("\r\n\r\n").nth(1).unwrap()).unwrap();
         let number=server_count.fetch_add(1,Ordering::SeqCst);
         let input:JsonValue=body["messages"].as_array().unwrap().last().unwrap()["content"]
@@ -637,7 +637,7 @@ fn source_guidance_reviewers_receive_only_their_frozen_focus_and_preserve_gaps()
         let ids=Arc::new(Mutex::new(Vec::<String>::new()));
         let count=Arc::new(AtomicUsize::new(0));
         let (server_path,server_ids,server_count)=(path.clone(),ids.clone(),count.clone());
-        let (port,seen,stop)=crate::commands::agent_tests::spawn_endpoint(Arc::new(move |request| {
+        let (port,seen,stop)=crate::scanning::agent_tests::spawn_endpoint(Arc::new(move |request| {
             let body:JsonValue=serde_json::from_str(request.split("\r\n\r\n").nth(1).unwrap()).unwrap();
             let number=server_count.fetch_add(1,Ordering::SeqCst);
             let last=body["messages"].as_array().unwrap().last().unwrap();

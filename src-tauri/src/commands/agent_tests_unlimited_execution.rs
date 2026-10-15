@@ -1,3 +1,5 @@
+include!("agent_tests_unlimited_execution_financial.rs");
+
 #[test]
 fn unlimited_execution_actual_native_creator_reaches_paid_root_web_broker_client_chain() {
     let _real = RealSpecialistTransport::enter();
@@ -13,12 +15,13 @@ fn unlimited_execution_actual_native_creator_reaches_paid_root_web_broker_client
     multi_agent_finish_execution(&f.h.context, f.session.as_mut().unwrap(), &outcome).unwrap();
     let db = db::open(&f.h.db_path).unwrap();
     let root = &f.session.as_ref().unwrap().lease.root_run_id;
+    let financial = unlimited_execution_financial_usage(&f, 8);
     assert_eq!(
-        f.h.model_seen.lock().unwrap().len(),
+        f.h.model_seen.lock().unwrap().len() - financial["model_requests"] as usize,
         15,
         "paid Root x5 (including original new-evidence assessment), Mapper, Web reaches original max_turns=8, Client"
     );
-    assert_eq!(root_tick_count(&db, root, "publication"), 5);
+    assert_eq!(root_tick_count(&db, root, "publication") - financial["model_requests"], 5);
     for (dimension, paid) in [
         ("model_input_tokens", 150),
         ("model_cached_tokens", 0),
@@ -27,7 +30,7 @@ fn unlimited_execution_actual_native_creator_reaches_paid_root_web_broker_client
     ] {
         let fees =
             crate::agent_runtime::multi_agent::budget::balance(&db, root, None, dimension).unwrap();
-        assert_eq!(fees.consumed, paid, "actual paid usage {dimension}");
+        assert_eq!(fees.consumed - financial[dimension], paid, "actual paid business usage {dimension}, excluding separately proven original financial advisories");
         assert_eq!(fees.indeterminate, 0, "known receipts {dimension}");
         assert_eq!(fees.reserved, 0, "closed original chain {dimension}");
     }
@@ -42,7 +45,7 @@ fn unlimited_execution_actual_native_creator_reaches_paid_root_web_broker_client
     assert_eq!(
         crate::agent_runtime::multi_agent::budget::balance(&db, root, None, "model_requests")
             .unwrap()
-            .consumed,
+            .consumed - financial["model_requests"],
         15,
         "unlimited still records every original paid SDK"
     );
@@ -55,6 +58,8 @@ fn unlimited_execution_actual_native_creator_reaches_paid_root_web_broker_client
         .unwrap(),
         1
     );
+    coordinator_finished_web_replay_spends_zero(&f.h.context, f.session.as_mut().unwrap(), &outcome,
+        || f.h.model_seen.lock().unwrap().len());
     assert_eq!(
         db.query_row(
             "SELECT count(*) FROM agent_assignments WHERE role='client_side' AND state='completed'",
@@ -97,15 +102,17 @@ fn unlimited_execution_mixed_original_ceiling_keeps_finite_grant_and_actual_sdk_
         multi_agent_finish_execution(&f.h.context, f.session.as_mut().unwrap(), &outcome).unwrap();
         let root = &f.session.as_ref().unwrap().lease.root_run_id;
         // v6 keeps finite request headroom, shortening Web's paid execution.
-        // Unlimited requests retain the original physical 15-call flow.
+        // Unlimited requests retain the original 15-call business flow;
+        // current paid financial advisories are proven separately per bill.
         let expected_calls = if limits.1 > 0 { 10 } else { 15 };
+        let financial = unlimited_execution_financial_usage(&f, if limits.1 > 0 { 3 } else { 8 });
         assert_eq!(
             crate::agent_runtime::multi_agent::budget::balance(&db, root, None, "model_requests")
                 .unwrap()
-                .consumed,
+                .consumed - financial["model_requests"],
             expected_calls
         );
-        assert_eq!(f.h.model_seen.lock().unwrap().len(), expected_calls as usize);
+        assert_eq!(f.h.model_seen.lock().unwrap().len() - financial["model_requests"] as usize, expected_calls as usize);
         assert!(
             crate::agent_runtime::multi_agent::attempts::audit_rows::Rows::read(
                 &db,
@@ -131,6 +138,8 @@ fn unlimited_execution_mixed_original_ceiling_keeps_finite_grant_and_actual_sdk_
         if limits.1 > 0 {
             assert!(requests.consumed + requests.reserved + requests.indeterminate <= limits.1);
         }
+        coordinator_finished_web_replay_spends_zero(&f.h.context, f.session.as_mut().unwrap(), &outcome,
+            || f.h.model_seen.lock().unwrap().len());
     }
 }
 #[test]

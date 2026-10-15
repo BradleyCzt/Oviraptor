@@ -19,6 +19,11 @@ pub fn enabled(db: &Connection, scan: &str, attempt: i64) -> Result<bool, String
         return Ok(false);
     };
     let plan: Value = serde_json::from_str(&text).map_err(|_| "homogeneous_frozen_plan_invalid")?;
+    if crate::native_pipeline::NativeSourcePlan::verifies_source_owner(
+        db, scan, attempt, &plan, &hash,
+    )? {
+        return Ok(false);
+    }
     if crate::agent_runtime::store::stable_hash(&text) != hash {
         return Err("homogeneous_frozen_plan_invalid".into());
     }

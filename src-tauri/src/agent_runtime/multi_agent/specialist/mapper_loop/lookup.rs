@@ -1,5 +1,5 @@
 use super::*;
-use crate::commands::mapper_evidence_lookup::{
+use crate::scanning::mapper_evidence_lookup::{
     MapperEvidenceInventory, MapperLookupLimits, MapperLookupObservation,
 };
 
@@ -64,7 +64,7 @@ pub(super) fn original_inventory_on(
             .and_then(|n| usize::try_from(n).ok())
             .ok_or("mapper_loop_inventory_limits_invalid")?,
     )?;
-    let directory = crate::commands::resolve_agent_evidence_location(db, &actor.root_run_id)?;
+    let directory = crate::scanning::evidence_bridge::resolve_agent_evidence_location(db, &actor.root_run_id)?;
     let inventory = MapperEvidenceInventory::capture_on(
         db,
         actor,

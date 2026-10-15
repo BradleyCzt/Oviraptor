@@ -1,4 +1,4 @@
-import type { AgentTimelineItem } from "../../../types";
+import type { AgentTimelineItem } from "../types";
 import { chatDecisionDisplay } from "./rootDecisionContract";
 
 // Identity is event-scoped. Delimiters can occur in either field, so all

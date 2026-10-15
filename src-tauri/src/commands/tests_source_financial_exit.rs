@@ -20,7 +20,7 @@ fn source_financial_exit_expired_original_c_has_financial_fact_without_dispatch_
             source_exit_require_fact(db, c, false);
             source_exit_assert_snapshot(db, c, &before);
             assert_eq!(source_exit_wall(db, &c.root_run_id), wall);
-            let before = crate::commands::web_mode_test_rows(db);
+            let before = crate::scanning::web_mode_test_rows(db);
             assert!(run_native_source_assessments(
                 &root.join("oviraptor.sqlite3"),
                 &record.scan_id,
@@ -28,7 +28,7 @@ fn source_financial_exit_expired_original_c_has_financial_fact_without_dispatch_
                 &root.join("attempt-0001")
             )
             .is_err());
-            crate::commands::web_mode_assert_rows(db, &before);
+            crate::scanning::web_mode_assert_rows(db, &before);
             result
         },
     );
@@ -175,12 +175,12 @@ fn source_financial_exit_private_writer_failures_keep_primary_error_and_roll_bac
         let (root,db,_,result)=source_reviewer_execution_fixture_using_calls("valid",None,3,None,1,|root,db,record,c| {
             source_reviewer_checkpoint_fixture(root,db,record,c,"first_assessment_unknown");
             db.execute_batch(&format!("CREATE TRIGGER source_exit_financial_fault {fault}")).unwrap();
-            let before=crate::commands::web_mode_test_rows(db);
+            let before=crate::scanning::web_mode_test_rows(db);
             std::thread::sleep(Duration::from_millis(50));
             let result=run_native_source_assessments(&root.join("oviraptor.sqlite3"),&record.scan_id,1,&root.join("attempt-0001"));
             let error=result.as_ref().unwrap_err();assert!(error.contains("source_financial_exit:"),"financial finally was skipped: {error}");
             assert!(!error.starts_with("source_financial_exit:"),"primary failure must remain");
-            crate::commands::web_mode_assert_rows(db,&before);result
+            crate::scanning::web_mode_assert_rows(db,&before);result
         });
         assert!(result.is_err());drop(db);fs::remove_dir_all(root).unwrap();
     }

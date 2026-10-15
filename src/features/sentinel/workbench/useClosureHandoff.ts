@@ -1,6 +1,6 @@
 import { ref, type Ref } from "vue";
-import { api } from "../../../api";
-import type { ClosureHandoffInput, ClosureHandoffPreview, ClosureHandoffReceipt, SentinelScan } from "../../../types";
+import { sentinelApi } from "../api";
+import type { ClosureHandoffInput, ClosureHandoffPreview, ClosureHandoffReceipt, SentinelScan } from "../types";
 
 type HandoffForm = {
   projectId: number;
@@ -60,7 +60,7 @@ export function useClosureHandoff(context: HandoffContext) {
     try {
       if (context.hasFollowup() || !context.isWebMode() || context.form.projectId !== source.projectId)
         throw new Error("closure_handoff_scope_mismatch");
-      const preview = await api.previewWebClosureHandoff(source.sourceScanId);
+      const preview = await sentinelApi.previewWebClosureHandoff(source.sourceScanId);
       if (!current()) return;
       if (preview.sourceScanId !== source.sourceScanId || preview.closureId !== source.closureId
         || preview.sourceHash !== source.sourceHash
@@ -92,7 +92,7 @@ export function useClosureHandoff(context: HandoffContext) {
       const input = pendingHandoff.value;
       if (input.sourceScanId !== source.sourceScanId || input.closureId !== source.closureId || input.sourceHash !== source.sourceHash)
         throw new Error("closure_handoff_pending_scope_mismatch");
-      const receipt = await api.createWebClosureHandoff({ ...input, urls: [...input.urls], authSessionIds: [...input.authSessionIds], skillIds: [...input.skillIds] });
+      const receipt = await sentinelApi.createWebClosureHandoff({ ...input, urls: [...input.urls], authSessionIds: [...input.authSessionIds], skillIds: [...input.skillIds] });
       if (!current()) return;
       validateReceipt(receipt, source, input);
       pendingHandoff.value = undefined;

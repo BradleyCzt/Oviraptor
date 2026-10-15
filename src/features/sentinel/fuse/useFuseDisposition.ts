@@ -1,5 +1,5 @@
 import { reactive, ref } from "vue";
-import type { SentinelFuseEntry, SentinelScan } from "../../../types";
+import type { SentinelFuseEntry, SentinelScan } from "../types";
 
 export function useFuseDisposition(options: {
   save: (input: { id: number; verdict: string; note: string; evidence: string; archived: boolean }) => Promise<void>;

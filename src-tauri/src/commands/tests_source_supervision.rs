@@ -10,7 +10,7 @@ fn assignment_attempt_supervisor_source_inflight_stop_preserves_claim_without_re
     let (arrived_tx, arrived_rx) = mpsc::channel();
     let (release_tx, release_rx) = mpsc::channel();
     let release = Arc::new(Mutex::new(release_rx));
-    let (port, seen, stop) = crate::commands::agent_tests::spawn_endpoint(Arc::new(move |_| {
+    let (port, seen, stop) = crate::scanning::agent_tests::spawn_endpoint(Arc::new(move |_| {
         let _ = arrived_tx.send(());
         let _ = release
             .lock()

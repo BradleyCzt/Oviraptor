@@ -962,7 +962,7 @@ pub fn grade_intel_finding(connection: &Connection, project_id: i64, raw: &JsonV
     let entity_anchor = match request.entity_id {
         None => false,
         Some(entity_id) => {
-            let entities = crate::commands::load_org_entities(tx).map_err(storage)?;
+            let entities = crate::commands::ownership::load_org_entities(tx).map_err(storage)?;
             if !entities.iter().any(|entity| entity.id == entity_id) {
                 return Err(format!("[exposure_intel_anchor_invalid] 组织目录里没有实体 {entity_id}"));
             }

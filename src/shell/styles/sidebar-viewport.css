@@ -1,0 +1,6 @@
+
+.sidebar-fixed-links{display:flex;flex-direction:column;gap:5px;margin-top:auto;padding-top:10px}.sidebar-fixed-links button{height:38px;border:0;background:transparent;color:#98a7bd;border-radius:9px;padding:0 12px;display:flex;align-items:center;gap:12px;text-align:left}.sidebar-fixed-links button:hover,.sidebar-fixed-links button.active{background:#ffffff12;color:#fff}.sidebar-fixed-links span{font-size:11px}
+.sidebar .sidebar-project{margin-top:0}
+.tab-strip{overflow-x:auto}.tab-strip button{flex:0 0 auto;white-space:nowrap}
+html,body,#app{max-width:100%;overflow-x:hidden}
+@media(max-width:760px){.modal-backdrop{padding:10px}.modal-card.wide{width:calc(100vw - 20px)}.modal-header{padding:15px 14px 12px}.modal-body{padding:16px 14px}.modal-footer{padding:11px 14px}.profile-heading{align-items:stretch;flex-direction:column}.profile-heading .check-field{padding-top:0}.security-rule-card{padding:10px}}

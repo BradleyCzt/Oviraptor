@@ -95,10 +95,10 @@ test('ir15 ir01 ir14 the handler, the shared export, and the exposure api match 
     'import_exposure_documents',
     'grade_exposure_intel',
   ]) {
-    assert.match(lib, new RegExp(`commands::${name},`), name);
+    assert.match(lib, new RegExp(`commands::exposure::${name},`), name);
   }
-  assert.match(lib, /commands::review_exposure_finding_scoped,/);
-  assert.doesNotMatch(lib, /commands::review_exposure_finding,/);
+  assert.match(lib, /commands::exposure::review_exposure_finding_scoped,/);
+  assert.doesNotMatch(lib, /commands::(?:exposure::)?review_exposure_finding,/);
   const shared = readSource('src/features/assets/api.ts');
   assert.doesNotMatch(shared, /invoke<void>\("review_exposure_finding"/);
   assert.doesNotMatch(shared, /reviewExposureFinding:/);
@@ -114,7 +114,7 @@ test('ir15 ir01 ir14 the handler, the shared export, and the exposure api match 
   assert.match(panel, /写入导入/);
   assert.doesNotMatch(panel, /不提供导入按钮/);
   assert.doesNotMatch(panel, /fetch\(|mailto:|smtp/i);
-  const surface = readSource('src/components/ExposureSurface.vue');
+  const surface = readSource('src/features/assets/exposure/ExposureSurface.vue');
   assert.match(surface, /写入等级/);
   assert.match(surface, /gradeExposureIntel/);
   assert.doesNotMatch(surface, /fetch\(|mailto:|smtp/i);
@@ -148,7 +148,7 @@ test('ir10 and ir01 and ir08 and ir04 are locked in source', () => {
   assert.match(pkg, /"test:exposure-g1"/);
   assert.match(pkg, /"test:exposure-ir"/);
   assert.match(pkg, /"test:exposure"/);
-  const models = readSource('src-tauri/src/models_appsec.rs');
+  const models = readSource('src-tauri/src/assets/model.rs');
   assert.doesNotMatch(models, /ExposureFindingReviewInput/);
   const lib = readSource('src-tauri/src/lib.rs');
   assert.match(lib, /reclassify_exposure_finding/);
@@ -200,5 +200,6 @@ test('ir02 the group ledger shows real unit counts, a subsidiary stays apart, an
   assert.doesNotMatch(units, /per_asset_edge: "integration_pending"/);
   const own = readSource('src-tauri/src/commands/ownership_unit_projection.rs').split('#[cfg(test)]')[0];
   assert.doesNotMatch(own, /INSERT|UPDATE |DELETE|ALTER TABLE|CREATE TABLE/, '归属投影只读');
-  assert.match(readSource('src-tauri/src/commands.rs'), /include!\("commands\/ownership_unit_projection.rs"\);/);
+  assert.match(readSource('src-tauri/src/commands.rs'), /pub\(crate\) mod ownership;/);
+  assert.match(readSource('src-tauri/src/commands/ownership.rs'), /include!\("ownership_unit_projection.rs"\);/);
 });

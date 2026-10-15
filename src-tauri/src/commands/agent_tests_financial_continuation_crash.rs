@@ -31,7 +31,7 @@ fn financial_continuation_actual_subprocess_exit_after_publication_reentry_close
     let output = std::process::Command::new(std::env::current_exe().unwrap())
         .args([
             "--exact",
-            "commands::agent_tests::a02_test_subprocess_driver",
+            "scanning::agent_tests::a02_test_subprocess_driver",
             "--test-threads=1",
         ])
         .env("OVIRAPTOR_TEST_FINANCIAL_DRIVER_DB", &f.context.db_path)

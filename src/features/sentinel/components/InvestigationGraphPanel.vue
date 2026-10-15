@@ -4,7 +4,7 @@ import {
   Bot, Braces, CheckCircle2, ChevronDown, CircleStop, GitCompareArrows,
   MousePointerClick, Network, Send, ShieldAlert, ShieldCheck, Sparkles,
 } from "@lucide/vue";
-import type { InvestigationApiModel, InvestigationGraph, InvestigationHypothesis } from "../../../types";
+import type { InvestigationApiModel, InvestigationGraph, InvestigationHypothesis } from "../types";
 import { buildRawHttpResponse, prettyHttpBody } from "../httpMessage";
 
 const props = defineProps<{ graph?: InvestigationGraph; busy?: boolean; updatingId?: number }>();

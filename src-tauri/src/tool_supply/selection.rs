@@ -433,7 +433,7 @@ impl OriginalSignedToolSelectionPolicy {
     pub(crate) fn capture_original_on(
         db: &Connection, scan: &str, attempt: i64,
     ) -> Result<Self, String> {
-        let source = crate::commands::capture_original_tool_selection_policy_on(db, scan, attempt)?;
+        let source = crate::scanning::scope_contract::capture_original_tool_selection_policy_on(db, scan, attempt)?;
         Ok(Self {
             mode: source.mode().clone(),
             canonical_policy: source.canonical_policy().into(),

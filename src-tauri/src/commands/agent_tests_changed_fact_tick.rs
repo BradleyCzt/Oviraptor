@@ -35,6 +35,93 @@ fn changed_fact_response(request: &str, allow: bool) -> String {
     }
 }
 
+// The current signed birth adds one paid advisory for the original Web bill.
+// Classify it separately from the pre-existing dispatch/review calls, proving
+// its exact phase, original fee and lack of any execution or scope grant.
+fn coordinator_original_budget_assessment_count(
+    db: &rusqlite::Connection,
+    root: &str,
+    wires: &[String],
+    expected_phases: &[&str],
+) -> usize {
+    if db.is_autocommit() {
+        let snapshot = db.unchecked_transaction().unwrap();
+        return coordinator_original_budget_assessment_count(&snapshot, root, wires, expected_phases);
+    }
+    let wire_phases: Vec<String> = wires.iter()
+        .filter(|wire| wire.contains("You are the Root Coordinator"))
+        .map(|wire| {
+            let body: JsonValue = serde_json::from_str(wire.split_once("\r\n\r\n").unwrap().1).unwrap();
+            let input: JsonValue = serde_json::from_str(body["messages"][1]["content"].as_str().unwrap()).unwrap();
+            input["basis"]["phase"].as_str().unwrap().to_string()
+        }).collect();
+    assert_eq!(wire_phases.iter().map(String::as_str).collect::<Vec<_>>(), expected_phases);
+    let requests: Vec<(String, String)> = db.prepare(
+        "SELECT call_id,fact_json FROM agent_root_tick_receipts WHERE root_run_id=?1 AND phase='request' ORDER BY round"
+    ).unwrap().query_map([root], |row| Ok((row.get(0)?, row.get(1)?))).unwrap()
+        .collect::<rusqlite::Result<_>>().unwrap();
+    let mut saved_phases = Vec::new();
+    let mut assessments = 0usize;
+    for (call, raw) in requests {
+        let saved: JsonValue = serde_json::from_str(&raw).unwrap();
+        let basis = &saved["request"]["basis"];
+        let phase = basis["phase"].as_str().unwrap();
+        saved_phases.push(phase.to_string());
+        let fee: (i64, i64) = db.query_row(
+            "SELECT count(*),coalesce(sum(amount),0) FROM agent_budget_entries WHERE root_run_id=?1 AND assignment_id='' AND dimension='model_requests' AND kind='consume' AND source_id=?2",
+            params![root, call], |row| Ok((row.get(0)?, row.get(1)?)),
+        ).unwrap();
+        assert_eq!(fee, (1, 1), "{phase}: exactly one original paid Root request");
+        if phase != "budget-consumption" { continue; }
+        assessments += 1;
+        let fact = &basis["changedFact"]["semantic"];
+        assert_eq!(fact["rootRunId"], root);
+        assert_eq!(fact["usage"]["modelRequests"], 1);
+        assert_eq!(fact["advisoryOnly"], true);
+        assert_eq!(fact["executionGrant"], false);
+        assert_eq!(fact["additionalScopeGranted"], false);
+        assert_eq!(fact["targetRequestsGranted"], 0);
+        let original: i64 = db.query_row(
+            "SELECT count(*) FROM agent_web_model_journal WHERE call_id=?1 AND root_run_id=?2 AND child_run_id=?3 AND phase='received'",
+            params![fact["callId"].as_str().unwrap(), root, fact["childRunId"].as_str().unwrap()],
+            |row| row.get(0),
+        ).unwrap();
+        assert_eq!(original, 1, "assessment must cite the original received Web bill");
+        let source = format!("web-model:{}:{}:{}:receipt:{}",
+            fact["assignmentId"].as_str().unwrap(), fact["round"].as_i64().unwrap(),
+            fact["requestHash"].as_str().unwrap(), fact["responseHash"].as_str().unwrap());
+        let web_fee: (i64, i64) = db.query_row(
+            "SELECT count(*),coalesce(sum(amount),0) FROM agent_budget_entries WHERE root_run_id=?1 AND assignment_id=?2 AND lease_attempt_id=?3 AND source_id=?4 AND dimension='model_requests' AND kind='consume'",
+            params![root, fact["assignmentId"].as_str().unwrap(), fact["workerAttemptId"].as_str().unwrap(), source],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        ).unwrap();
+        assert_eq!(web_fee, (1, 1), "advisory cannot replace or duplicate its original Web fee");
+        let event: i64 = db.query_row(
+            "SELECT json_extract(fact_json,'$.eventSequence') FROM agent_root_tick_receipts WHERE root_run_id=?1 AND call_id=?2 AND phase='publication'",
+            params![root, call], |row| row.get(0),
+        ).unwrap();
+        let publication = crate::agent_runtime::multi_agent::budget::root::model::tick::Tick::project_publication(db, root, event).unwrap();
+        assert_eq!(publication.record["summary"]["suggestions"], json!(["assess:budget_consumption"]));
+    }
+    assert_eq!(saved_phases, wire_phases, "every actual Root phase has the same original receipt");
+    assert_eq!(assessments, 1, "one settled Web bill receives one advisory assessment");
+    assessments
+}
+
+fn coordinator_finished_web_replay_spends_zero(
+    context: &AgentRunContext,
+    session: &mut MultiAgentSession,
+    outcome: &AgentTargetOutcome,
+    request_count: impl Fn() -> usize,
+) {
+    let db = db::open(&context.db_path).unwrap();
+    let before = web_mode_test_rows(&db);
+    let calls = request_count();
+    multi_agent_finish_execution(context, session, outcome).unwrap();
+    assert_eq!(request_count(), calls, "same settled Web bill cannot buy another Root SDK call");
+    web_mode_assert_rows(&db, &before);
+}
+
 #[test]
 fn coordinator_changed_mapper_fact_actual_sdk_and_same_fact_zero_sdk_replay() {
     let _real = RealSpecialistTransport::enter();
@@ -101,7 +188,10 @@ fn coordinator_changed_mapper_fact_actual_sdk_and_same_fact_zero_sdk_replay() {
     let outcome = run_native_agent(&f.context);
     assert!(matches!(outcome, AgentTargetOutcome::BoundedCompleted(_) | AgentTargetOutcome::Incomplete(_)), "{}", outcome.detail());
     multi_agent_finish_execution(&f.context, &mut session, &outcome).unwrap();
-    assert_eq!(seen.lock().unwrap().len(), 5, "original budget feedback and one actual empty Web round exit naturally");
+    coordinator_finished_web_replay_spends_zero(&f.context, &mut session, &outcome, || seen.lock().unwrap().len());
+    let assessment = coordinator_original_budget_assessment_count(&db, &f.actor.root_run_id, &seen.lock().unwrap(),
+        &["bootstrap", "mapper-output", "budget-allocation", "budget-consumption"]);
+    assert_eq!(seen.lock().unwrap().len() - assessment, 5, "original budget feedback and one actual empty Web round exit naturally");
     drop(session);
 }
 

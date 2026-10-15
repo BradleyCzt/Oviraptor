@@ -209,24 +209,44 @@ fn input_parser_root_feedback_fact_change_during_paid_tick_withholds_publication
     assert_eq!(f.input_parser_rows(&db), 0);
 }
 
-// U176: admission inventory — exactly one role frame (input-parser-output) moved to
-// wired with its own trigger name; BL/AZ/ES unchanged and still named not_ready.
+// U176's InputParser trigger stays distinct. The later BL/AZ/ES output producers
+// are wired advisory assessments; the reserved display-only skeleton cannot
+// replace any of these real, verified frames.
 #[test]
 fn input_parser_root_feedback_admits_only_input_parser_with_distinct_trigger_name() {
+    use crate::agent_runtime::contract::AgentRole;
     assert!(NATIVE_WIRED_SUPERVISION_FRAME_KINDS.contains(&"input-parser-output"));
     assert!(!NATIVE_RESERVED_ROLE_OUTPUT_FRAME_KINDS.contains(&"input-parser-output"));
-    assert_eq!(NATIVE_RESERVED_ROLE_OUTPUT_FRAME_KINDS,
-        &["business-logic-output", "authorization-output", "external-surface-output"]);
+    assert_eq!(NATIVE_RESERVED_ROLE_OUTPUT_FRAME_KINDS, &[] as &[&str]);
     assert_eq!(native_supervision_frame_admission("input-parser-output"), Ok(()));
     let bare = NativeCoordinatorFrame { kind: "input-parser-output", semantic: json!({}),
         rows: Vec::new(), review_refs: None, review_meta: None };
     let trigger = NativeCoordinatorTrigger::classify(&bare).unwrap();
+    assert!(matches!(trigger, NativeCoordinatorTrigger::InputParserTrigger));
     assert_eq!(trigger.name(), "input_parser_trigger");
     assert_ne!(trigger.name(), "child_output_envelope");
-    for kind in ["business-logic-output", "authorization-output", "external-surface-output"] {
-        let code = format!("root_trigger_{}_not_ready", kind.replace('-', "_"));
-        assert_eq!(native_supervision_frame_admission(kind).unwrap_err(), code);
+    assert_eq!(bare.step(), "dispatch:input_parser");
+    for (role, kind, step) in [
+        (AgentRole::BusinessLogic, "business-logic-output", "assess:business_logic_output"),
+        (AgentRole::Authorization, "authorization-output", "assess:authorization_output"),
+        (AgentRole::ExternalSurface, "external-surface-output", "assess:external_surface_output"),
+    ] {
+        assert_eq!(native_reserved_role_output_kind_for_role(role), Some(kind));
+        assert_eq!(native_agent_role_for_reserved_role_output_kind(kind), Some(role));
+        assert!(NATIVE_WIRED_SUPERVISION_FRAME_KINDS.contains(&kind));
+        assert!(!NATIVE_RESERVED_ROLE_OUTPUT_FRAME_KINDS.contains(&kind));
+        assert_eq!(native_supervision_frame_admission(kind), Ok(()));
+        let output = NativeCoordinatorFrame { kind, semantic: json!({}),
+            rows: Vec::new(), review_refs: None, review_meta: None };
+        let output_trigger = NativeCoordinatorTrigger::classify(&output).unwrap();
+        assert_eq!(output_trigger.name(), "child_output_envelope");
+        assert_ne!(output_trigger.name(), trigger.name());
+        assert_eq!(output.step(), step);
+        // This flag describes only the retired display-skeleton API. Actual
+        // output producers must supply their own verified original facts.
         assert!(!native_reserved_role_output_producer_ready(kind));
+        assert_eq!(native_reserved_role_output_frame_skeleton_for_role(role, "display only").err().as_deref(),
+            Some("root_trigger_skeleton_kind_invalid"));
     }
     // The display-only skeleton can no longer stand in for the wired kind.
     assert_eq!(native_input_parser_output_frame_skeleton("ip").err().as_deref(),

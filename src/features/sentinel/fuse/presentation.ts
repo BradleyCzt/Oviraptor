@@ -1,4 +1,4 @@
-import type { SentinelFuseEntry, SentinelTarget } from "../../../types";
+import type { SentinelFuseEntry, SentinelTarget } from "../types";
 
 // Fuse copy and classification belong to the stop/disposition feature. These
 // helpers only read saved evidence; they never decide whether a scan can resume.

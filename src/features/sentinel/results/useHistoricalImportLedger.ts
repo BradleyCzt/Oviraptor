@@ -1,5 +1,5 @@
 import { onBeforeUnmount, ref, watch, type Ref } from "vue";
-import type { HistoricalImportPreview, HistoricalImportRun } from "../../../types";
+import type { HistoricalImportPreview, HistoricalImportRun } from "../types";
 import { sentinelApi } from "../api";
 import { validateHistoricalPreviews } from "./historicalPreviewContract";
 

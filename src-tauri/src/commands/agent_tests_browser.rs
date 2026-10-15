@@ -1,226 +1,280 @@
-    /// Case 15 (整改后语义): 暂停发生在 attempt 2，续跑发生在 attempt 3 并显式继承
-    /// attempt 2，重新执行发生在 attempt 4 且必须从零预算开始。
-    ///
-    /// Every attempt is opened by the real Web startup (creator/HMAC, frozen
-    /// plan, an original Single Root with its own financial control): attempt 1
-    /// by Confirm, attempts 2/3 by "继续扫描" (Resume), attempt 4 by "重新执行"
-    /// (Retry). Attempt 1 is the real parent spend (one fully recorded target
-    /// request). The user pauses through the production pause request between
-    /// rounds, the executor stops at its round boundary and the production
-    /// finalizer publishes the pause.
-    #[test]
-    fn e2e_pause_resume_and_reexecute_keep_the_budget() {
-        let mut harness = fresh_single_production_harness("e2e-pause", mock_site);
-        freeze_fresh_single_production_harness(&mut harness);
-        let AgentHarness { root, db_path, mut context, site_seen, .. } = harness;
-        let target_url = context.target_url.clone();
-        let replay = |path: &str, family: &str| Some(model_round(
-            &[("replay_http", serde_json::json!({"identity":"anonymous","method":"GET","url":format!("{target_url}{path}"),"family":family}))],
-            500,
-        ));
-        // `None` is a text-only round during which the user presses pause, so
-        // no target request is in flight when the executor observes it. The
-        // returned guard keeps that attempt's model endpoint alive.
-        let model = |rounds: Vec<Option<String>>, context: &mut AgentRunContext| {
-            let pause_db = db_path.clone();
-            let served = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
-            let (port, seen, stop) = spawn_endpoint(std::sync::Arc::new(move |request| {
-                if !request.contains("POST /v1/chat/completions") {
-                    return (404, "text/plain", "unexpected path".to_string());
-                }
-                let index = served.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-                let body = match rounds.get(index).cloned() {
-                    Some(Some(body)) => body,
-                    Some(None) => {
-                        request_sentinel_pause(&pause_db, "agent-scan").unwrap();
-                        model_round(&[], 10)
-                    }
-                    None => model_round(&[], 10),
-                };
-                (200, "application/json", body)
-            }));
-            context.environment.api_base = format!("http://127.0.0.1:{port}/v1");
-            (stop, seen)
-        };
-        let pause = |context: &AgentRunContext, outcome: &AgentTargetOutcome| {
-            assert!(matches!(outcome, AgentTargetOutcome::Cancelled), "{:?}", outcome.detail());
-            assert_eq!(record_runtime_terminal_facts_checked(&context.db_path, &context.scan_id, &context.route, outcome), Ok(None));
-            assert!(finish_sentinel_pause(&context.db_path, &context.scan_id, context.attempt_number).unwrap());
-        };
-        // Production opens each attempt through Web startup, then freezes its
-        // plan and opens that attempt's own original Single Root.
-        let enter = |context: &mut AgentRunContext, attempt: i64, mode: WebStartMode| {
-            let mut db = db::open(&db_path).unwrap();
-            let work = web_mode_test_start(&root, &mut db, "agent-scan", mode).unwrap();
-            context.attempt_number = attempt;
-            context.resume = matches!(mode, WebStartMode::Resume);
-            context.target_dir = work.join("url-pipeline/target-00001");
-            context.log_path = work.join("runner.log");
-            fs::create_dir_all(&context.target_dir).unwrap();
-            fs::write(context.target_dir.join(".oviraptor-scan-id"), "agent-scan").unwrap();
-            fs::write(context.target_dir.join("frontend-evidence.json"), context.evidence.to_string()).unwrap();
-            context.execution_plan = frozen_plan_for(&db_path, context, attempt);
-            persist_frozen_web_execution_plan(&db_path, "agent-scan", attempt, &context.target_url, &context.execution_plan).unwrap();
-            context.run = Some(runtime_open_run(&db_path, "agent-scan", &context.route).unwrap());
-            bind_agent_evidence_location(context).unwrap();
-        };
+// Runtime artifacts are compared by path/type/content hash, never printed as
+// raw task data or private HMAC key bytes when an assertion fails.
+fn paid_pause_work_files(root: &Path) -> Vec<(PathBuf, String)> {
+    fn collect(root: &Path, path: &Path, files: &mut Vec<(PathBuf, String)>) {
+        use sha2::{Digest, Sha256};
+        let metadata = fs::symlink_metadata(path).unwrap();
+        assert!(!metadata.file_type().is_symlink());
+        let relative = path.strip_prefix(root).unwrap().to_path_buf();
+        if metadata.is_dir() {
+            files.push((relative, "directory".into()));
+            for entry in fs::read_dir(path).unwrap() {
+                collect(root, &entry.unwrap().path(), files);
+            }
+        } else {
+            assert!(metadata.is_file());
+            files.push((
+                relative,
+                format!(
+                    "file:{}:{:x}",
+                    metadata.len(),
+                    Sha256::digest(fs::read(path).unwrap())
+                ),
+            ));
+        }
+    }
+    let mut files = Vec::new();
+    collect(root, root, &mut files);
+    files.sort();
+    files
+}
 
-        // Attempt 1 spends one anonymous authorization request, then pauses.
-        let _model1 = model(vec![replay("/api/orders", "authorization"), None], &mut context);
-        let outcome = NativeAgentBackend.execute(&context);
-        pause(&context, &outcome);
-        let parent = NativeAgentState::read(&db_path, "agent-scan", &target_url).unwrap();
-        assert_eq!((parent.attempt_number, parent.parent_attempt_number, parent.target_requests), (1, None, 1));
-        assert_eq!(site_seen.lock().unwrap().len(), 1);
+fn assert_paid_pause_startup_refused(root: &Path, db_path: &Path, scan: &str, mode: WebStartMode) {
+    let mut db = db::open(db_path).unwrap();
+    let before = web_mode_test_rows(&db);
+    let changes = db.total_changes();
+    let work = root.join(SCAN_WORK_DIRECTORY).join(scan);
+    let files = paid_pause_work_files(&work);
+    assert_eq!(
+        web_mode_test_start(root, &mut db, scan, mode).unwrap_err(),
+        "web_start_paid_history_requires_explicit_financial_contract"
+    );
+    web_mode_assert_rows(&db, &before);
+    assert_eq!(
+        db.total_changes(),
+        changes,
+        "paid startup refusal must precede every database write"
+    );
+    assert_eq!(
+        paid_pause_work_files(&work),
+        files,
+        "paid startup refusal must preserve every runtime artifact"
+    );
+    assert!(
+        !work.join("attempt-0002").exists(),
+        "refusal must not allocate another attempt"
+    );
+}
 
-        // Attempt 2 resumes attempt 1, commits one local (text-only) round and
-        // is paused by the user during its next round: the inherited ledger
-        // survives, no target request is sent and nothing settles.
-        enter(&mut context, 2, WebStartMode::Resume);
-        let _model2 = model(vec![Some(model_round(&[], 10)), None], &mut context);
-        let outcome = NativeAgentBackend.execute(&context);
-        let paused = NativeAgentState::read(&db_path, "agent-scan", &target_url).unwrap();
-        assert_eq!(paused.attempt_number, 2);
-        assert_eq!(paused.parent_attempt_number, Some(1));
-        assert_eq!(paused.target_requests, parent.target_requests, "a pause must not lose the spend");
-        assert!(
-            paused.terminal_reason.is_empty(),
-            "a pause must stay resumable: {}",
-            paused.terminal_reason
-        );
-        assert_eq!(site_seen.lock().unwrap().len(), 1, "a paused attempt sends nothing");
-        // The runtime row is written by the one terminal-outcome path; a pause
-        // must leave it open, not settled (§11).
-        pause(&context, &outcome);
-        let paused_run: String = db::open(&db_path).unwrap().query_row(
-            "SELECT status FROM agent_runs WHERE id=?1", [&context.run.as_ref().unwrap().run_id], |r| r.get(0)).unwrap();
-        assert_eq!(paused_run, "paused", "the runtime row must not settle on a pause");
-        // The resumed attempt owns a fresh original Root: its provider calls are
-        // numbered from round 1 for that Root, not from the inherited turn count.
-        let root_rounds = |run: &str| -> Vec<i64> {
-            let db = db::open(&db_path).unwrap();
-            let mut q = db.prepare("SELECT round FROM agent_root_model_journal WHERE root_run_id=?1 AND phase='dispatch' ORDER BY round").unwrap();
-            q.query_map([run], |r| r.get(0)).unwrap().collect::<Result<Vec<_>, _>>().unwrap()
+/// A real paid Single attempt pauses with its original financial history.
+/// Ordinary Resume/Retry cannot create another allowance: a reviewed financial
+/// continuation contract is required and its execution is not implemented yet.
+#[test]
+fn e2e_paid_pause_refuses_resume_and_retry_without_financial_contract() {
+    let mut harness = fresh_single_production_harness("e2e-pause", mock_site);
+    freeze_fresh_single_production_harness(&mut harness);
+    let AgentHarness {
+        root,
+        db_path,
+        mut context,
+        site_seen,
+        ..
+    } = harness;
+    let target_url = context.target_url.clone();
+    let pause_db = db_path.clone();
+    let served = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let replay = model_round(
+        &[(
+            "replay_http",
+            serde_json::json!({"identity":"anonymous","method":"GET","url":format!("{target_url}/api/orders"),"family":"authorization"}),
+        )],
+        500,
+    );
+    let (port, model_seen, _model_stop) = spawn_endpoint(std::sync::Arc::new(move |request| {
+        if !request.contains("POST /v1/chat/completions") {
+            return (404, "text/plain", "unexpected path".to_string());
+        }
+        let body = if served.fetch_add(1, std::sync::atomic::Ordering::SeqCst) == 0 {
+            replay.clone()
+        } else {
+            // The user pauses during a text-only round; no target request is
+            // in flight when the executor observes the pause boundary.
+            request_sentinel_pause(&pause_db, "agent-scan").unwrap();
+            model_round(&[], 10)
         };
-        assert_eq!(paused.turns, parent.turns + 1);
-        assert_eq!(root_rounds(&context.run.as_ref().unwrap().run_id), vec![1, 2]);
-
-        // Continuing creates attempt 3, which inherits attempt 2 explicitly.
-        enter(&mut context, 3, WebStartMode::Resume);
-        let _model3 = model(vec![replay("/api/cart", "business_flow")], &mut context);
-        let outcome = NativeAgentBackend.execute(&context);
-        assert!(
-            matches!(outcome, AgentTargetOutcome::BoundedCompleted(_)),
-            "{:?}",
-            outcome.detail()
-        );
-        let resumed = NativeAgentState::read(&db_path, "agent-scan", &target_url).unwrap();
-        assert_eq!(resumed.parent_attempt_number, Some(2));
+        (200, "application/json", body)
+    }));
+    context.environment.api_base = format!("http://127.0.0.1:{port}/v1");
+    let outcome = NativeAgentBackend.execute(&context);
+    assert!(
+        matches!(outcome, AgentTargetOutcome::Cancelled),
+        "{:?}",
+        outcome.detail()
+    );
+    assert_eq!(
+        record_runtime_terminal_facts_checked(&db_path, "agent-scan", &context.route, &outcome),
+        Ok(None)
+    );
+    assert!(finish_sentinel_pause(&db_path, "agent-scan", 1).unwrap());
+    let parent = NativeAgentState::read(&db_path, "agent-scan", &target_url).unwrap();
+    assert_eq!(
+        (
+            parent.attempt_number,
+            parent.parent_attempt_number,
+            parent.target_requests
+        ),
+        (1, None, 1)
+    );
+    assert!(
+        parent.terminal_reason.is_empty(),
+        "a pause does not settle the original runtime"
+    );
+    assert_eq!(site_seen.lock().unwrap().len(), 1);
+    assert_eq!(model_seen.lock().unwrap().len(), 2);
+    let db = db::open(&db_path).unwrap();
+    let run = &context.run.as_ref().unwrap().run_id;
+    let paused_run: String = db
+        .query_row("SELECT status FROM agent_runs WHERE id=?1", [run], |row| {
+            row.get(0)
+        })
+        .unwrap();
+    assert_eq!(
+        paused_run, "paused",
+        "the runtime row must not settle on a pause"
+    );
+    let paid_models: i64 = db.query_row("SELECT COALESCE(SUM(amount),0) FROM agent_budget_entries WHERE root_run_id=?1 AND dimension='model_requests' AND kind='consume'", [run], |row| row.get(0)).unwrap();
+    assert_eq!(
+        paid_models, 2,
+        "both actual provider rounds retain their recorded cost"
+    );
+    let rounds = {
+        let mut q = db.prepare("SELECT round FROM agent_root_model_journal WHERE root_run_id=?1 AND phase='dispatch' ORDER BY round").unwrap();
+        q.query_map([run], |row| row.get::<_, i64>(0))
+            .unwrap()
+            .collect::<Result<Vec<_>, _>>()
+            .unwrap()
+    };
+    assert_eq!(rounds, vec![1, 2]);
+    drop(db);
+    for mode in [WebStartMode::Resume, WebStartMode::Retry] {
+        assert_paid_pause_startup_refused(&root, &db_path, "agent-scan", mode);
+        let unchanged = NativeAgentState::read(&db_path, "agent-scan", &target_url).unwrap();
         assert_eq!(
-            resumed.target_requests,
-            paused.target_requests + 1,
-            "the resumed run must build on the spent budget"
+            (
+                unchanged.attempt_number,
+                unchanged.parent_attempt_number,
+                unchanged.target_requests
+            ),
+            (1, None, 1)
         );
         assert_eq!(
             site_seen.lock().unwrap().len(),
+            1,
+            "refused startup sends no target request"
+        );
+        assert_eq!(
+            model_seen.lock().unwrap().len(),
             2,
-            "only the new request may reach the target"
+            "refused startup sends no model request"
         );
-        assert!(resumed.covered_families.contains(&"business_flow".to_string()));
-        assert!(
-            !resumed.covered_families.contains(&"authorization".to_string()),
-            "the inherited anonymous request still cannot cover authorization: {:?}",
-            resumed.covered_families
-        );
-        assert!(
-            resumed
-                .coverage_evidence
-                .iter()
-                .any(|entry| entry.family == "authorization" && entry.result == "partial"),
-            "the inherited partial work must survive into the child attempt"
-        );
-        let resumed_rounds = root_rounds(&context.run.as_ref().unwrap().run_id);
-        assert!(!resumed_rounds.is_empty());
-        assert_eq!(resumed_rounds, (1..=resumed_rounds.len() as i64).collect::<Vec<_>>());
-        let mut tally = AgentPipelineTally::default();
-        assert!(record_agent_target_outcome(&db_path, "agent-scan", &context.route, outcome, &mut tally));
-        tally.finalize(&db_path, "agent-scan", 1);
-
-        // 重新执行: a new attempt starts from a clean ledger on purpose.
-        enter(&mut context, 4, WebStartMode::Retry);
-        let _model4 = model(vec![replay("/api/cart", "business_flow")], &mut context);
-        NativeAgentBackend.execute(&context);
-        let retried = NativeAgentState::read(&db_path, "agent-scan", &target_url).unwrap();
-        assert_eq!(retried.attempt_number, 4);
-        assert_eq!(retried.parent_attempt_number, None, "fresh inherits nothing");
-        assert_eq!(retried.target_requests, 1, "a new attempt gets a fresh budget");
-        assert!(retried.pending_queue.contains(&"family:authorization".to_string()));
     }
+}
 
-    /// Guard still bites after the per-Root round fix: a resumed attempt's fresh
-    /// original Single Root admits round 1 only. The parent's inherited turn
-    /// number (the old executor numbering) or any skipped round is refused before
-    /// a reservation, journal row, invocation owner or provider request exists.
-    #[test]
-    fn resumed_single_root_refuses_inherited_or_skipped_model_round() {
-        use crate::agent_runtime::multi_agent::budget::root::model::RootModelCall;
-        let mut harness = fresh_single_production_harness("e2e-root-round", mock_site);
-        freeze_fresh_single_production_harness(&mut harness);
-        let AgentHarness { root, db_path, mut context, site_seen, .. } = harness;
-        let target_url = context.target_url.clone();
-        let pause_db = db_path.clone();
-        let served = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
-        let round_one = model_round(&[("replay_http", serde_json::json!({"identity":"anonymous","method":"GET","url":format!("{target_url}/api/orders"),"family":"authorization"}))], 500);
-        let (port, model_seen, _stop) = spawn_endpoint(std::sync::Arc::new(move |request| {
-            if !request.contains("POST /v1/chat/completions") {
-                return (404, "text/plain", "unexpected path".to_string());
-            }
-            if served.fetch_add(1, std::sync::atomic::Ordering::SeqCst) == 0 {
-                return (200, "application/json", round_one.clone());
-            }
-            request_sentinel_pause(&pause_db, "agent-scan").unwrap();
-            (200, "application/json", model_round(&[], 10))
-        }));
-        context.environment.api_base = format!("http://127.0.0.1:{port}/v1");
-        let outcome = NativeAgentBackend.execute(&context);
-        assert!(matches!(outcome, AgentTargetOutcome::Cancelled), "{:?}", outcome.detail());
-        assert_eq!(record_runtime_terminal_facts_checked(&db_path, "agent-scan", &context.route, &outcome), Ok(None));
-        assert!(finish_sentinel_pause(&db_path, "agent-scan", 1).unwrap());
-        let parent = NativeAgentState::read(&db_path, "agent-scan", &target_url).unwrap();
-        assert_eq!((parent.attempt_number, parent.turns, parent.target_requests), (1, 1, 1));
-
-        // Resume opens attempt 2 and its own original Single Root.
-        let mut db = db::open(&db_path).unwrap();
-        let work = web_mode_test_start(&root, &mut db, "agent-scan", WebStartMode::Resume).unwrap();
-        context.attempt_number = 2;
-        context.resume = true;
-        context.target_dir = work.join("url-pipeline/target-00001");
-        context.log_path = work.join("runner.log");
-        fs::create_dir_all(&context.target_dir).unwrap();
-        fs::write(context.target_dir.join(".oviraptor-scan-id"), "agent-scan").unwrap();
-        fs::write(context.target_dir.join("frontend-evidence.json"), context.evidence.to_string()).unwrap();
-        context.execution_plan = frozen_plan_for(&db_path, &context, 2);
-        persist_frozen_web_execution_plan(&db_path, "agent-scan", 2, &target_url, &context.execution_plan).unwrap();
-        context.run = Some(runtime_open_run(&db_path, "agent-scan", &context.route).unwrap());
-        bind_agent_evidence_location(&context).unwrap();
-        native_prepare_single_budget(&context).unwrap();
-        let run = context.run.as_ref().unwrap().run_id.clone();
-        let before = single_finally_physical(&db);
-        let models_before = model_seen.lock().unwrap().len();
-        for (round, expected) in [
-            (parent.turns + 1, "budget_history_requires_reconciliation"),
-            (parent.turns + 2, "budget_history_requires_reconciliation"),
-            (0, "budget_root_call_invalid"),
-        ] {
-            let tx = db.unchecked_transaction().unwrap();
-            let error = RootModelCall::claim_single_transport(&tx, &run, round, &"a".repeat(64), 1_000).err();
-            drop(tx);
-            assert_eq!(error.as_deref(), Some(expected), "round {round} must be refused");
+/// Paid startup refusal must not be bypassed to manufacture a resumed Root.
+/// An independent task's real fresh Single Root starts at round 1; the paid
+/// parent's turn number and skipped rounds cannot authorize its first call.
+#[test]
+fn fresh_single_root_refuses_inherited_or_skipped_model_round_after_paid_resume_refusal() {
+    use crate::agent_runtime::multi_agent::budget::root::model::RootModelCall;
+    let mut harness = fresh_single_production_harness("e2e-root-round", mock_site);
+    freeze_fresh_single_production_harness(&mut harness);
+    let AgentHarness {
+        root,
+        db_path,
+        mut context,
+        site_seen,
+        ..
+    } = harness;
+    let target_url = context.target_url.clone();
+    let pause_db = db_path.clone();
+    let served = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let round_one = model_round(
+        &[(
+            "replay_http",
+            serde_json::json!({"identity":"anonymous","method":"GET","url":format!("{target_url}/api/orders"),"family":"authorization"}),
+        )],
+        500,
+    );
+    let (port, model_seen, _stop) = spawn_endpoint(std::sync::Arc::new(move |request| {
+        if !request.contains("POST /v1/chat/completions") {
+            return (404, "text/plain", "unexpected path".to_string());
         }
-        assert_eq!(single_finally_physical(&db), before, "a refused round leaves no reservation or journal row");
-        assert_eq!(model_seen.lock().unwrap().len(), models_before, "a refused round sends no provider request");
-        assert_eq!(site_seen.lock().unwrap().len(), 1);
+        if served.fetch_add(1, std::sync::atomic::Ordering::SeqCst) == 0 {
+            return (200, "application/json", round_one.clone());
+        }
+        request_sentinel_pause(&pause_db, "agent-scan").unwrap();
+        (200, "application/json", model_round(&[], 10))
+    }));
+    context.environment.api_base = format!("http://127.0.0.1:{port}/v1");
+    let outcome = NativeAgentBackend.execute(&context);
+    assert!(
+        matches!(outcome, AgentTargetOutcome::Cancelled),
+        "{:?}",
+        outcome.detail()
+    );
+    assert_eq!(
+        record_runtime_terminal_facts_checked(&db_path, "agent-scan", &context.route, &outcome),
+        Ok(None)
+    );
+    assert!(finish_sentinel_pause(&db_path, "agent-scan", 1).unwrap());
+    let parent = NativeAgentState::read(&db_path, "agent-scan", &target_url).unwrap();
+    assert_eq!(
+        (parent.attempt_number, parent.turns, parent.target_requests),
+        (1, 1, 1)
+    );
+    assert_paid_pause_startup_refused(&root, &db_path, "agent-scan", WebStartMode::Resume);
+
+    // This is a separately created task with no inherited charge or resume
+    // permission. Do not clear the paid parent's ledger or invoke a lower-level
+    // issuer to make the blocked Resume above appear to have succeeded.
+    let mut fresh = fresh_single_production_harness("e2e-independent-root-round", mock_site);
+    freeze_fresh_single_production_harness(&mut fresh);
+    native_prepare_single_budget(&fresh.context).unwrap();
+    let db = db::open(&fresh.db_path).unwrap();
+    let run = fresh.context.run.as_ref().unwrap().run_id.clone();
+    let before = web_mode_test_rows(&db);
+    let changes = db.total_changes();
+    let work = fresh
+        .root
+        .join(SCAN_WORK_DIRECTORY)
+        .join(&fresh.context.scan_id);
+    let files = paid_pause_work_files(&work);
+    let models_before = fresh.model_seen.lock().unwrap().len();
+    for (round, expected) in [
+        (parent.turns + 1, "budget_history_requires_reconciliation"),
+        (parent.turns + 2, "budget_history_requires_reconciliation"),
+        (0, "budget_root_call_invalid"),
+    ] {
+        let tx = db.unchecked_transaction().unwrap();
+        let error =
+            RootModelCall::claim_single_transport(&tx, &run, round, &"a".repeat(64), 1_000).err();
+        drop(tx);
+        assert_eq!(
+            error.as_deref(),
+            Some(expected),
+            "round {round} must be refused"
+        );
     }
+    web_mode_assert_rows(&db, &before);
+    assert_eq!(
+        db.total_changes(),
+        changes,
+        "a refused round must precede every write"
+    );
+    assert_eq!(paid_pause_work_files(&work), files);
+    assert_eq!(
+        fresh.model_seen.lock().unwrap().len(),
+        models_before,
+        "a refused round sends no provider request"
+    );
+    assert_eq!(
+        fresh.site_seen.lock().unwrap().len(),
+        0,
+        "an independent fresh task sends no target request"
+    );
+    assert_eq!(site_seen.lock().unwrap().len(), 1);
+    assert_eq!(model_seen.lock().unwrap().len(), 2);
+}
 
     /// A local deployment must keep working through the LLM hook that makes
     /// cancellation real: the hook forwards to the configured server and leaves its

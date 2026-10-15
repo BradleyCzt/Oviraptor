@@ -1,10 +1,5 @@
 import { reactive, type Ref } from "vue";
-import type {
-  SentinelFinding,
-  SentinelFuseEntry,
-  SentinelTarget,
-  SentinelValidation,
-} from "../../../types";
+import type { SentinelFinding, SentinelFuseEntry, SentinelTarget, SentinelValidation } from "../types";
 
 export type FuseDetailTab = "summary" | "fingerprint" | "assets" | "endpoints" | "proof";
 type FuseDetailState = {

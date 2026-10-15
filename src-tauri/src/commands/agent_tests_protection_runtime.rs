@@ -8,6 +8,7 @@ fn protection_runtime_unknown_sdk_preserves_original_debt_without_publication_or
     );
     let db = db::open(&f.h.db_path).unwrap();
     let calls = protection_paid_root_calls(&f);
+    let phases = followup_original_root_phase_counts(&db, &f.actor.root_run_id, &f.h.model_seen.lock().unwrap());
     let requests = crate::agent_runtime::multi_agent::budget::balance(
         &db,
         &f.actor.root_run_id,
@@ -19,7 +20,8 @@ fn protection_runtime_unknown_sdk_preserves_original_debt_without_publication_or
     let error = multi_agent_finish_execution(&f.h.context, f.session.as_mut().unwrap(), &f.outcome)
         .unwrap_err();
     assert_eq!(error, "budget_indeterminate_requires_reconciliation");
-    assert_eq!(protection_paid_root_calls(&f), calls + 1);
+    let financial = protection_paid_financial_assessment_count(&f, &db, phases);
+    assert_eq!(protection_paid_root_calls(&f) - financial, calls + 1);
     let now = crate::agent_runtime::multi_agent::budget::balance(
         &db,
         &f.actor.root_run_id,
@@ -27,7 +29,7 @@ fn protection_runtime_unknown_sdk_preserves_original_debt_without_publication_or
         "model_requests",
     )
     .unwrap();
-    assert_eq!((now.consumed, now.indeterminate), (requests + 1, 0));
+    assert_eq!((now.consumed - financial as i64, now.indeterminate), (requests + 1, 0));
     assert!(
         crate::agent_runtime::multi_agent::budget::balance(
             &db,
@@ -50,7 +52,7 @@ fn protection_runtime_unknown_sdk_preserves_original_debt_without_publication_or
             native_coordinator_protection_feedback(&f.h.context, &f.actor, &f.receipt).is_err()
         );
         assert_eq!(super::tests::application_table_snapshot(&db), paid);
-        assert_eq!(protection_paid_root_calls(&f), calls + 1);
+        assert_eq!(protection_paid_root_calls(&f) - financial, calls + 1);
     }
     assert_eq!(f.h.site_seen.lock().unwrap().len(), 1);
 }
@@ -92,9 +94,11 @@ fn protection_runtime_parallel_feedback_during_first_actual_sdk_is_refused_befor
     *scope.lock().unwrap() = Some((f.h.context.clone(), f.actor.clone(), f.receipt.clone()));
     let db = db::open(&f.h.db_path).unwrap();
     let calls = protection_paid_root_calls(&f);
+    let phases = followup_original_root_phase_counts(&db, &f.actor.root_run_id, &f.h.model_seen.lock().unwrap());
     multi_agent_finish_execution(&f.h.context, f.session.as_mut().unwrap(), &f.outcome).unwrap();
     assert!(observed.lock().unwrap().is_some());
-    assert_eq!(protection_paid_root_calls(&f), calls + 1);
+    let financial = protection_paid_financial_assessment_count(&f, &db, phases);
+    assert_eq!(protection_paid_root_calls(&f) - financial, calls + 1);
     assert_eq!(
         protection_paid_phases(&db, &f.actor.root_run_id, "request"),
         1
@@ -107,7 +111,7 @@ fn protection_runtime_parallel_feedback_during_first_actual_sdk_is_refused_befor
     let before = super::tests::application_table_snapshot(&db);
     multi_agent_finish_execution(&f.h.context, f.session.as_mut().unwrap(), &f.outcome).unwrap();
     assert_eq!(super::tests::application_table_snapshot(&db), before);
-    assert_eq!(protection_paid_root_calls(&f), calls + 1);
+    assert_eq!(protection_paid_root_calls(&f) - financial, calls + 1);
 }
 
 #[test]
@@ -115,6 +119,7 @@ fn protection_runtime_c_expires_after_actual_paid_sdk_preserving_bill_without_pu
     let mut f = ProtectionOriginalFixture::new("protection-runtime-paid-expiry");
     let db = db::open(&f.h.db_path).unwrap();
     let calls = protection_paid_root_calls(&f);
+    let phases = followup_original_root_phase_counts(&db, &f.actor.root_run_id, &f.h.model_seen.lock().unwrap());
     let requests = crate::agent_runtime::multi_agent::budget::balance(
         &db,
         &f.actor.root_run_id,
@@ -123,21 +128,29 @@ fn protection_runtime_c_expires_after_actual_paid_sdk_preserving_bill_without_pu
     )
     .unwrap()
     .consumed;
-    let path = f.h.db_path.clone();
-    let actor = f.actor.clone();
-    ROOT_TICK_AFTER_PAID_TEST_BOUNDARY.with(|slot| {
-        assert!(slot.borrow().is_none());
-        *slot.borrow_mut() = Some(Box::new(move || {
-            let db = db::open(&path).unwrap();
-            assert_eq!(db.execute("UPDATE agent_coordinator_leases SET lease_expires_at='2000-01-01 00:00:00' WHERE root_run_id=?1 AND lease_epoch=?2 AND fencing_token=?3",params![actor.root_run_id,actor.lease_epoch,actor.fencing_token]).unwrap(),1);
-        }));
-    });
+    let expired = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    // Preserve the preceding financial advisory. This fault belongs to the
+    // actual paid protection assessment, after its original author is closed.
+    protection_arm_original_publication_fault(
+        f.h.db_path.clone(), f.actor.root_run_id.clone(),
+        format!("UPDATE agent_coordinator_leases SET lease_expires_at='2000-01-01 00:00:00' WHERE root_run_id='{}' AND lease_epoch={} AND fencing_token='{}'",
+            f.actor.root_run_id.replace('\'', "''"), f.actor.lease_epoch, f.actor.fencing_token.replace('\'', "''")),
+        expired.clone(),
+    );
     assert!(
         multi_agent_finish_execution(&f.h.context, f.session.as_mut().unwrap(), &f.outcome)
             .is_err()
     );
     ROOT_TICK_AFTER_PAID_TEST_BOUNDARY.with(|slot| assert!(slot.borrow().is_none()));
-    assert_eq!(protection_paid_root_calls(&f), calls + 1);
+    assert!(expired.load(std::sync::atomic::Ordering::SeqCst));
+    let expired_rows: i64 = db.query_row(
+        "SELECT count(*) FROM agent_coordinator_leases WHERE root_run_id=?1 AND lease_epoch=?2 AND fencing_token=?3 AND lease_expires_at='2000-01-01 00:00:00'",
+        params![f.actor.root_run_id, f.actor.lease_epoch, f.actor.fencing_token], |row| row.get(0),
+    ).unwrap();
+    assert_eq!(expired_rows, 1);
+    assert!(crate::agent_runtime::multi_agent::lease::validate_coordinator_lease(&db, &f.actor).is_err());
+    let financial = protection_paid_financial_assessment_count(&f, &db, phases);
+    assert_eq!(protection_paid_root_calls(&f) - financial, calls + 1);
     assert_eq!(
         crate::agent_runtime::multi_agent::budget::balance(
             &db,
@@ -146,7 +159,7 @@ fn protection_runtime_c_expires_after_actual_paid_sdk_preserving_bill_without_pu
             "model_requests"
         )
         .unwrap()
-        .consumed,
+        .consumed - financial as i64,
         requests + 1
     );
     assert_eq!(
@@ -160,7 +173,7 @@ fn protection_runtime_c_expires_after_actual_paid_sdk_preserving_bill_without_pu
             native_coordinator_protection_feedback(&f.h.context, &f.actor, &f.receipt).is_err()
         );
         assert_eq!(super::tests::application_table_snapshot(&db), before);
-        assert_eq!(protection_paid_root_calls(&f), calls + 1);
+        assert_eq!(protection_paid_root_calls(&f) - financial, calls + 1);
     }
     assert_eq!(f.h.site_seen.lock().unwrap().len(), 1);
 }

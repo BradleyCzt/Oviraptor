@@ -180,7 +180,7 @@ fn run_homogeneous_root_loop(
                         scope.spawn(move || {
                             let lane=db::open(&scoped_context.db_path).and_then(|db|db.query_row("SELECT lane FROM agent_assignments WHERE id=?1",[&id],|r|r.get::<_,String>(0)).map_err(|e|e.to_string()));
                             let executed=match lane {
-                                Ok(lane) if lane=="target_touching" => crate::commands::homogeneous_execution::run_target(&scoped_context,actor,&id),
+                                Ok(lane) if lane=="target_touching" => crate::scanning::homogeneous_execution::run_target(&scoped_context,actor,&id),
                                 Ok(_) => native_homogeneous_model_worker(&transport,actor,&id,&worker_control,configuration.as_ref()),
                                 Err(e)=>Err(e),
                             };

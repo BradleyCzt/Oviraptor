@@ -1,4 +1,4 @@
-import type { OrderedAssessmentPlan, OrderedAssessmentExecution, AgentTimelineItem, NativeScanStatus } from "../../../types";
+import type { OrderedAssessmentPlan, OrderedAssessmentExecution, AgentTimelineItem, NativeScanStatus } from "../types";
 const marker = "ordered_readonly_assessment_v2";
 const blocked = "proposal_ordered_execution_not_connected";
 const liveMarker = "ordered_readonly_assessment_v3";

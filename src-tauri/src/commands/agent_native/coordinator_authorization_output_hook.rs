@@ -47,7 +47,7 @@ pub(crate) fn native_coordinator_authorization_output_publication_replay_on(
     }
     // Genuine receipt absence is not a producer error. Bad signed sources,
     // unknown fees and scope errors must propagate, never become absence.
-    if crate::commands::authorization_output_receipt::read_original_on(
+    if crate::scanning::authorization_output_receipt::read_original_on(
         db, actor, child,
     )?
     .is_none()

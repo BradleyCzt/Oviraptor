@@ -1,7 +1,7 @@
 import { onBeforeUnmount, onMounted, ref } from "vue";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
-import { api } from "../../../api";
-import type { BrowserAuthSession } from "../../../types";
+import { sentinelApi } from "../api";
+import type { BrowserAuthSession } from "../types";
 
 type AuthForm = {
   projectId: number;
@@ -49,7 +49,7 @@ export function useBrowserAuthSessions(options: {
       if (disposed || isDisposed() || (authBusy.value && authBusy.value !== session.id)) return;
       authBusy.value = session.id;
       try {
-        const updated = await api.finishBrowserAuthSession(session.id);
+        const updated = await sentinelApi.finishBrowserAuthSession(session.id);
         await loadAuthSessions();
         if (updated.status === "valid") stopAuthCapturePolling(session.id);
       } catch {
@@ -68,7 +68,7 @@ export function useBrowserAuthSessions(options: {
     const projectId = form.projectId;
     const scopeId = authSessionScopeId.value;
     try {
-      const sessions = await api.listBrowserAuthSessions(projectId, scopeId);
+      const sessions = await sentinelApi.listBrowserAuthSessions(projectId, scopeId);
       if (disposed || isDisposed() || projectId !== form.projectId || scopeId !== authSessionScopeId.value) return;
       authSessions.value = sessions;
       const validIds = new Set(sessions.filter((session) => session.status === "valid").map((session) => session.id));
@@ -126,7 +126,7 @@ export function useBrowserAuthSessions(options: {
     const busyId = session?.id || "new";
     authBusy.value = busyId;
     try {
-      const opened = await api.openBrowserAuthSession({
+      const opened = await sentinelApi.openBrowserAuthSession({
         id: session?.id, projectId: form.projectId, name: form.authSessionName || session?.name || "",
         entryUrl, draftScopeId: authSessionScopeId.value,
       });
@@ -144,7 +144,7 @@ export function useBrowserAuthSessions(options: {
     const current = currentScope();
     authBusy.value = session.id;
     try {
-      const updated = await api.finishBrowserAuthSession(session.id);
+      const updated = await sentinelApi.finishBrowserAuthSession(session.id);
       if (!current()) return;
       if (!form.authSessionIds.includes(updated.id)) form.authSessionIds.push(updated.id);
       form.authSessionId = form.authSessionIds[0] || updated.id;
@@ -161,7 +161,7 @@ export function useBrowserAuthSessions(options: {
     const current = currentScope();
     authBusy.value = session.id;
     try {
-      const updated = await api.validateBrowserAuthSession(session.id);
+      const updated = await sentinelApi.validateBrowserAuthSession(session.id);
       if (!current()) return;
       await loadAuthSessions();
       if (current()) notify(updated.status === "valid" ? "success" : "info", updated.status === "valid"
@@ -178,7 +178,7 @@ export function useBrowserAuthSessions(options: {
     const current = currentScope();
     authBusy.value = session.id;
     try {
-      await api.deleteBrowserAuthSession(session.id);
+      await sentinelApi.deleteBrowserAuthSession(session.id);
       if (!current()) return;
       form.authSessionIds = form.authSessionIds.filter((id) => id !== session.id);
       form.authSessionId = form.authSessionIds[0] || "";

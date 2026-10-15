@@ -50,7 +50,7 @@ pub const BOUNDARY_LEGACY: &str = "";
 
 /// The PSL snapshot this build groups with, read from the shared ownership module.
 pub fn psl_version() -> &'static str {
-    crate::commands::OWNERSHIP_PSL_VERSION
+    crate::commands::ownership::OWNERSHIP_PSL_VERSION
 }
 
 /// The stored basis of a PSL boundary: `psl:<snapshot>`.
@@ -59,7 +59,7 @@ pub fn psl_basis() -> String {
 }
 
 /// G1-1: the registrable domain under the shared public-suffix list, read-only through
-/// `crate::commands::ownership_domain_parts`. An IP, a host that is itself a public suffix
+/// `crate::commands::ownership::ownership_domain_parts`. An IP, a host that is itself a public suffix
 /// (`github.io`, `com.cn`) or a malformed name has no registrable domain and is grouped by
 /// its exact host instead, never by a guessed parent. Returns `(key, basis)`; `basis` is
 /// `psl:<snapshot>` or `exact_host`.
@@ -72,7 +72,7 @@ pub fn registrable_boundary(host: &str) -> (String, String) {
     if host.is_empty() {
         return (String::new(), BOUNDARY_LEGACY.to_string());
     }
-    match crate::commands::ownership_domain_parts(&host).and_then(|parts| parts.registrable) {
+    match crate::commands::ownership::ownership_domain_parts(&host).and_then(|parts| parts.registrable) {
         Some(registrable) => (registrable, psl_basis()),
         None => (host, BOUNDARY_EXACT_HOST.to_string()),
     }

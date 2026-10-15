@@ -21,7 +21,7 @@ fn http_journal_fixture(target: &str, baseline: i64) -> (PathBuf, AgentRunContex
 #[test]
 fn http_journal_real_fanout_survives_stale_checkpoint_without_double_charge() {
     let (port,seen,stop) = spawn_endpoint(std::sync::Arc::new(|_| (200,"text/plain","hello".into())));
-    let (_root,context,mut runtime,request) = http_journal_fixture(&format!("http://127.0.0.1:{port}/"),3);
+    let (_root,context,mut runtime,request) = real_http_transport_fixture(&format!("http://127.0.0.1:{port}/"),3);
     for _ in 0..2 { agent_http_exchange(&context,&mut runtime,&request).unwrap(); }
     let connection = db::open(&context.db_path).unwrap();
     let usage = agent_request_accounting(&connection,&context.scan_id,1,&context.target_url).unwrap();
@@ -55,17 +55,18 @@ fn http_journal_claim_without_send_stays_charged_and_never_replays() {
 
 #[test]
 fn http_journal_claim_faults_rollback_and_never_send() {
-    for trigger in [
-        "CREATE TRIGGER fail_claim BEFORE INSERT ON agent_http_request_claims BEGIN SELECT RAISE(IGNORE); END;",
-        "CREATE TRIGGER fail_claim BEFORE INSERT ON agent_http_request_claims BEGIN SELECT RAISE(ABORT,'injected'); END;",
-        "CREATE TRIGGER fail_claim AFTER INSERT ON agent_http_request_claims BEGIN DELETE FROM agent_http_request_claims WHERE ordinal=NEW.ordinal; END;",
+    for (trigger, reason) in [
+        ("CREATE TRIGGER fail_claim BEFORE INSERT ON agent_http_request_claims BEGIN SELECT RAISE(IGNORE); END;", "http_journal_claim_verification_failed"),
+        ("CREATE TRIGGER fail_claim BEFORE INSERT ON agent_http_request_claims BEGIN SELECT RAISE(ABORT,'injected'); END;", "http_journal_claim_write_failed"),
+        ("CREATE TRIGGER fail_claim AFTER INSERT ON agent_http_request_claims BEGIN DELETE FROM agent_http_request_claims WHERE ordinal=NEW.ordinal; END;", "http_journal_claim_verification_failed"),
     ] {
         let (port,seen,stop) = spawn_endpoint(std::sync::Arc::new(|_| (200,"text/plain","hello".into())));
-        let (_root,context,mut runtime,request)=http_journal_fixture(&format!("http://127.0.0.1:{port}/"),0);
+        let (_root,context,mut runtime,request)=real_http_transport_fixture(&format!("http://127.0.0.1:{port}/"),0);
         let connection=db::open(&context.db_path).unwrap();
         connection.execute_batch(trigger).unwrap();
         let error=agent_http_exchange(&context,&mut runtime,&request).unwrap_err();
         assert_eq!(error["code"],"evidence_write_failed");
+        assert_eq!(error["error"],reason,"must reach the injected claim failure");
         assert_eq!(runtime.target_requests,0);
         for table in ["agent_http_request_claims","agent_http_budget_origins"] {
             let n:i64=connection.query_row(&format!("SELECT COUNT(*) FROM {table}"),[],|r|r.get(0)).unwrap();
@@ -83,7 +84,7 @@ fn http_journal_receipt_fault_keeps_unknown_charge_and_does_not_resend() {
         "CREATE TRIGGER fail_receipt BEFORE UPDATE ON agent_http_request_claims BEGIN SELECT RAISE(ABORT,'injected'); END;",
     ] {
         let (port,seen,stop)=spawn_endpoint(std::sync::Arc::new(|_| (200,"text/plain","hello".into())));
-        let (_root,context,mut runtime,request)=http_journal_fixture(&format!("http://127.0.0.1:{port}/"),0);
+        let (_root,context,mut runtime,request)=real_http_transport_fixture(&format!("http://127.0.0.1:{port}/"),0);
         let connection=db::open(&context.db_path).unwrap();
         connection.execute_batch(trigger).unwrap();
         let result=agent_http_exchange(&context,&mut runtime,&request).unwrap_err();
@@ -390,7 +391,7 @@ fn http_journal_execution_stop_survives_target_run_and_checkpoint_projection() {
 #[test]
 fn http_journal_stale_checkpoint_stop_is_sticky_across_urls_and_invocations() {
     let (port,seen,stop)=spawn_endpoint(std::sync::Arc::new(|_|(200,"text/plain","hello".into())));
-    let (_root,context,mut runtime,mut request)=http_journal_fixture(&format!("http://127.0.0.1:{port}/"),0);
+    let (_root,context,mut runtime,mut request)=real_http_transport_fixture(&format!("http://127.0.0.1:{port}/"),0);
     claim_agent_http_request(&context,&runtime,&request,&request.url).unwrap().unwrap();
     let error=agent_http_exchange(&context,&mut runtime,&request).unwrap_err();
     assert_eq!(error["code"],terminal_code::REQUEST_RECONCILIATION_REQUIRED);
@@ -413,17 +414,33 @@ fn http_journal_transport_and_partial_body_failures_preserve_charge_without_retr
     for partial_body in [false,true] {
         let listener=std::net::TcpListener::bind("127.0.0.1:0").unwrap();
         let port=listener.local_addr().unwrap().port();
+        listener.set_nonblocking(true).unwrap();
         let server=thread::spawn(move || {
-            let (mut stream,_)=listener.accept().unwrap();
+            let deadline=std::time::Instant::now()+std::time::Duration::from_secs(10);
+            let (mut stream,_)=loop {
+                match listener.accept() {
+                    Ok(accepted) => break accepted,
+                    Err(error) if error.kind()==std::io::ErrorKind::WouldBlock => {
+                        if std::time::Instant::now()>=deadline {
+                            return Err("fixture did not receive a request within 10 seconds");
+                        }
+                        thread::sleep(std::time::Duration::from_millis(10));
+                    }
+                    Err(_) => return Err("fixture listener accept failed"),
+                }
+            };
+            stream.set_nonblocking(false).unwrap();
             let request=read_http_request(&mut stream).unwrap();
             if partial_body {
                 stream.write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 80\r\nConnection: close\r\n\r\npartial").unwrap();
             }
-            (listener,request)
+            Ok((listener,request))
         });
-        let (_root,context,mut runtime,mut request)=http_journal_fixture(&format!("http://127.0.0.1:{port}/?token=journal-secret"),0);
+        let (_root,context,mut runtime,mut request)=real_http_transport_fixture(&format!("http://127.0.0.1:{port}/?token=journal-secret"),0);
         let error=agent_http_exchange(&context,&mut runtime,&request).unwrap_err();
-        let (listener,received)=server.join().unwrap();
+        let (listener,received)=server.join().unwrap().unwrap_or_else(|reason| {
+            panic!("{reason}; transport code={}, phase={}, reason={}",error["code"],error["phase"],error["error"])
+        });
         assert!(received.contains("journal-secret"));
         assert_eq!(error["code"],terminal_code::REQUEST_RECONCILIATION_REQUIRED);
         assert_eq!(error["phase"],if partial_body {"reading_body"} else {"awaiting_headers"});
@@ -488,7 +505,7 @@ fn http_journal_nested_probe_failure_cannot_hide_inside_successful_outer_result(
         if request.contains("oviraptor_no_such_user") { (0,"text/plain","unusable response".into()) }
         else { (200,"application/json",r#"{"exists":true}"#.into()) }
     }));
-    let (_root,context,mut runtime,request)=http_journal_fixture(&format!("http://127.0.0.1:{port}/checkUser?username=alice"),0);
+    let (_root,context,mut runtime,request)=real_http_transport_fixture(&format!("http://127.0.0.1:{port}/checkUser?username=alice"),0);
     let arguments=serde_json::json!({"identity":"anonymous","method":"GET","url":request.url,"family":"authorization"});
     let result=agent_execute_tool_at(&context,&mut runtime,"replay_http",&arguments,"inv-1-001");
     assert_eq!(result.model_view["code"],terminal_code::REQUEST_RECONCILIATION_REQUIRED);

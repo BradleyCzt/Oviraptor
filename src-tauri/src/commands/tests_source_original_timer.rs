@@ -15,7 +15,7 @@ fn source_timer_fixture(schema: i64) -> SourceTimerFixture {
         contract::{AgentLane, AgentRole},
         multi_agent::{scheduler, source},
     };
-    let (port, seen, stop) = crate::commands::agent_tests::spawn_endpoint(std::sync::Arc::new(
+    let (port, seen, stop) = crate::scanning::agent_tests::spawn_endpoint(std::sync::Arc::new(
         |_| {
             (200,"application/json",
         json!({"choices":[{"message":{"role":"assistant","content":"Original paid Source initial assessment"},"finish_reason":"stop"}],
@@ -93,7 +93,7 @@ fn source_timer_authorizers(
         verify_source_runtime_contract(db, &record.scan_id, 1, &work).unwrap();
     let proxy = source_runtime_proxy(&runtime).unwrap();
     let mut context =
-        crate::commands::agent_tests::test_context(&path, &actor.target_key, Vec::new());
+        crate::scanning::agent_tests::test_context(&path, &actor.target_key, Vec::new());
     context.scan_id = record.scan_id.clone();
     context.run = Some(AgentRunLedger {
         db_path: path.clone(),
@@ -138,7 +138,7 @@ fn source_original_timer_both_live_authorizers_use_born_clock_not_mutable_starte
             &actor.root_run_id
         )
         .is_ok());
-        let before = crate::commands::web_mode_test_rows(&db);
+        let before = crate::scanning::web_mode_test_rows(&db);
         let (native, phase) = source_timer_authorizers(&root, &db, &record, &actor, &child);
         assert!(
             native.is_ok(),
@@ -148,7 +148,7 @@ fn source_original_timer_both_live_authorizers_use_born_clock_not_mutable_starte
             phase.is_ok(),
             "real phase admission used mutable started_at: {phase:?}"
         );
-        crate::commands::web_mode_assert_rows(&db, &before);
+        crate::scanning::web_mode_assert_rows(&db, &before);
         assert_eq!(seen.lock().unwrap().len(), 2);
         stop.store(true, std::sync::atomic::Ordering::SeqCst);
         drop(db);

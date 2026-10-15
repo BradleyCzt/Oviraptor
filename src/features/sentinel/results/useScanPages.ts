@@ -1,5 +1,5 @@
 import { onUnmounted, ref, shallowRef, watch } from "vue";
-import type { SentinelScan } from "../../../types";
+import type { SentinelScan } from "../types";
 import { validTaskPage } from "./taskPageContract";
 
 type ScanCursor = Pick<SentinelScan, "updatedAt" | "id">;

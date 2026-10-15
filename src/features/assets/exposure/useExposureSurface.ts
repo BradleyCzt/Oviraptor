@@ -5,14 +5,7 @@
 // the page is hidden or unmounted. Nothing here starts a collection on its own.
 
 import { computed, onMounted, onUnmounted, ref, watch } from "vue";
-import type {
-  Asset,
-  AssetPage,
-  AssetQuery,
-  ExposureFinding,
-  ExposureRun,
-  ExposureSourceResult,
-} from "../../../types";
+import type { Asset, AssetPage, AssetQuery, ExposureFinding, ExposureRun, ExposureSourceResult } from "../types";
 import {
   classificationLine,
   dispositionBadge,

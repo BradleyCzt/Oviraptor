@@ -1,6 +1,6 @@
 import { ref, watch, type Ref } from "vue";
-import { api } from "../../../api";
-import type { GapFollowupDraftInput, GapFollowupPreview, GapFollowupSubmission } from "../../../types";
+import { sentinelApi } from "../api";
+import type { GapFollowupDraftInput, GapFollowupPreview, GapFollowupSubmission } from "../types";
 
 type RecoveryForm = { urls: string; taskName: string };
 
@@ -35,7 +35,7 @@ export function useFollowupRecovery(options: {
     followupRecoveryError.value = "";
     const current = () => !isDisposed() && epoch === recoveryEpoch && viewGeneration === generation();
     try {
-      const saved = await api.getAgentGapFollowupSubmission(currentSource.sourceScanId, currentSource.assessmentMessageId);
+      const saved = await sentinelApi.getAgentGapFollowupSubmission(currentSource.sourceScanId, currentSource.assessmentMessageId);
       if (!current()) return false;
       if (saved && (saved.input.sourceScanId !== currentSource.sourceScanId || saved.input.assessmentMessageId !== currentSource.assessmentMessageId))
         throw new Error("followup_submission_source_mismatch");
@@ -59,7 +59,7 @@ export function useFollowupRecovery(options: {
     const viewGeneration = generation();
     busy.value = true;
     try {
-      await api.releaseAgentGapFollowupSubmission(saved.input.requestId, saved.createdScanId || saved.scan?.id);
+      await sentinelApi.releaseAgentGapFollowupSubmission(saved.input.requestId, saved.createdScanId || saved.scan?.id);
       if (pendingFollowupInput.value?.requestId === saved.input.requestId) pendingFollowupInput.value = undefined;
       if (isDisposed() || viewGeneration !== generation()) return;
       followupSubmission.value = undefined;

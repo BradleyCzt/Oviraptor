@@ -6,7 +6,7 @@ use std::{
     collections::{BTreeMap, BTreeSet, HashMap, HashSet},
     fs,
     io::{BufRead, Read, Write},
-    net::{IpAddr, TcpStream, ToSocketAddrs},
+    net::{IpAddr, TcpStream},
     path::Path,
     sync::{
         atomic::{AtomicBool, Ordering},
@@ -69,35 +69,7 @@ fn text(row: &Record, keys: &[&str]) -> String {
         .unwrap_or_default()
 }
 fn endpoint(row: &Record) -> String {
-    let raw = text(row, &["probe_effective_url", "link", "host"]);
-    let parsed = reqwest::Url::parse(&raw)
-        .or_else(|_| reqwest::Url::parse(&format!("http://{raw}")))
-        .ok();
-    let mut host = parsed
-        .as_ref()
-        .and_then(reqwest::Url::host_str)
-        .unwrap_or_else(|| {
-            row.get("domain")
-                .or_else(|| row.get("ip"))
-                .map(String::as_str)
-                .unwrap_or("")
-        })
-        .trim_end_matches('.')
-        .to_lowercase();
-    if let Some(v) = host.strip_prefix("www.") {
-        host = v.into()
-    }
-    let path = parsed
-        .as_ref()
-        .map(reqwest::Url::path)
-        .unwrap_or("/")
-        .trim_end_matches('/');
-    format!(
-        "{}|{}|{}",
-        text(row, &["company"]).to_lowercase(),
-        host,
-        if path.is_empty() { "/" } else { path }
-    )
+    discovery_identity(row)
 }
 fn number(row: &Record, keys: &[&str]) -> i64 {
     text(row, keys).parse().unwrap_or(0)
@@ -194,6 +166,10 @@ const ACTIVE_STATUSES: &[&str] = &[
 
 include!("native_refinement.rs");
 
+include!("native_discovery.rs");
+
+include!("native_response_identity.rs");
+
 include!("native_probe.rs");
 
 include!("native_fofa.rs");
@@ -206,32 +182,16 @@ pub fn merge_url_inventory(input: &Path, output: &Path) -> Result<serde_json::Va
         if raw.is_empty() {
             continue;
         }
-        let mut url = if raw.contains("://") {
-            raw
-        } else {
-            let protocol = text(&row, &["protocol"]).to_ascii_lowercase();
-            let port = number(&row, &["port"]);
-            let scheme = if protocol.contains("https") || port == 443 {
-                "https"
+        let mut url = build_probe_url(&row).unwrap_or_else(|| {
+            if raw.contains("://") {
+                raw
             } else {
-                "http"
-            };
-            let mut parsed = reqwest::Url::parse(&format!("{scheme}://{raw}")).ok();
-            if let Some(parsed) = parsed.as_mut() {
-                if parsed.port().is_none()
-                    && port > 0
-                    && !((scheme == "http" && port == 80) || (scheme == "https" && port == 443))
-                {
-                    let _ = parsed.set_port(Some(port as u16));
-                }
+                format!("http://{raw}")
             }
-            parsed
-                .map(|value| value.to_string())
-                .unwrap_or_else(|| format!("{scheme}://{raw}"))
-        };
+        });
         if let Ok(mut parsed) = reqwest::Url::parse(&url) {
             parsed.set_fragment(None);
-            url = parsed.to_string().trim_end_matches('/').to_string();
+            url = parsed.to_string();
         }
         let decision = text(&row, &["decision", "人工结论", "结论"]).to_ascii_lowercase();
         let bucket = if [
@@ -359,43 +319,96 @@ pub fn optimize_src_assets(input: &Path, output: &Path) -> Result<serde_json::Va
             )
         }
     }
-    let mut best = HashMap::<String, usize>::new();
+    rows.sort_by(|left, right| {
+        endpoint(left)
+            .cmp(&endpoint(right))
+            .then_with(|| rank(right).cmp(&rank(left)))
+            .then_with(|| {
+                let left = left.iter().collect::<BTreeMap<_, _>>();
+                let right = right.iter().collect::<BTreeMap<_, _>>();
+                serde_json::to_string(&left)
+                    .expect("CSV records serialize")
+                    .cmp(&serde_json::to_string(&right).expect("CSV records serialize"))
+            })
+    });
+    // Stage/journal output can contain the same requested endpoint more than
+    // once. Import its best current result once, retaining all source evidence;
+    // a later duplicate must not overwrite a healthy result with quarantine.
+    let mut best = BTreeMap::<String, usize>::new();
     for (i, row) in rows.iter().enumerate() {
-        if !reason(row).is_empty() {
-            continue;
-        }
         let key = endpoint(row);
-        if best
-            .get(&key)
-            .map(|old| rank(row) > rank(&rows[*old]))
-            .unwrap_or(true)
-        {
-            best.insert(key, i);
+        best.entry(key).or_insert(i);
+    }
+    for i in 0..rows.len() {
+        let selected = best[&endpoint(&rows[i])];
+        if selected != i {
+            let incoming = rows[i].clone();
+            merge_discovery_evidence(&mut rows[selected], &incoming);
         }
     }
-    let (mut keep, mut excluded) = (Vec::new(), Vec::new());
+    let selected = best.values().copied().collect::<Vec<_>>();
+    let eligible = selected
+        .iter()
+        .copied()
+        .filter(|&i| reason(&rows[i]).is_empty())
+        .collect::<Vec<_>>();
+    let response_summary = annotate_exact_response_groups(&mut rows, &eligible);
+    let (mut keep, mut excluded, mut response_duplicates, mut all) =
+        (Vec::new(), Vec::new(), Vec::new(), Vec::new());
     for (i, row) in rows.iter().enumerate() {
-        let mut why = reason(row);
-        if why.is_empty() && best.get(&endpoint(row)).copied() != Some(i) {
-            why = "duplicate_endpoint".into()
-        }
+        let is_selected = best.get(&endpoint(row)).copied() == Some(i);
+        let why = if is_selected {
+            reason(row)
+        } else {
+            "duplicate_endpoint".into()
+        };
         let mut out = row.clone();
         if why.is_empty() {
-            keep.push(out)
+            out.insert("auto_excluded".into(), "0".into());
+            out.insert("exclude_reason".into(), String::new());
+            if text(&out, &["response_duplicate_of"]).is_empty() {
+                keep.push(out.clone());
+            } else {
+                response_duplicates.push(out.clone());
+            }
         } else {
             out.insert("auto_excluded".into(), "1".into());
             out.insert("exclude_reason".into(), why);
-            excluded.push(out)
+            excluded.push(out.clone());
+        }
+        if is_selected {
+            all.push(out);
         }
     }
-    for v in ["auto_excluded", "exclude_reason"] {
+    for v in ["auto_excluded", "exclude_reason"]
+        .into_iter()
+        .chain(RESPONSE_GROUP_FIELDS.iter().copied())
+    {
         if !fields.iter().any(|x| x == v) {
             fields.push(v.into())
         }
     }
+    // Legacy input may not have provenance columns. Evidence union adds them
+    // in memory; export those generated fields too rather than silently
+    // dropping the original endpoint's second discovery source at the CSV edge.
+    let generated_fields = rows
+        .iter()
+        .flat_map(|row| row.keys().cloned())
+        .collect::<BTreeSet<_>>();
+    for field in generated_fields {
+        if !fields.contains(&field) {
+            fields.push(field);
+        }
+    }
     write_csv(&output.join("optimized_assets.csv"), &fields, &keep)?;
     write_csv(&output.join("auto_excluded.csv"), &fields, &excluded)?;
-    let summary = json!({"input":rows.len(),"kept":keep.len(),"excluded":excluded.len(),"web_alive":rows.iter().filter(|r|matches!(text(r,&["probe_outcome"]).as_str(),"web_alive"|"web_restricted"|"browser_render_required"|"virtual_host_required")).count(),"tcp_non_web":rows.iter().filter(|r|text(r,&["probe_outcome"])=="tcp_alive_non_http").count(),"web_abnormal":rows.iter().filter(|r|text(r,&["probe_outcome"])=="web_abnormal").count(),"unreachable":rows.iter().filter(|r|reason(r).starts_with("unreachable:")).count()});
+    write_csv(
+        &output.join("response_duplicates.csv"),
+        &fields,
+        &response_duplicates,
+    )?;
+    write_csv(&output.join("all_probe_results.csv"), &fields, &all)?;
+    let summary = json!({"input":rows.len(),"importable":all.len(),"kept":keep.len(),"excluded":excluded.len(),"response_groups":response_summary.groups,"response_duplicates":response_summary.duplicates,"endpoint_duplicates":rows.len()-all.len(),"web_alive":rows.iter().filter(|r|matches!(text(r,&["probe_outcome"]).as_str(),"web_alive"|"web_restricted"|"browser_render_required"|"virtual_host_required")).count(),"tcp_non_web":rows.iter().filter(|r|text(r,&["probe_outcome"])=="tcp_alive_non_http").count(),"web_abnormal":rows.iter().filter(|r|text(r,&["probe_outcome"])=="web_abnormal").count(),"unreachable":rows.iter().filter(|r|reason(r).starts_with("unreachable:")).count()});
     fs::write(
         output.join("summary.json"),
         serde_json::to_vec_pretty(&summary).map_err(|e| e.to_string())?,
@@ -431,15 +444,15 @@ mod tests {
     }
 
     #[test]
-    fn optimizer_matches_python_contract() {
+    fn optimizer_preserves_distinct_schemes_and_quarantines_failed_endpoints() {
         let root = std::env::temp_dir().join(format!("oviraptor-native-opt-{}", Uuid::new_v4()));
         let input = root.join("in");
         let output = root.join("out");
         fs::create_dir_all(&input).unwrap();
         fs::write(input.join("P1_web_alive.csv"), "company,probe_effective_url,probe_outcome,probe_status_code,probe_title\nAcme,http://example.com,web_alive,200,Home\nAcme,https://example.com,web_alive,200,Home\nAcme,https://bad.example.com,unreachable,0,\n").unwrap();
         let summary = optimize_src_assets(&input, &output).unwrap();
-        assert_eq!(summary["kept"], 1);
-        assert_eq!(summary["excluded"], 2);
+        assert_eq!(summary["kept"], 2);
+        assert_eq!(summary["excluded"], 1);
         assert!(fs::read_to_string(output.join("optimized_assets.csv"))
             .unwrap()
             .contains("https://example.com"));
@@ -523,6 +536,7 @@ mod tests {
         let options = ProbeOptions {
             workers: 2,
             timeout: Duration::from_secs(2),
+            total_timeout: Duration::from_secs(3),
             retries: 0,
             max_body_bytes: 4096,
             include_other: false,
@@ -654,6 +668,7 @@ mod tests {
         let options = ProbeOptions {
             workers: 1,
             timeout: Duration::from_secs(2),
+            total_timeout: Duration::from_secs(3),
             retries: 0,
             max_body_bytes: 4096,
             include_other: false,
@@ -691,6 +706,39 @@ mod tests {
             .map(|entry| entry.path())
             .find(|path| path.extension().is_some_and(|v| v == "jsonl"))
             .unwrap();
+        // Workers may finish either one or two requests before observing the
+        // cancellation. Count the actual durable P1 records independently of
+        // the cache loader before injecting corruption; resume must reuse all
+        // and only those completed URL identities.
+        let expected_urls = [
+            format!("http://{address}/one"),
+            format!("http://{address}/two"),
+        ]
+        .into_iter()
+        .collect::<HashSet<_>>();
+        let mut persisted_urls = HashSet::new();
+        for line in fs::read_to_string(&journal).unwrap().lines() {
+            if line.trim().is_empty() {
+                continue;
+            }
+            let entry: serde_json::Value = serde_json::from_str(line)
+                .expect("every complete pre-corruption journal line must be valid JSON");
+            assert_eq!(entry["stage"], "P1");
+            assert_eq!(entry["row"]["probe_outcome"], "web_alive");
+            let url = entry["row"]["probe_input_url"]
+                .as_str()
+                .expect("persisted probe must identify its requested URL");
+            assert!(
+                expected_urls.contains(url),
+                "unexpected persisted URL: {url}"
+            );
+            assert!(
+                persisted_urls.insert(url.to_string()),
+                "duplicate persisted URL: {url}"
+            );
+        }
+        let persisted_count = persisted_urls.len();
+        assert!((1..=2).contains(&persisted_count));
         // Simulate a torn final write after a process crash.
         fs::OpenOptions::new()
             .append(true)
@@ -700,7 +748,10 @@ mod tests {
             .unwrap();
         cancel.store(false, Ordering::Relaxed);
         let result = probe_assets(&refined, &input, &output, options, &cancel, |_, _| {}).unwrap();
-        assert_eq!(result["reused_results"], 1);
+        assert_eq!(
+            result["reused_results"].as_u64(),
+            Some(persisted_count as u64)
+        );
         assert_eq!(server.join().unwrap(), 2);
         let (_, rows) = read_csv(&output.join("P1_web_alive.csv")).unwrap();
         assert_eq!(rows.len(), 2);

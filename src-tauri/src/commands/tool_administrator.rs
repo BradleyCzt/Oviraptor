@@ -1,3 +1,8 @@
+//! Task-external administrator decisions for signed tool inventories.
+//! Approval is preparation metadata and does not itself grant task execution.
+use crate::AppState;
+use tauri::{AppHandle, Manager};
+
 // Task-external signed inventory decisions. These commands do not grant execution.
 static TOOL_INVENTORY_BUSY: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 struct ToolInventoryCall;

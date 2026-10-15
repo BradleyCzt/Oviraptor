@@ -13,7 +13,7 @@ import { useI18n } from "../../../../i18n";
 import SentinelJsFiles from "./SentinelJsFiles.vue";
 import SentinelRequestHeaders from "./SentinelRequestHeaders.vue";
 import SentinelRuntimeExploration from "./SentinelRuntimeExploration.vue";
-import type { SentinelFinding } from "../../../../types";
+import type { SentinelFinding } from "../../types";
 import {
   createSentinelLabels,
   cryptoCategory,

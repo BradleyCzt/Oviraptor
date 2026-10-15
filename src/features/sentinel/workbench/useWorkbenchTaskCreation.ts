@@ -1,9 +1,6 @@
 import type { Ref } from "vue";
-import { api } from "../../../api";
-import type {
-  GapFollowupDraftInput, GapFollowupPreview, GapFollowupSubmission,
-  SentinelScan, WorkbenchScanInput,
-} from "../../../types";
+import { sentinelApi } from "../api";
+import type { GapFollowupDraftInput, GapFollowupPreview, GapFollowupSubmission, SentinelScan, WorkbenchScanInput } from "../types";
 
 export type WorkbenchMode = "web" | "code" | "greybox" | "cicd" | "skills";
 type CreationForm = Omit<WorkbenchScanInput, "scanType" | "urls" | "authSessionScopeId"> & {
@@ -129,12 +126,12 @@ export function useWorkbenchTaskCreation(context: {
           };
         }
         const createOrdinaryDraft = form.homogeneousWorkers
-          ? (...args: Parameters<typeof api.createSentinelUrlScan>) => api.createSentinelHomogeneousUrlScan(...args, Boolean(form.homogeneousExecution), approvedToolIds)
+          ? (...args: Parameters<typeof sentinelApi.createSentinelUrlScan>) => sentinelApi.createSentinelHomogeneousUrlScan(...args, Boolean(form.homogeneousExecution), approvedToolIds)
           : approvedToolIds.length
-          ? (...args: Parameters<typeof api.createSentinelUrlScan>) => api.createSentinelUrlScanWithToolSelection(...args, approvedToolIds)
-          : api.createSentinelUrlScan;
+          ? (...args: Parameters<typeof sentinelApi.createSentinelUrlScan>) => sentinelApi.createSentinelUrlScanWithToolSelection(...args, approvedToolIds)
+          : sentinelApi.createSentinelUrlScan;
         const draft = followup && pendingFollowupInput.value
-          ? await api.createAgentGapFollowup({ ...pendingFollowupInput.value,
+          ? await sentinelApi.createAgentGapFollowup({ ...pendingFollowupInput.value,
             authSessionIds: [...pendingFollowupInput.value.authSessionIds], skillIds: [...pendingFollowupInput.value.skillIds] })
           : await createOrdinaryDraft(
             form.projectId, form.taskName, urls, form.scanMode, form.maxBudgetUsd,
@@ -160,7 +157,7 @@ export function useWorkbenchTaskCreation(context: {
         }
         let scan: SentinelScan;
         try {
-          scan = await api.confirmSentinelScan(draft.id);
+          scan = await sentinelApi.confirmSentinelScan(draft.id);
         } catch (error) {
           reload();
           if (currentView()) {
@@ -182,7 +179,7 @@ export function useWorkbenchTaskCreation(context: {
         projectId: form.projectId, taskName: form.taskName, instruction: form.instruction,
         authValue: form.authValue, scopeId: authSessionScopeId.value,
       };
-      const scan = await api.startWorkbenchScan({
+      const scan = await sentinelApi.startWorkbenchScan({
         projectId: form.projectId, taskName: form.taskName,
         scanType: context.mode.value as Exclude<WorkbenchMode, "skills" | "web">,
         urls, sourcePath: form.sourcePath, skillIds: form.skillIds,

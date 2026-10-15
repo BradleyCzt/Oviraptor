@@ -584,11 +584,11 @@ fn document_project(connection: &Connection, project_id: i64, site: &Fixture, so
         .query_row("SELECT COALESCE(MAX(version),0) FROM exposure_settings WHERE project_id=?1", [project_id], |row| row.get(0))
         .unwrap();
     save(connection, &value, current).expect("配置必须能保存");
-    super::super::exposure_scan_settings(connection, project_id).expect("配置必须可读")
+    super::exposure_scan_settings(connection, project_id).expect("配置必须可读")
 }
 
-fn fixture_endpoints() -> super::super::SourceEndpoints {
-    super::super::SourceEndpoints {
+fn fixture_endpoints() -> super::SourceEndpoints {
+    super::SourceEndpoints {
         ct: Vec::new(),
         archive: Vec::new(),
         github: GithubEndpoint { api_origin: "http://127.0.0.1:9".into(), allow_private: true },
@@ -600,8 +600,8 @@ fn fixture_endpoints() -> super::super::SourceEndpoints {
 
 fn run_round(connection: &Connection, db_path: &Path, project_id: i64, settings: &JsonValue) -> i64 {
     let started = start_or_reuse(connection, project_id, settings).expect("计划必须能建立");
-    super::super::use_test_endpoints_once(fixture_endpoints());
-    super::super::execute_exposure_run(db_path.to_path_buf(), started.run_id, project_id, "g4-worker".into(), settings.clone());
+    super::use_test_endpoints_once(fixture_endpoints());
+    super::execute_exposure_run(db_path.to_path_buf(), started.run_id, project_id, "g4-worker".into(), settings.clone());
     started.run_id
 }
 
@@ -852,8 +852,8 @@ fn g4_3_exports_are_named_escaped_redacted_and_the_ledger_reconciles() {
     let dir = root.join("exports");
     std::fs::create_dir_all(&dir).unwrap();
     let now = chrono::Local::now();
-    let (first, rows) = super::super::export_exposure_in(&connection, &dir, pid, "findings", now).unwrap();
-    let (second, _) = super::super::export_exposure_in(&connection, &dir, pid, "findings", now).unwrap();
+    let (first, rows) = super::export_exposure_in(&connection, &dir, pid, "findings", now).unwrap();
+    let (second, _) = super::export_exposure_in(&connection, &dir, pid, "findings", now).unwrap();
     let name = first.file_name().unwrap().to_string_lossy().to_string();
     assert!(name.starts_with("测试_项目_A_暴露面_"), "{name}");
     let stamp = now.format("%Y%m%d-%H%M%S%z").to_string();
@@ -868,7 +868,7 @@ fn g4_3_exports_are_named_escaped_redacted_and_the_ledger_reconciles() {
     assert!(!text.contains("SuperSecretValue123"), "凭据值不进导出");
     assert!(!text.lines().any(|line| line.starts_with('=') || line.contains(",=")), "公式被转义");
     assert!(text.lines().next().unwrap().contains("事件编号"));
-    let (ledger, _) = super::super::export_exposure_in(&connection, &dir, pid, "ledger", now).unwrap();
+    let (ledger, _) = super::export_exposure_in(&connection, &dir, pid, "ledger", now).unwrap();
     assert!(ledger.file_name().unwrap().to_string_lossy().contains("_暴露面_事件台账_"));
     let verified = super::export::verify_written(&ledger).unwrap();
     assert_eq!(verified["format"], "ledger_v1");
@@ -888,7 +888,7 @@ fn g4_3_exports_are_named_escaped_redacted_and_the_ledger_reconciles() {
     assert_eq!(totals["entity_links_total"], kinds["entity_link"].as_i64().unwrap());
     assert_eq!(totals["coverage_rows_total"], kinds["coverage"].as_i64().unwrap());
     assert!(!std::fs::read_to_string(&ledger).unwrap().contains("SuperSecretValue123"));
-    assert!(super::super::export_exposure_in(&connection, &dir, pid, "everything", now).unwrap_err().contains("exposure_export_kind_invalid"));
+    assert!(super::export_exposure_in(&connection, &dir, pid, "everything", now).unwrap_err().contains("exposure_export_kind_invalid"));
     // A header with the right count but other names is refused.
     let forged = dir.join("forged.csv");
     let mut header = super::export::LEDGER_HEADERS.to_vec();
@@ -1339,10 +1339,10 @@ fn rem_scale_full_projection_matches_the_per_asset_edges_exactly() {
     connection.execute("DELETE FROM asset_events WHERE asset_id=?1", [ids[4]]).unwrap();
     // f：大写的非确认事件（如 'Revoked:'）也算变更；以 'Confirmed' 开头但没有冒号的不算变更、也不算决定。
     event(ids[5], "Confirmedish note");
-    let full = crate::commands::ownership_asset_unit_projection(&connection, pid).unwrap();
+    let full = crate::commands::ownership::ownership_asset_unit_projection(&connection, pid).unwrap();
     let mut single_edges = Vec::new();
     for asset_id in &ids {
-        if let Some(edge) = crate::commands::ownership_asset_unit_edge(&connection, pid, *asset_id).unwrap() {
+        if let Some(edge) = crate::commands::ownership::ownership_asset_unit_edge(&connection, pid, *asset_id).unwrap() {
             single_edges.push((edge.asset_id, edge.owner_entity_id, edge.version.clone()));
         }
     }

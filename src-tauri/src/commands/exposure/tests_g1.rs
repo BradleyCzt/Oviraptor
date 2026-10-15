@@ -85,7 +85,7 @@ fn passive_settings(connection: &Connection, project_id: i64) -> JsonValue {
         )
         .unwrap();
     save(connection, &value, current).expect("配置必须能保存");
-    super::super::exposure_scan_settings(connection, project_id).expect("配置必须可读")
+    super::exposure_scan_settings(connection, project_id).expect("配置必须可读")
 }
 
 fn run_row(connection: &Connection, run_id: i64) -> (String, String) {
@@ -157,7 +157,7 @@ fn g1_0_a_worker_with_a_corrupt_frozen_plan_fails_the_round_without_sending() {
     connection
         .execute("UPDATE exposure_run_plans SET settings_json='{broken' WHERE run_id=?1", [started.run_id])
         .unwrap();
-    super::super::execute_exposure_run(db_path.clone(), started.run_id, 402, "g1-worker".into(), settings.clone());
+    super::execute_exposure_run(db_path.clone(), started.run_id, 402, "g1-worker".into(), settings.clone());
     let (status, error) = run_row(&connection, started.run_id);
     assert_eq!(status, "failed", "{error}");
     assert!(error.contains("exposure_plan_settings_corrupt"), "{error}");
@@ -166,7 +166,7 @@ fn g1_0_a_worker_with_a_corrupt_frozen_plan_fails_the_round_without_sending() {
     // 正向对照：同一项目、未损坏的计划真正出站并完成。
     let second = start_or_reuse(&connection, 402, &settings).expect("新一轮");
     assert_ne!(second.run_id, started.run_id);
-    super::super::execute_exposure_run(db_path, second.run_id, 402, "g1-worker".into(), settings);
+    super::execute_exposure_run(db_path, second.run_id, 402, "g1-worker".into(), settings);
     let (status, error) = run_row(&connection, second.run_id);
     assert!(fixture.request_count() > 0, "完好的计划必须真的出站");
     assert_ne!(status, "failed", "{error}");
@@ -234,7 +234,7 @@ fn g1_0_settings_view_says_execution_is_serial() {
     let mut edited = ExposureSettings::for_project(404);
     edited.concurrency = 6;
     save(&connection, &edited, 0).unwrap();
-    let view = super::super::exposure_settings_view_in(&connection, 404).unwrap();
+    let view = super::exposure_settings_view_in(&connection, 404).unwrap();
     assert!(view.get("exposureConcurrency").is_none(), "并行度不再出现在采集合同里");
     assert_eq!(view["effective"]["concurrency"], 1, "实际并行度必须报告为 1");
     assert_eq!(view["effective"]["concurrencyImplemented"], false);
@@ -247,7 +247,7 @@ fn g1_0_settings_view_says_execution_is_serial() {
 #[test]
 fn g1_1_cluster_boundaries_come_from_the_shared_psl() {
     use super::clusters::{boundary_label, legacy_last_two_labels, registrable_boundary, registered_domain, BOUNDARY_EXACT_HOST};
-    let psl = format!("psl:{}", crate::commands::OWNERSHIP_PSL_VERSION);
+    let psl = format!("psl:{}", crate::commands::ownership::OWNERSHIP_PSL_VERSION);
     assert_eq!(registrable_boundary("shop.a.example.com.cn"), ("example.com.cn".to_string(), psl.clone()));
     assert_eq!(legacy_last_two_labels("shop.a.example.com.cn"), "com.cn", "旧规则会把所有 .com.cn 合并");
     assert_eq!(registrable_boundary("team.github.io"), ("team.github.io".to_string(), psl.clone()));
@@ -308,7 +308,7 @@ fn g1_1_new_clusters_use_psl_boundaries_and_never_absorb_legacy_rows() {
     let basis: String = connection
         .query_row("SELECT root_basis FROM exposure_observations WHERE id=?1", [ids[0]], |row| row.get(0))
         .unwrap();
-    assert_eq!(basis, format!("psl:{}", crate::commands::OWNERSHIP_PSL_VERSION), "观察必须记录边界依据");
+    assert_eq!(basis, format!("psl:{}", crate::commands::ownership::OWNERSHIP_PSL_VERSION), "观察必须记录边界依据");
     super::cluster_repository::persist_for_observations(&connection, 41100, 411, &ids, 1).unwrap();
     let clusters = |connection: &Connection| -> Vec<(String, String, String, i64)> {
         let mut statement = connection
@@ -323,7 +323,7 @@ fn g1_1_new_clusters_use_psl_boundaries_and_never_absorb_legacy_rows() {
     assert_eq!(
         clusters(&connection),
         vec![
-            ("domain:example.com.cn".to_string(), "psl".to_string(), crate::commands::OWNERSHIP_PSL_VERSION.to_string(), 2),
+            ("domain:example.com.cn".to_string(), "psl".to_string(), crate::commands::ownership::OWNERSHIP_PSL_VERSION.to_string(), 2),
             ("host:10.0.0.8".to_string(), "exact_host".to_string(), String::new(), 2),
         ],
         "other.com.cn 与 github.io 租户都不能被合并；IP 只按精确主机分组"
@@ -341,7 +341,7 @@ fn g1_1_new_clusters_use_psl_boundaries_and_never_absorb_legacy_rows() {
         .unwrap();
     super::cluster_repository::persist_for_observations(&connection, 41100, 411, &[ids[0], ids[2]], 1).unwrap();
     let after = clusters(&connection);
-    assert!(after.contains(&("domain:example.com.cn".to_string(), "psl".to_string(), crate::commands::OWNERSHIP_PSL_VERSION.to_string(), 2)), "旧行不能被并入新簇：{after:?}");
+    assert!(after.contains(&("domain:example.com.cn".to_string(), "psl".to_string(), crate::commands::ownership::OWNERSHIP_PSL_VERSION.to_string(), 2)), "旧行不能被并入新簇：{after:?}");
     let (direct, inherited): (i64, i64) = connection
         .query_row("SELECT direct_count,inherited_count FROM exposure_clusters WHERE project_id=411 AND cluster_key='domain:example.com.cn'", [], |row| Ok((row.get(0)?, row.get(1)?)))
         .unwrap();
@@ -365,7 +365,7 @@ fn g1_1_new_clusters_use_psl_boundaries_and_never_absorb_legacy_rows() {
     assert_eq!(legacy.boundary_basis, "");
     assert!(legacy.boundary_label.contains("旧版末两段"), "{}", legacy.boundary_label);
     let fresh = page.items.iter().find(|row| row.cluster_key == "domain:example.com.cn").unwrap();
-    assert!(fresh.boundary_label.contains(crate::commands::OWNERSHIP_PSL_VERSION), "{}", fresh.boundary_label);
+    assert!(fresh.boundary_label.contains(crate::commands::ownership::OWNERSHIP_PSL_VERSION), "{}", fresh.boundary_label);
     let _ = std::fs::remove_dir_all(root);
 }
 
@@ -447,8 +447,8 @@ fn g1_2_a_professional_subsidiary_is_never_placed_under_a_province() {
     let root = sandbox("units");
     let (connection, _) = database(&root);
     directory(&connection);
-    let entities = crate::commands::load_org_entities(&connection).unwrap();
-    let by_id: std::collections::HashMap<i64, &crate::commands::OrgEntityView> = entities.iter().map(|row| (row.id, row)).collect();
+    let entities = crate::commands::ownership::load_org_entities(&connection).unwrap();
+    let by_id: std::collections::HashMap<i64, &crate::commands::ownership::OrgEntityView> = entities.iter().map(|row| (row.id, row)).collect();
     let place = |id: i64| super::units::place_unit(by_id[&id], &by_id);
     let (bucket, province, note) = place(4);
     assert_eq!((bucket.as_str(), province.is_none()), ("professional_subsidiary", true), "名字和地区码像浙江也不能归入浙江省公司");
@@ -493,8 +493,8 @@ fn g1_2_a_professional_subsidiary_is_never_placed_under_a_province() {
     entity(&connection, 9, "city_branch", "环甲", Some(1), None, "");
     entity(&connection, 10, "city_branch", "环乙", Some(1), Some(9), "");
     connection.execute("UPDATE org_entities SET parent_id=10 WHERE id=9", []).unwrap();
-    let entities = crate::commands::load_org_entities(&connection).unwrap();
-    let by_id: std::collections::HashMap<i64, &crate::commands::OrgEntityView> = entities.iter().map(|row| (row.id, row)).collect();
+    let entities = crate::commands::ownership::load_org_entities(&connection).unwrap();
+    let by_id: std::collections::HashMap<i64, &crate::commands::ownership::OrgEntityView> = entities.iter().map(|row| (row.id, row)).collect();
     let (_, province, note) = super::units::place_unit(by_id[&9], &by_id);
     assert!(province.is_none());
     assert!(note.unwrap_or_default().contains("成环"));
@@ -698,7 +698,7 @@ fn finding_id_of(connection: &Connection, project_id: i64, url: &str) -> i64 {
         .unwrap()
 }
 
-fn page_of(connection: &Connection, project_id: i64, disposition: &str) -> Result<super::super::ExposureFindingPageView, String> {
+fn page_of(connection: &Connection, project_id: i64, disposition: &str) -> Result<super::ExposureFindingPageView, String> {
     let query = super::contract::ExposureFindingPageInput {
         project_id,
         page_size: 50,
@@ -707,7 +707,7 @@ fn page_of(connection: &Connection, project_id: i64, disposition: &str) -> Resul
     }
     .normalize()
     .map_err(|error| format!("[{}] {}", error.code, error.message))?;
-    super::super::finding_page_view(connection, &query)
+    super::finding_page_view(connection, &query)
 }
 
 #[test]
@@ -852,7 +852,7 @@ fn notice_page() -> String {
 }
 
 fn run_worker(db_path: &Path, run_id: i64, project_id: i64, settings: &JsonValue) {
-    super::super::execute_exposure_run(db_path.to_path_buf(), run_id, project_id, "g1-4-worker".into(), settings.clone());
+    super::execute_exposure_run(db_path.to_path_buf(), run_id, project_id, "g1-4-worker".into(), settings.clone());
 }
 
 fn observation_of(connection: &Connection, run_id: i64, url: &str) -> Option<(i64, String, i64)> {
@@ -1418,7 +1418,7 @@ fn rem_acceptance_full_loop_import_discover_own_incident_retest_close() {
             params![pid, asset, format!("confirmed: 组确认（复核组 #{group}，快照 #{analysis}，操作 op-rem-loop-own）")],
         )
         .unwrap();
-    let edge = crate::commands::ownership_asset_unit_edge(&connection, pid, asset).unwrap().expect("资产有单位依据");
+    let edge = crate::commands::ownership::ownership_asset_unit_edge(&connection, pid, asset).unwrap().expect("资产有单位依据");
     assert_eq!(edge.owner_entity_id, 5);
 
     // ③ 发现：生产执行器对授权站点做一轮被动采集。
@@ -1617,7 +1617,7 @@ fn fix3_r8_a_manual_finding_is_stored_redacted_and_distinct_secrets_stay_distinc
     rem_run(&connection, pid, "completed");
     let first = "SNTmanual+Qw3/Er8Ty2Ui";
     let twin = "SNTmanual+Qw4/Er8Ty2Ui";
-    let input = |secret: &str| -> super::super::ExposureFindingInput {
+    let input = |secret: &str| -> super::ExposureFindingInput {
         serde_json::from_value(serde_json::json!({
             "projectId": pid, "assetId": null, "category": "credential", "severity": "high", "confidence": 70,
             "title": format!("配置泄漏 password={secret}"), "sourceType": "manual",
@@ -1627,10 +1627,10 @@ fn fix3_r8_a_manual_finding_is_stored_redacted_and_distinct_secrets_stay_distinc
         }))
         .unwrap()
     };
-    let a = super::super::save_exposure_finding_in(&connection, input(first)).unwrap();
-    let again = super::super::save_exposure_finding_in(&connection, input(first)).unwrap();
+    let a = super::save_exposure_finding_in(&connection, input(first)).unwrap();
+    let again = super::save_exposure_finding_in(&connection, input(first)).unwrap();
     assert_eq!(a, again, "同一输入仍是同一条");
-    let b = super::super::save_exposure_finding_in(&connection, input(twin)).unwrap();
+    let b = super::save_exposure_finding_in(&connection, input(twin)).unwrap();
     assert_ne!(a, b, "脱敏后相同、原文不同的两条线索被合并");
     let mut statement = connection.prepare("SELECT title||source_url||evidence_excerpt||fingerprint FROM exposure_findings WHERE project_id=?1").unwrap();
     let rows: Vec<String> = statement.query_map([pid], |row| row.get(0)).unwrap().collect::<Result<_, _>>().unwrap();
@@ -1790,7 +1790,7 @@ fn fix3_full_business_loop_with_sentinel_secrets_leaves_no_original_anywhere() {
     let now = chrono::Local::now();
     let mut exported = Vec::new();
     for kind in ["findings", "ledger"] {
-        let (path, rows) = super::super::export_exposure_in(&connection, &dir, pid, kind, now).unwrap();
+        let (path, rows) = super::export_exposure_in(&connection, &dir, pid, kind, now).unwrap();
         assert!(rows > 0, "{kind}");
         exported.push((kind, std::fs::read(&path).unwrap()));
     }
@@ -2058,7 +2058,7 @@ fn fix4_r8_import_metadata_secrets_never_reach_storage_responses_or_exports() {
     let now = chrono::Local::now();
     let mut scan = Fix4Scan::default();
     for kind in ["findings", "ledger"] {
-        let (path, _rows) = super::super::export_exposure_in(&connection, &dir, pid, kind, now).unwrap();
+        let (path, _rows) = super::export_exposure_in(&connection, &dir, pid, kind, now).unwrap();
         scan.bytes(&format!("export-name {kind}"), path.to_string_lossy().as_bytes(), &secrets);
         scan.bytes(&format!("export {kind}"), &std::fs::read(&path).unwrap(), &secrets);
     }
@@ -2159,7 +2159,7 @@ fn fix4_p2_csv_every_findings_column_holds_what_its_header_says() {
     }
     let dir = root.join("exports");
     std::fs::create_dir_all(&dir).unwrap();
-    let (path, rows) = super::super::export_exposure_in(&connection, &dir, pid, "findings", chrono::Local::now()).unwrap();
+    let (path, rows) = super::export_exposure_in(&connection, &dir, pid, "findings", chrono::Local::now()).unwrap();
     assert_eq!(rows, 1);
     let parsed = fix4_parse_csv(&std::fs::read_to_string(&path).unwrap());
     let header = &parsed[0];

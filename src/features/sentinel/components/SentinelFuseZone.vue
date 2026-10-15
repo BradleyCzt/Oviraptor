@@ -9,8 +9,8 @@ import {
   ShieldAlert,
 } from "@lucide/vue";
 import { useI18n } from "../../../i18n";
-import type { SentinelFuseEntry } from "../../../types";
-import InlineConfirm from "../../../components/InlineConfirm.vue";
+import type { SentinelFuseEntry } from "../types";
+import InlineConfirm from "../../../shared/components/InlineConfirm.vue";
 import {
   createSentinelLabels,
   fuseVerdictLabel,

@@ -12,7 +12,7 @@ const transpile = (source) => ts.transpileModule(source, {
   compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020 },
 }).outputText;
 function loadPanel(name) {
-  const filename = path.join(__dirname, '../src/features/sentinel/workbench', name);
+  const filename = path.join(__dirname, name === 'SkillInstructionsCatalog.vue' ? '../src/features/skills' : '../src/features/sentinel/workbench', name);
   const { descriptor } = parse(fs.readFileSync(filename, 'utf8'), { filename });
   const script = compileScript(descriptor, { id: name });
   const template = compileTemplate({ source: descriptor.template.content, filename, id: name,
@@ -26,8 +26,8 @@ function loadPanel(name) {
       new Function('exports', transpile(fs.readFileSync(path.join(__dirname, '../src/features/sentinel/presentation.ts'), 'utf8')))(labels);
       return labels;
     }
-    if (name === '../../../i18n') return { useI18n: () => ({ tr: (zh) => zh }) };
-    if (name === '../../../components/InlineConfirm.vue') return { default: () => null };
+    if (name === '../../../i18n' || name === '../../i18n') return { useI18n: () => ({ tr: (zh) => zh }) };
+    if (name === '../../../shared/components/InlineConfirm.vue' || name === '../../shared/components/InlineConfirm.vue') return { default: () => null };
     if (name === '@lucide/vue') return new Proxy({}, { get: () => () => null });
     throw new Error(`Unexpected panel import: ${name}`);
   };
@@ -93,7 +93,7 @@ test('overview renders scoped recent tasks and aggregate usage', async () => {
 });
 
 test('Skills catalog renders escaped content and built-in clone action', async () => {
-  const panel = loadPanel('WorkbenchSkillsCatalog.vue');
+  const panel = loadPanel('SkillInstructionsCatalog.vue');
   const catalog = {
     skills: vue.ref([{ id: 1, name: '<unsafe>', description: 'Base', instructions: '<script>alert(1)</script>',
       builtin: true, enabled: true }]),

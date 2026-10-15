@@ -34,6 +34,11 @@ impl Binding {
         };
         let plan: Value =
             serde_json::from_str(&text).map_err(|_| "homogeneous_execution_plan_invalid")?;
+        if crate::native_pipeline::NativeSourcePlan::verifies_source_owner(
+            db, scan, attempt, &plan, &hash,
+        )? {
+            return Ok(None);
+        }
         if stable_hash(&text) != hash {
             return Err("homogeneous_execution_plan_hash_changed".into());
         }

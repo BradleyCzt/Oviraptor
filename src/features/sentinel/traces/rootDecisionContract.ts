@@ -1,4 +1,4 @@
-import type { AgentTraceEvent, HumanDirectiveDecisionContext } from "../../../types";
+import type { AgentTraceEvent, HumanDirectiveDecisionContext } from "../types";
 
 export interface PublicDecisionSummary {
   schemaVersion: 1;

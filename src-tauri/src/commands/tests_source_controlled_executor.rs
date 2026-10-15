@@ -9,7 +9,7 @@ fn source_controlled_executor_actual_three_rounds_path_correction_and_finish() {
     let count = calls.clone();
     let observed = Arc::new(std::sync::Mutex::new(Vec::<JsonValue>::new()));
     let requests = observed.clone();
-    let (port, _, stop) = crate::commands::agent_tests::spawn_endpoint(Arc::new(move |raw| {
+    let (port, _, stop) = crate::scanning::agent_tests::spawn_endpoint(Arc::new(move |raw| {
         let body: JsonValue = serde_json::from_str(raw.split("\r\n\r\n").nth(1).unwrap()).unwrap();
         let number = count.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
         let messages = body["messages"].as_array().unwrap();
@@ -205,7 +205,7 @@ fn source_controlled_executor_actual_reused_id_keeps_known_fee_without_finish() 
     };
     let calls = Arc::new(AtomicUsize::new(0));
     let observed = calls.clone();
-    let (port, _, stop) = crate::commands::agent_tests::spawn_endpoint(Arc::new(move |raw| {
+    let (port, _, stop) = crate::scanning::agent_tests::spawn_endpoint(Arc::new(move |raw| {
         let request: JsonValue =
             serde_json::from_str(raw.split("\r\n\r\n").nth(1).unwrap()).unwrap();
         let number = observed.fetch_add(1, std::sync::atomic::Ordering::SeqCst);

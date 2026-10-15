@@ -12,6 +12,8 @@ fn coordinator_frame_step_inventory_is_explicit_for_wired_kinds() {
         ("capability-changed", "assess:capability_changed"),
         ("authorization-output", "assess:authorization_output"),
         ("external-surface-output", "assess:external_surface_output"),
+        ("business-logic-output", "assess:business_logic_output"),
+        ("business-logic-input", "dispatch:business_logic"),
         ("mapper-output", "dispatch:web_executor"),
         ("investigator-proposal", "assess:gap_proposal"),
         ("client-side-output", "assess:client_side_configuration"),

@@ -13,15 +13,15 @@ import {
   Wrench,
 } from "@lucide/vue";
 import { open } from "@tauri-apps/plugin-dialog";
-import { api } from "../../../api";
+import { sentinelApi } from "../api";
+import { knowledgeCatalogApi } from "../../skills/catalogApi";
+import { instructionCatalogApi } from "../../skills/catalogApi";
+import { scanningLearningApi } from "../learningApi";
 import { useI18n } from "../../../i18n";
-import type {
-  AgentLearningCandidate,
-  AgentKnowledgeEntry,
-  AgentSkill,
-  AgentTraceSummary,
-} from "../../../types";
-import InlineConfirm from "../../../components/InlineConfirm.vue";
+import type { AgentSkill } from "../../skills/catalogTypes";
+import type { AgentLearningCandidate, AgentKnowledgeEntry } from "../../skills/knowledgeTypes";
+import type { AgentTraceSummary } from "../types";
+import InlineConfirm from "../../../shared/components/InlineConfirm.vue";
 import { tracePresentation } from "../traces/presentation";
 import { useLiveTrace } from "../traces/useLiveTrace";
 import { useTraceSelection } from "../traces/useTraceSelection";
@@ -71,10 +71,10 @@ async function load() {
   loading.value = true;
   try {
     const snapshot = await Promise.all([
-      api.listAgentTraces(),
-      api.listAgentKnowledge(),
-      api.listAgentLearningCandidates(),
-      api.listAgentSkills(),
+      sentinelApi.listAgentTraces(),
+      knowledgeCatalogApi.listAgentKnowledge(),
+      knowledgeCatalogApi.listAgentLearningCandidates(),
+      instructionCatalogApi.listAgentSkills(),
     ]);
     if (disposed || requestRevision !== catalogRevision) return;
     [traces.value, knowledge.value, candidates.value, skills.value] = snapshot;
@@ -91,7 +91,7 @@ async function generateCandidate() {
   if (!selectedId.value) return;
   busy.value = "candidate";
   try {
-    const candidate = await api.generateAgentLearningCandidate(selectedId.value);
+    const candidate = await scanningLearningApi.generateAgentLearningCandidate(selectedId.value);
     candidates.value = [candidate, ...candidates.value.filter((item) => item.id !== candidate.id)];
     emit("notify", "success", tr("已生成待审核学习候选", "Learning candidate generated for review"));
   } catch (error) {
@@ -103,7 +103,7 @@ async function generateCandidate() {
 async function reviewCandidate(candidate: AgentLearningCandidate, decision: "accepted" | "rejected") {
   busy.value = `candidate-${candidate.id}`;
   try {
-    const updated = await api.reviewAgentLearningCandidate(candidate.id, decision, candidate.targetSkillId);
+    const updated = await knowledgeCatalogApi.reviewAgentLearningCandidate(candidate.id, decision, candidate.targetSkillId);
     Object.assign(candidate, updated);
     emit("notify", decision === "accepted" ? "success" : "info", decision === "accepted" ? tr("候选已接受，可沉淀为 Skill", "Candidate accepted; ready to apply as Skill") : tr("候选已拒绝，不会注入后续任务", "Candidate rejected and excluded from future tasks"));
   } catch (error) {
@@ -116,10 +116,10 @@ async function applyCandidate(candidate: AgentLearningCandidate) {
   busy.value = `apply-${candidate.id}`;
   try {
     if (candidate.targetSkillId) {
-      const updated = await api.reviewAgentLearningCandidate(candidate.id, "accepted", candidate.targetSkillId);
+      const updated = await knowledgeCatalogApi.reviewAgentLearningCandidate(candidate.id, "accepted", candidate.targetSkillId);
       Object.assign(candidate, updated);
     }
-    const skillId = await api.applyAgentLearningCandidate(candidate.id);
+    const skillId = await knowledgeCatalogApi.applyAgentLearningCandidate(candidate.id);
     candidate.status = "applied";
     candidate.targetSkillId = skillId;
     emit("notify", "success", tr(`已沉淀为 Skill #${skillId}，后续扫描会自动注入`, `Applied as Skill #${skillId}; future scans will inject it`));
@@ -134,7 +134,7 @@ async function removeCandidate() {
   const candidate = deleteCandidate.value;
   busy.value = `delete-candidate-${candidate.id}`;
   try {
-    await api.deleteAgentLearningCandidate(candidate.id);
+    await knowledgeCatalogApi.deleteAgentLearningCandidate(candidate.id);
     candidates.value = candidates.value.filter((item) => item.id !== candidate.id);
     deleteCandidate.value = undefined;
     emit("notify", "success", tr("学习候选已删除", "Learning candidate deleted"));
@@ -147,7 +147,7 @@ async function removeCandidate() {
 async function aggregate() {
   busy.value = "aggregate";
   try {
-    const entry = await api.aggregateAgentKnowledge(aggregateType.value);
+    const entry = await scanningLearningApi.aggregateAgentKnowledge(aggregateType.value);
     knowledge.value = [entry, ...knowledge.value.filter((item) => item.id !== entry.id)];
     emit("notify", "success", tr("同类轨迹已聚合提炼", "Similar traces aggregated"));
   } catch (error) {
@@ -164,7 +164,7 @@ async function ingestSource(forceRefresh = false) {
   }
   busy.value = "source";
   try {
-    const entry = await api.ingestAgentKnowledgeSource(source, forceRefresh);
+    const entry = await knowledgeCatalogApi.ingestAgentKnowledgeSource(source, forceRefresh);
     knowledge.value = [entry, ...knowledge.value.filter((item) => item.id !== entry.id)];
     emit("notify", "success", tr("文章/本地 HTML 已缓存并提炼为方法卡片；后续扫描只读取本地知识", "Article/local HTML cached and distilled into method cards; later scans use local knowledge"));
   } catch (error) {
@@ -178,7 +178,7 @@ async function removeKnowledge() {
   const entry = deleteKnowledge.value;
   busy.value = `delete-${entry.id}`;
   try {
-    await api.deleteAgentKnowledge(entry.id);
+    await knowledgeCatalogApi.deleteAgentKnowledge(entry.id);
     knowledge.value = knowledge.value.filter((item) => item.id !== entry.id);
     const trace = traces.value.find((item) => item.scanId === entry.scanId);
     if (trace) trace.knowledgeId = undefined;
@@ -193,7 +193,7 @@ async function removeKnowledge() {
 async function convert(entry: AgentKnowledgeEntry) {
   busy.value = `skill-${entry.id}`;
   try {
-    entry.skillId = await api.convertAgentKnowledgeToInstruction(entry.id);
+    entry.skillId = await knowledgeCatalogApi.convertAgentKnowledgeToInstruction(entry.id);
     emit("notify", "success", tr("知识已转换为可选 Skill", "Knowledge converted to a selectable Skill"));
   } catch (error) {
     emit("notify", "error", String(error));
@@ -203,7 +203,7 @@ async function convert(entry: AgentKnowledgeEntry) {
 }
 async function exportKnowledge() {
   try {
-    const path = await api.exportAgentKnowledge();
+    const path = await knowledgeCatalogApi.exportAgentKnowledge();
     emit("notify", "success", tr(`知识库已导出：${path}`, `Knowledge exported: ${path}`));
   } catch (error) {
     emit("notify", "error", String(error));
@@ -217,7 +217,7 @@ async function importKnowledge() {
   });
   if (!path) return;
   try {
-    const count = await api.importAgentKnowledge(path);
+    const count = await knowledgeCatalogApi.importAgentKnowledge(path);
     await load();
     emit("notify", "success", tr(`已导入 ${count} 条知识`, `Imported ${count} knowledge entries`));
   } catch (error) {

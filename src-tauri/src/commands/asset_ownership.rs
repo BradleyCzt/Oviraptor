@@ -9,7 +9,7 @@ fn clean_ownership_list(values: Vec<String>) -> Vec<String> {
         .collect()
 }
 
-fn normalize_ownership_domain(value: &str) -> String {
+pub(crate) fn normalize_ownership_domain(value: &str) -> String {
     let mut value = value.trim().to_lowercase();
     if let Some((_, rest)) = value.split_once("://") {
         value = rest.to_string();
@@ -26,7 +26,7 @@ fn normalize_ownership_domain(value: &str) -> String {
     value.trim_start_matches("www.").to_string()
 }
 
-fn domain_matches(host: &str, rule: &str) -> bool {
+pub(crate) fn domain_matches(host: &str, rule: &str) -> bool {
     let host = normalize_ownership_domain(host);
     let rule = normalize_ownership_domain(rule);
     !host.is_empty() && !rule.is_empty() && (host == rule || host.ends_with(&format!(".{rule}")))
@@ -261,7 +261,7 @@ fn assess_asset_ownership_for_connection(
             .map(normalize_ownership_domain)
             .find(|value| !value.is_empty())
             .unwrap_or_default();
-        let extra=json(extra_json);let org=extra.get("org").and_then(JsonValue::as_str).unwrap_or("");let region=["country","country_name","region","province"].iter().filter_map(|key|extra.get(*key).and_then(JsonValue::as_str)).collect::<Vec<_>>().join(" ");
+        let extra = serde_json::from_str::<JsonValue>(&extra_json).unwrap_or_else(|_| JsonValue::Object(Default::default()));let org=extra.get("org").and_then(JsonValue::as_str).unwrap_or("");let region=["country","country_name","region","province"].iter().filter_map(|key|extra.get(*key).and_then(JsonValue::as_str)).collect::<Vec<_>>().join(" ");
         let combined = format!("{company} {title} {org}");
         let mut approved_domains = profile.approved_domains.clone();
         let mut excluded_domains = profile.excluded_domains.clone();

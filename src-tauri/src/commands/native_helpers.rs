@@ -78,51 +78,6 @@ fn native_helper_stderr_note(error_output: &[u8]) -> String {
     bounded_redacted_text(trimmed, 1200)
 }
 
-/// The shipped JavaScript is part of the application release, not a mutable
-/// tool installed from the host PATH. Compare against bytes compiled into this
-/// release; a missing or modified resource is an unavailable capability.
-/// This is integrity checking, not a process/network sandbox or a signature
-/// for separately downloaded capability bundles.
-fn verify_bundled_worker(helper: &Path) -> Result<(), String> {
-    fn verify_file(path: &Path, expected: &[u8], missing: &str, mismatch: &str) -> Result<(), String> {
-        let metadata = fs::symlink_metadata(path).map_err(|_| missing.to_string())?;
-        if !metadata.is_file() || metadata.file_type().is_symlink() {
-            return Err(mismatch.into());
-        }
-        let actual = fs::read(path).map_err(|_| mismatch.to_string())?;
-        if Sha256::digest(&actual) != Sha256::digest(expected) {
-            return Err(mismatch.into());
-        }
-        Ok(())
-    }
-
-    match helper.file_name().and_then(|name| name.to_str()) {
-        Some("9_frontend_runtime_probe.cjs") => {
-            verify_file(helper, include_bytes!("../../resources/workers/9_frontend_runtime_probe.cjs"),
-                "bundled_worker_missing", "bundled_worker_digest_mismatch")?;
-            let config = helper.parent().and_then(Path::parent)
-                .ok_or("bundled_worker_browser_locations_missing")?.join("config/browser-locations.json");
-            verify_file(&config, include_bytes!("../../resources/config/browser-locations.json"),
-                "bundled_worker_browser_locations_missing", "bundled_worker_browser_locations_mismatch")
-        },
-        Some("8_js_ast_analyzer.cjs") => {
-            verify_file(
-                helper,
-                include_bytes!("../../resources/workers/8_js_ast_analyzer.cjs"),
-                "bundled_worker_missing",
-                "bundled_worker_digest_mismatch",
-            )?;
-            verify_file(
-                &helper.with_file_name("babel-parser.cjs"),
-                include_bytes!("../../resources/workers/babel-parser.cjs"),
-                "bundled_worker_parser_missing",
-                "bundled_worker_parser_digest_mismatch",
-            )
-        }
-        _ => Err("bundled_worker_unregistered".into()),
-    }
-}
-
 // Both old JSON API and diagnostics use this actual private capture path.
 fn run_native_json_helper(helper:&Path,payload:&JsonValue,runtime_path:&OsString,
  proxy:Option<&str>,no_proxy:&str,timeout:Duration,control:&NativeReconControl)->Result<JsonValue,String>{
@@ -194,12 +149,43 @@ mod native_helper_tests {
 
     #[test]
     fn resolve_helper_node_prefers_modern_over_usr_local_v16() {
-        let runtime = std::ffi::OsString::from("/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin");
+        #[cfg(unix)]
+        let directory = std::env::temp_dir().join(format!("oviraptor-node-resolver-{}", Uuid::new_v4()));
+        #[cfg(unix)]
+        let (runtime, legacy, modern) = {
+            use std::os::unix::fs::PermissionsExt;
+            let legacy_dir = directory.join("usr local bin");
+            let modern_dir = directory.join("homebrew bin");
+            fs::create_dir_all(&legacy_dir).unwrap();
+            fs::create_dir_all(&modern_dir).unwrap();
+            let legacy = legacy_dir.join("node");
+            let modern = modern_dir.join("node");
+            for (path, version) in [(&legacy, "v16.0.0"), (&modern, "v22.0.0")] {
+                fs::write(
+                    path,
+                    format!("#!/bin/sh\n[ \"$#\" -eq 1 ] && [ \"$1\" = \"-v\" ] || exit 64\nprintf '%s\\n' '{version}'\n"),
+                ).unwrap();
+                fs::set_permissions(path, fs::Permissions::from_mode(0o700)).unwrap();
+            }
+            // Put the old executable first, as the former GUI PATH did.
+            let runtime = std::env::join_paths([&legacy_dir, &modern_dir]).unwrap();
+            (runtime, legacy, modern)
+        };
+        #[cfg(not(unix))]
+        let runtime = {
+            // Native Windows executables cannot be replaced by POSIX scripts;
+            // keep the real resolver/version check using the application's PATH.
+            let home = std::env::var_os("USERPROFILE")
+                .map(PathBuf::from)
+                .unwrap_or_else(std::env::temp_dir);
+            sentinel_runtime_path(&home)
+        };
         let chosen = resolve_helper_node(&runtime).expect("modern node");
         let version = std::process::Command::new(&chosen)
             .arg("-v")
             .output()
             .expect("node -v");
+        assert!(version.status.success(), "node -v failed for {}", chosen.display());
         let text = String::from_utf8_lossy(&version.stdout);
         let major = text
             .trim()
@@ -208,15 +194,17 @@ mod native_helper_tests {
             .next()
             .and_then(|v| v.parse::<u32>().ok())
             .unwrap_or(0);
-        assert!(major >= 18, "expected Node 18+, got {text} from {}", chosen.display());
-        if std::path::Path::new("/opt/homebrew/bin/node").is_file()
-            && std::path::Path::new("/usr/local/bin/node").is_file()
+        let minimum_major = if cfg!(unix) { 22 } else { 18 };
+        assert!(major >= minimum_major, "expected Node {minimum_major}+, got {text} from {}", chosen.display());
+        #[cfg(unix)]
         {
-            assert_eq!(
-                chosen,
-                std::path::PathBuf::from("/opt/homebrew/bin/node"),
-                "Homebrew Node must win over /usr/local Node 16"
-            );
+            assert_ne!(chosen, legacy, "Node 16 must not win over modern Node");
+            // The resolver also considers explicit overrides and installed paths;
+            // a newer host Node may legitimately beat the v22 fixture.
+            if chosen == modern {
+                assert_eq!(text.trim(), "v22.0.0");
+            }
+            fs::remove_dir_all(directory).unwrap();
         }
     }
 

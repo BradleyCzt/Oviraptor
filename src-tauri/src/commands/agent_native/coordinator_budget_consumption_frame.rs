@@ -168,8 +168,15 @@ impl NativeCoordinatorFrame {
         let (tokens, requests) =
             native_budget_consumption_original_grant_on(db, actor, child, owner.attempt_id())?;
         let worker_id = owner.attempt_id();
+        // A verified fully unbounded grant has no model reserve rows. Freeze
+        // that exact empty set; finite and mixed grants still require rows.
+        let capture_reserve = if tokens == 0 && requests == 0 {
+            NativeCoordinatorFrozenRows::capture_optional
+        } else {
+            NativeCoordinatorFrozenRows::capture
+        };
         let rows = vec![
-            NativeCoordinatorFrozenRows::capture(db,
+            capture_reserve(db,
                 "SELECT rowid,* FROM agent_budget_entries WHERE root_run_id=?1 AND assignment_id=?2 AND lease_attempt_id=?3 AND kind='reserve' AND source_id=?4 ORDER BY rowid",
                 &[&actor.root_run_id,&child.assignment_id,worker_id,&format!("assignment:{}",child.assignment_id)],
             )?,

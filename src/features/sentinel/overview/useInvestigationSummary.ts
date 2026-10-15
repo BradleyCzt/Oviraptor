@@ -1,5 +1,5 @@
 import { onUnmounted, ref, watch } from "vue";
-import type { InvestigationOverview } from "../../../types";
+import type { InvestigationOverview } from "../types";
 
 export type InvestigationSummaryState = "idle" | "loading" | "ready" | "error";
 const emptySummary = (): InvestigationOverview => ({

@@ -244,7 +244,7 @@ fn business_logic_dispatch_actual_v14_ineligible_is_readonly_and_paid_defer_mint
 
 #[test]
 fn business_logic_dispatch_actual_signed_binding_scope_tamper_and_missing_prevents_execution() {
-    use crate::commands::business_logic_dispatch_receipt;
+    use crate::scanning::business_logic_dispatch_receipt;
     let _real = RealSpecialistTransport::enter();
     let f = business_logic_dispatch_actual_fixture(false, true);
     let actor = &f.session.as_ref().unwrap().lease;

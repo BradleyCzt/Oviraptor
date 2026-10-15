@@ -20,11 +20,20 @@ fn budget_target_http_claim_and_headers_are_atomic_nonrefundable_sources() {
 fn budget_target_journal_failure_prevents_http_send_and_rolls_back_claim() {
     for action in ["ABORT,'budget failed'","FAIL,'budget failed'","IGNORE"] {
         let (port,seen,stop)=spawn_endpoint(std::sync::Arc::new(|_| (200,"text/plain","hello".into())));
-        let (root,context,mut runtime,request)=http_journal_fixture(&format!("http://127.0.0.1:{port}/"),0);
+        let (root,context,mut runtime,request)=real_http_transport_fixture(&format!("http://127.0.0.1:{port}/"),0);
         let db=db::open(&context.db_path).unwrap();
         db.execute_batch(&format!("CREATE TRIGGER reject_target_budget BEFORE INSERT ON agent_budget_entries WHEN NEW.dimension='target_requests' BEGIN SELECT RAISE({action}); END;")).unwrap();
         let before=receipt_database_snapshot(&db);
-        assert!(agent_http_exchange(&context,&mut runtime,&request).is_err(),"{action}");
+        let result=agent_http_exchange(&context,&mut runtime,&request);
+        assert!(result.is_err(),"{action}");
+        let error=result.unwrap_err();
+        assert_eq!(error["code"],"evidence_write_failed","{action}: {error}");
+        if action=="IGNORE" {
+            assert_eq!(error["error"],"budget_entry_persistence_conflict","{action}");
+        } else {
+            assert!(error["error"].as_str().unwrap().contains("budget failed"),
+                "{action}: must reach the injected budget write failure: {error}");
+        }
         assert_eq!(receipt_database_snapshot(&db),before,"{action}");
         assert_eq!(db.query_row("SELECT count(*) FROM agent_http_request_claims",[],|r|r.get::<_,i64>(0)).unwrap(),0);
         assert_eq!(runtime.target_requests,0);assert!(seen.lock().unwrap().is_empty());
@@ -205,7 +214,7 @@ fn budget_target_unknown_target_cost_blocks_an_already_scheduled_model() {
 #[test]
 fn budget_target_http_claim_rechecks_revocation_before_transport() {
     let (port,seen,stop)=spawn_endpoint(std::sync::Arc::new(|_| (200,"text/plain","entry".into())));
-    let (root,context,mut runtime,request)=http_journal_fixture(&format!("http://127.0.0.1:{port}/"),0);
+    let (root,context,mut runtime,request)=real_http_transport_fixture(&format!("http://127.0.0.1:{port}/"),0);
     let db=db::open(&context.db_path).unwrap();
     db.execute_batch("CREATE TRIGGER revoke_http AFTER INSERT ON agent_http_request_claims BEGIN
         UPDATE agent_capability_leases SET revoked_at='revoked' WHERE child_run_id=NEW.run_id; END;").unwrap();

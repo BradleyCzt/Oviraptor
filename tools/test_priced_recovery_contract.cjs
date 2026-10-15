@@ -94,7 +94,7 @@ test('production IPC uses the new consent and forwards exact strings without leg
     ['get_native_priced_protection_recovery_approval',{requestId:op.requestId}],
     ['find_native_priced_protection_recovery_approval',{selection}]]);
   const source=fs.readFileSync(path.join(root,'src-tauri/src/lib.rs'),'utf8');
-  for (const [name] of calls) assert.ok(source.includes(`commands::${name},`),name);
+  for (const [name] of calls) assert.ok(source.includes(`scanning::${name},`),name);
 });
 
 if (process.env.OVIRAPTOR_PRICED_RECOVERY_PUBLIC_FIXTURE_FILE) {
@@ -133,5 +133,5 @@ test('priced cancellation has its own matched non-executable history and explici
     approvalId:approved.approvalId,consent:'revoke_exact_pending_priced_approval_preserve_original_history'}],
     ['get_native_priced_protection_recovery_cancellation',{requestId:op.requestId}]]);
   const source=fs.readFileSync(path.join(root,'src-tauri/src/lib.rs'),'utf8');
-  for(const [name] of calls)assert.ok(source.includes(`commands::${name},`),name);
+  for(const [name] of calls)assert.ok(source.includes(`scanning::${name},`),name);
 });

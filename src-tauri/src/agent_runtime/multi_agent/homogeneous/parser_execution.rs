@@ -54,7 +54,7 @@ impl FreshParserFact<'_> {
     }
 }
 fn issuer(db: &Connection, actor: &lease::CoordinatorLease) -> Result<WithdrawalIssuer, String> {
-    let mode: VerifiedMode = crate::commands::original_root_capture_mode(db, &actor.root_run_id)?;
+    let mode: VerifiedMode = crate::scanning::scope_contract::original_root_capture_mode(db, &actor.root_run_id)?;
     WithdrawalIssuer::from_verified_birth_on(db, &actor.root_run_id, mode)
 }
 
@@ -304,13 +304,7 @@ pub(crate) fn execute(
     tx.commit().map_err(|e| e.to_string())?;
     verify_frozen(db, cfg, actor, child, &call)?;
     let check = || cancelled() || verify_frozen(db, cfg, actor, child, &call).is_err();
-    #[cfg(not(test))]
-    let receipt = container_parser::execute_guarded(&call.request, &check)?;
-    // The test harness executable has its own main. Exercise the same real
-    // fixed runtime here; cross-process guardian/SIGKILL proof uses the actual
-    // built App binary in tools/test_nest_sandbox_guardian.py.
-    #[cfg(test)]
-    let receipt = container_parser::Runtime::inspect()?.execute(&call.request, &check)?;
+    let receipt = crate::execution_service::offline_parser::execute(&call.request, &check)?;
     let tx = Transaction::new_unchecked(db, TransactionBehavior::Immediate)
         .map_err(|e| e.to_string())?;
     require_worker(&tx, actor, child)?;

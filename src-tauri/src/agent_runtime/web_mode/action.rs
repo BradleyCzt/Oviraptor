@@ -61,7 +61,7 @@ impl NewWebAction {
             "gap_followup"=>db.query_row("SELECT request_id,source_scan_id,source_hash,request_hash FROM agent_gap_followups WHERE scan_id=?1",[scan],|r|Ok((r.get(0)?,r.get(1)?,r.get(2)?,r.get(3)?))),
             "closure_handoff"=>db.query_row("SELECT request_id,source_scan_id,json_extract(preview_json,'$.sourceHash'),input_hash FROM native_web_closure_handoffs WHERE scan_id=?1",[scan],|r|Ok((r.get(0)?,r.get(1)?,r.get(2)?,r.get(3)?))),
             "protection_recovery"=> {
-                crate::commands::native_protection_recovery_draft_action_on(db,scan)?;
+                crate::scanning::recovery_draft::native_protection_recovery_draft_action_on(db,scan)?;
                 db.query_row("SELECT request_id,source_scan_id,proposal_hash,approval_id FROM main.native_protection_recovery_drafts WHERE scan_id=?1",[scan],|r|Ok((r.get(0)?,r.get(1)?,r.get(2)?,r.get(3)?)))
             },
             _=>return Err("web_mode_action_kind_invalid".into()),

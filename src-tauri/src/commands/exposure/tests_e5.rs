@@ -109,7 +109,7 @@ fn current_settings(connection: &Connection, project_id: i64) -> JsonValue {
     let mut value = ExposureSettings::for_project(project_id);
     value.sources = vec![KIND_PASSIVE_WEB.to_string()];
     save(connection, &value, 0).expect("配置必须能保存");
-    super::super::exposure_scan_settings(connection, project_id).expect("配置必须可读")
+    super::exposure_scan_settings(connection, project_id).expect("配置必须可读")
 }
 
 #[test]

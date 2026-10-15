@@ -1,7 +1,7 @@
 // Actual process boundaries reuse the original private transaction test barrier.
 fn paid_multi_deletion_child(h: &AgentHarness, mode: &str) -> std::process::Child {
     std::process::Command::new(std::env::current_exe().unwrap()).args([
-        "commands::agent_tests::scan_deletion_paid_multi_process_death_before_commit_keeps_all_original_sources","--exact","--test-threads=1"])
+        "scanning::agent_tests::scan_deletion_paid_multi_process_death_before_commit_keeps_all_original_sources","--exact","--test-threads=1"])
         .env("OVIRAPTOR_PAID_DELETE_FIXTURE_BINDING",json!([h.db_path.to_string_lossy(),h.context.scan_id]).to_string())
         .env("OVIRAPTOR_PAID_DELETE_FIXTURE_MODE",mode).stdout(std::process::Stdio::null()).stderr(std::process::Stdio::null()).spawn().unwrap()
 }

@@ -102,7 +102,7 @@ fn source_paid_deletion_original_unknown_usage_preserves_every_row() {
 #[test]
 fn source_paid_deletion_original_accepted_sarif_and_independent_review_survive_cold_audit() {
     use std::sync::atomic::Ordering;
-    let (port, seen, stop) = crate::commands::agent_tests::spawn_endpoint(Arc::new(|request| {
+    let (port, seen, stop) = crate::scanning::agent_tests::spawn_endpoint(Arc::new(|request| {
         let body: JsonValue =
             serde_json::from_str(request.split_once("\r\n\r\n").unwrap().1).unwrap();
         let messages = body["messages"].as_array().unwrap();

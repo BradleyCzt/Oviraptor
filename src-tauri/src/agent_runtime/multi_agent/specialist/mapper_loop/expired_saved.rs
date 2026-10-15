@@ -150,7 +150,7 @@ fn require_original_expiry_on(
     if !valid {
         return Err("mapper_loop_expired_original_deadline_invalid".into());
     }
-    let original = crate::commands::original_root_capture_mode(db, &actor.root_run_id)?;
+    let original = crate::scanning::scope_contract::original_root_capture_mode(db, &actor.root_run_id)?;
     let issuer = WithdrawalIssuer::from_verified_birth_on(db, &actor.root_run_id, original)?;
     issuer.verify_issued(db, &worker.id)?;
     attempts::withdrawal_receipt::verify_original(db, &worker.id)?;

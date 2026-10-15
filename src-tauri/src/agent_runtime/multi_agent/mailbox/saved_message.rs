@@ -139,8 +139,8 @@ pub(super) fn verify(
         (AgentRole::BusinessLogic, "evidence_summary") => {
             super::super::budget::root::RootOwner::load_original(db, &lease.root_run_id)?
                 .require_original_coordinator(db, lease)?;
-            let directory = crate::commands::resolve_agent_evidence_location(db, &lease.root_run_id)?;
-            let collection = crate::commands::native_business_logic_output_collection_on(
+            let directory = crate::scanning::evidence_bridge::resolve_agent_evidence_location(db, &lease.root_run_id)?;
+            let collection = crate::scanning::evidence_bridge::native_business_logic_output_collection_on(
                 db, lease, &child, &directory,
             )?;
             from == child.run_id

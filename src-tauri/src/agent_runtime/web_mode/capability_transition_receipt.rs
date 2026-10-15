@@ -193,7 +193,7 @@ pub(crate) fn read_original_on(
         return Err("capability_transition_snapshot_required".into());
     }
     verify_schema_on(db)?;
-    let proof = crate::commands::original_root_capture_mode(db, &actor.root_run_id)?;
+    let proof = crate::scanning::scope_contract::original_root_capture_mode(db, &actor.root_run_id)?;
     require_protocol(db, actor, child, &proof)?;
     let worker = attempts::current(db, actor, &child.assignment_id)?;
     type Row = (

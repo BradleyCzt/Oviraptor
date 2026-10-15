@@ -6,6 +6,94 @@ fn fresh_multi_anonymous_control_dispatch(
     fresh_multi_anonymous_control_dispatch_with_extra(revoke, 1)
 }
 
+// Revoking target identity stops execution, while the still-owned Root must
+// retain one bounded assessment of the HTTP charge already received.
+fn fresh_multi_anonymous_control_paid_calls_after_revocation(
+    h: &AgentHarness,
+    owned: &OwnedAgentTargetOutcome,
+    before: usize,
+) -> usize {
+    assert!(before > 0, "the authenticated HTTP must reach the revocation boundary");
+    let models = h.model_seen.lock().unwrap();
+    let after = models.get(before..).unwrap();
+    assert_eq!(after.len(), 1, "only the original HTTP-cost advisory may follow revocation");
+    let wire = &after[0];
+    assert!(fresh_multi_wire_system(wire).contains("You are the Root Coordinator"));
+    assert!(!wire.contains("cookie-alpha") && !wire.contains("Bearer alpha"));
+    let body: JsonValue = serde_json::from_str(wire.split_once("\r\n\r\n").unwrap().1).unwrap();
+    let input: JsonValue = serde_json::from_str(body["messages"][1]["content"].as_str().unwrap()).unwrap();
+    let basis = &input["basis"];
+    assert_eq!(basis["phase"], "http-budget-consumption");
+    let fact = &basis["changedFact"]["semantic"];
+    let root = owned.original_terminal.root_run_id.as_ref().unwrap();
+    assert_eq!(fact["rootRunId"], root.as_str());
+    assert_eq!(fact["scanId"], h.context.scan_id.as_str());
+    assert_eq!(fact["targetKey"], h.context.target_url.as_str());
+    assert_eq!(fact["protocol"], "original_received_http_target_cost_advisory_v1");
+    assert_eq!(fact["advisoryOnly"], true);
+    assert_eq!(fact["executionGrant"], false);
+    assert_eq!(fact["additionalScopeGranted"], false);
+    assert_eq!(fact["targetRequestsGranted"], 0);
+    assert_eq!(fact["targetRequests"], 1);
+    assert_eq!(fact["tool"], "compare_identities");
+    assert_eq!(fact["identityHandle"], "session-a");
+    let db = db::open(&h.db_path).unwrap();
+    let snapshot = db.unchecked_transaction().unwrap();
+    let receipt: i64 = snapshot.query_row(
+        "SELECT count(*) FROM agent_http_budget_receipts WHERE root_run_id=?1 AND receipt_id=?2 AND source_id=?3 AND run_id=?4 AND scan_id=?5 AND attempt_number=1 AND target_url=?6 AND response_status=200",
+        params![root, fact["receiptId"].as_str().unwrap(), fact["sourceId"].as_str().unwrap(),
+            fact["childRunId"].as_str().unwrap(), h.context.scan_id, h.context.target_url],
+        |row| row.get(0),
+    ).unwrap();
+    assert_eq!(receipt, 1, "advisory must cite the original received HTTP bill");
+    let target_fee: Vec<(String, i64)> = snapshot.prepare(
+        "SELECT kind,amount FROM agent_budget_entries WHERE root_run_id=?1 AND assignment_id=?2 AND lease_attempt_id=?3 AND source_id=?4 AND dimension='target_requests' ORDER BY rowid"
+    ).unwrap().query_map(
+        params![root, fact["assignmentId"].as_str().unwrap(), fact["workerAttemptId"].as_str().unwrap(), fact["sourceId"].as_str().unwrap()],
+        |row| Ok((row.get(0)?, row.get(1)?)),
+    ).unwrap().collect::<rusqlite::Result<_>>().unwrap();
+    assert_eq!(target_fee, vec![("reserve".into(), 1), ("forfeit".into(), 1), ("reconcile".into(), 1)],
+        "the original target charge remains reserved, received and reconciled exactly once");
+    let requests: Vec<(String, String)> = snapshot.prepare(
+        "SELECT call_id,fact_json FROM agent_root_tick_receipts WHERE root_run_id=?1 AND phase='request' AND json_extract(fact_json,'$.request.basis.phase')='http-budget-consumption'"
+    ).unwrap().query_map([root], |row| Ok((row.get(0)?, row.get(1)?))).unwrap()
+        .collect::<rusqlite::Result<_>>().unwrap();
+    assert_eq!(requests.len(), 1, "one received HTTP bill has one original advisory request");
+    let (call, raw) = &requests[0];
+    let saved: JsonValue = serde_json::from_str(raw).unwrap();
+    assert_eq!(saved["request"]["basis"]["phase"], basis["phase"]);
+    assert_eq!(saved["request"]["basis"]["changedFact"], basis["changedFact"]);
+    assert_eq!(saved["request"]["request"]["messages"], body["messages"]);
+    let root_fee: (i64, i64) = snapshot.query_row(
+        "SELECT count(*),coalesce(sum(amount),0) FROM agent_budget_entries WHERE root_run_id=?1 AND assignment_id='' AND source_id=?2 AND dimension='model_requests' AND kind='consume'",
+        params![root, call], |row| Ok((row.get(0)?, row.get(1)?)),
+    ).unwrap();
+    assert_eq!(root_fee, (1, 1), "the advisory adds exactly one paid Root request");
+    let event: i64 = snapshot.query_row(
+        "SELECT json_extract(fact_json,'$.eventSequence') FROM agent_root_tick_receipts WHERE root_run_id=?1 AND call_id=?2 AND phase='publication'",
+        params![root, call], |row| row.get(0),
+    ).unwrap();
+    let publication = crate::agent_runtime::multi_agent::budget::root::model::tick::Tick::project_publication(&snapshot, root, event).unwrap();
+    assert_eq!(publication.record["advisoryOnly"], true);
+    assert_eq!(publication.record["summary"]["suggestions"], json!(["assess:http_budget_consumption"]));
+    assert!(publication.record.get("localTools").is_none());
+    let web: (i64, i64) = snapshot.query_row(
+        "SELECT r.used_requests,(SELECT count(*) FROM agent_web_model_journal j WHERE j.root_run_id=?1 AND j.child_run_id=r.id AND j.phase='received') FROM agent_runs r WHERE r.id=?2 AND r.role='web_executor'",
+        params![root, fact["childRunId"].as_str().unwrap()],
+        |row| Ok((row.get(0)?, row.get(1)?)),
+    ).unwrap();
+    assert_eq!(web, (1, 1), "revocation cannot dispatch another Web SDK request");
+    let total = before + 1;
+    for dimension in crate::agent_runtime::multi_agent::budget::DIMENSIONS {
+        let balance = crate::agent_runtime::multi_agent::budget::balance(&snapshot, root, None, dimension).unwrap();
+        assert_eq!((balance.reserved, balance.indeterminate), (0, 0));
+        if dimension == "model_requests" { assert_eq!(balance.consumed, total as i64); }
+        if dimension == "target_requests" { assert_eq!(balance.consumed, 2); }
+    }
+    snapshot.rollback().unwrap();
+    total
+}
+
 fn fresh_multi_anonymous_control_dispatch_with_extra(
     revoke: bool,
     extra: usize,
@@ -152,6 +240,11 @@ fn fresh_multi_anonymous_control_dispatch_with_extra(
     .unwrap();
     stop.store(true, Ordering::SeqCst);
     let calls = calls_at_revocation.load(Ordering::SeqCst);
+    let calls = if revoke {
+        fresh_multi_anonymous_control_paid_calls_after_revocation(&h, &owned, calls)
+    } else {
+        calls
+    };
     (h, owned, calls)
 }
 
@@ -315,7 +408,7 @@ fn fresh_multi_anonymous_control_mid_http_revocation_preserves_paid_facts_and_bl
     assert_eq!(
         h.model_seen.lock().unwrap().len(),
         paid_calls,
-        "no SDK after the binding expired during actual HTTP"
+        "only the original bounded HTTP-cost advisory may follow revocation; no execution followups"
     );
     assert_eq!(
         owned.outcome.terminal_code(),

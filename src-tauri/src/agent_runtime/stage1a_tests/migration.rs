@@ -105,6 +105,9 @@ fn a_legacy_database_is_upgraded_in_place_and_stays_readable() {
         connection.execute_batch("DROP TRIGGER IF EXISTS agent_directive_proposal_state_guard_v2").unwrap();
         // Same for the open paid Root retention guard (it reads root_run_id).
         connection.execute_batch("DROP TRIGGER IF EXISTS root_paid_open_run_retained").unwrap();
+        // The later worker-report event trigger joins agent_assignments, which
+        // did not exist in a pre-Stage1 database either.
+        connection.execute_batch("DROP TRIGGER IF EXISTS agent_collaboration_homogeneous_report").unwrap();
         for table in [
             "agent_review_decisions",
             "agent_evidence_edges",
@@ -164,6 +167,14 @@ fn a_legacy_database_is_upgraded_in_place_and_stays_readable() {
         )
         .unwrap();
     assert_eq!(retention, 1, "升级后必须恢复开放付费 Root 保留守卫");
+    let report_events: i64 = connection
+        .query_row(
+            "SELECT COUNT(*) FROM sqlite_master WHERE type='trigger' AND name='agent_collaboration_homogeneous_report'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(report_events, 1, "升级后必须恢复 worker report 事件触发器");
     drop(connection);
     crate::db::initialize(&root).unwrap();
     let connection = crate::db::open(&path).unwrap();

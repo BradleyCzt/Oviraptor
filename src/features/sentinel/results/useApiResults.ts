@@ -1,5 +1,5 @@
 import { computed, ref, type Ref } from "vue";
-import type { SentinelFinding } from "../../../types";
+import type { SentinelFinding } from "../types";
 import { endpointUrl, json, text } from "../presentation";
 
 // API exploration owns its display state. The board only supplies the active

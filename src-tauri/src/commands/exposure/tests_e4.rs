@@ -43,7 +43,7 @@ fn current_settings(connection: &Connection, project: i64, items: i64) -> JsonVa
     value.sources = vec![KIND_PASSIVE_WEB.to_string()];
     value.max_items = items;
     save(connection, &value, 0).expect("配置必须能保存");
-    super::super::exposure_scan_settings(connection, project).expect("配置必须可读")
+    super::exposure_scan_settings(connection, project).expect("配置必须可读")
 }
 
 /// The file size of the temporary database, as the page would have to carry it.

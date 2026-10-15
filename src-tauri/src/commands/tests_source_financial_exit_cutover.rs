@@ -1,7 +1,7 @@
 #[test]
 fn source_financial_exit_pause_between_live_check_and_closure_cannot_publish_terminal() {
     use std::sync::{atomic::Ordering, Arc};
-    let (port, seen, stop) = crate::commands::agent_tests::spawn_endpoint(Arc::new(|_| {
+    let (port, seen, stop) = crate::scanning::agent_tests::spawn_endpoint(Arc::new(|_| {
         (
             500,
             "application/json",

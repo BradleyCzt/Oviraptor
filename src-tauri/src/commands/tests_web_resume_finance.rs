@@ -3,7 +3,7 @@
 fn web_resume_finance_fixture() -> (WebModeFixture, rusqlite::Connection, String) {
     let fixture = web_mode_fixture("multi", "https://finance.example.test/app");
     let context =
-        crate::commands::agent_tests::test_context(&fixture.path, &fixture.target, vec![]);
+        crate::scanning::agent_tests::test_context(&fixture.path, &fixture.target, vec![]);
     persist_frozen_web_execution_plan(
         &fixture.path,
         &fixture.scan,

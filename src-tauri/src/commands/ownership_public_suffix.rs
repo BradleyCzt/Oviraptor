@@ -6,10 +6,10 @@
 
 const OWNERSHIP_PSL_DATA: &str = include_str!("ownership_public_suffix_list.dat");
 /// 写入分析任务的算法版本，规则数据变化必须改变这里的标识。
-const OWNERSHIP_PSL_VERSION: &str = "psl-2026-10-07_07-28-19_UTC-3929462";
+pub(crate) const OWNERSHIP_PSL_VERSION: &str = "psl-2026-10-07_07-28-19_UTC-3929462";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum OwnershipSuffixSection {
+pub(crate) enum OwnershipSuffixSection {
     Icann,
     Private,
     /// 列表无匹配，按默认规则 `*` 取最后一段。
@@ -17,7 +17,7 @@ enum OwnershipSuffixSection {
 }
 
 impl OwnershipSuffixSection {
-    fn as_str(self) -> &'static str {
+    pub(crate) fn as_str(self) -> &'static str {
         match self {
             Self::Icann => "icann",
             Self::Private => "private",
@@ -62,16 +62,16 @@ fn ownership_psl_rules() -> &'static OwnershipPslRules {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-struct OwnershipDomainParts {
+pub(crate) struct OwnershipDomainParts {
     host: String,
     public_suffix: String,
     /// None：主机本身就是公共后缀（例如 com.cn），不存在可注册域。
-    registrable: Option<String>,
-    section: OwnershipSuffixSection,
+    pub(crate) registrable: Option<String>,
+    pub(crate) section: OwnershipSuffixSection,
 }
 
 /// 输入应为已规范化的小写主机名（不含端口/路径）；IP 地址返回 None。
-fn ownership_domain_parts(host: &str) -> Option<OwnershipDomainParts> {
+pub(crate) fn ownership_domain_parts(host: &str) -> Option<OwnershipDomainParts> {
     let host = host.trim().trim_end_matches('.').to_lowercase();
     if host.is_empty()
         || host.parse::<std::net::IpAddr>().is_ok()

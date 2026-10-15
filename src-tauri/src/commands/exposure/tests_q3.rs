@@ -199,14 +199,33 @@ fn q3_two_simultaneous_starters_get_one_active_run() {
 
 #[test]
 fn q3_the_plan_materializes_every_grant_and_names_the_unreachable_tail() {
+    const CHILD: &str = "OVIRAPTOR_TEST_Q3_UNREACHABLE_LOOPBACK_CHILD";
+    const TEST: &str = "commands::exposure::tests_q3::q3_the_plan_materializes_every_grant_and_names_the_unreachable_tail";
+    if std::env::var_os(CHILD).is_none() {
+        // Keep loopback attempts out of host proxy configuration without
+        // changing the environment of any concurrent test in this process.
+        let mut command = Command::new(std::env::current_exe().expect("测试二进制路径"));
+        command.args(["--exact", TEST, "--test-threads=1"])
+            .env(CHILD, "1").env("NO_PROXY", "*").env("no_proxy", "*");
+        for key in ["HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "http_proxy", "https_proxy", "all_proxy"] {
+            command.env_remove(key);
+        }
+        let output = command.output().expect("Q3 本机不可达目标子进程必须启动");
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        assert!(output.status.success() && stdout.contains("1 passed; 0 failed"),
+            "{TEST}: isolated loopback child failed:\n{stdout}\n{}",
+            String::from_utf8_lossy(&output.stderr));
+        return;
+    }
     let root = sandbox("plan");
     let connection = database(&root);
     // 250 origins: the old collector quietly kept 200 of them.
+    // Literal loopback skips DNS; destination port zero cannot host a listener.
     for index in 0..250 {
         seed_scope(
             &connection,
             21,
-            &format!("http://asset-{index}.invalid/"),
+            &format!("http://127.0.1.{}:0/", index + 1),
             true,
         );
     }
@@ -386,6 +405,13 @@ fn q3_a_crash_after_a_closed_item_does_not_fetch_it_again() {
             "second origin",
         )],
     )]));
+    // Work items are claimed by work_key, whose shared prefix is followed by
+    // origin. Ephemeral port allocation does not preserve fixture creation order.
+    let (closed, abandoned) = if closed.origin < abandoned.origin {
+        (closed, abandoned)
+    } else {
+        (abandoned, closed)
+    };
     seed_scope(&connection, PROJECT, &format!("{}/", closed.origin), true);
     seed_scope(
         &connection,

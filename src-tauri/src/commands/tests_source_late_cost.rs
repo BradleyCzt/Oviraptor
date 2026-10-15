@@ -14,7 +14,7 @@ fn source_round_late_cost_is_original_only_and_never_plans_tools() {
             else {
                 panic!()
             };
-            crate::commands::agent_tests::replace_target_cost_coordinator(
+            crate::scanning::agent_tests::replace_target_cost_coordinator(
                 &db,
                 &lease,
                 different_root,
@@ -88,7 +88,7 @@ fn source_round_late_cost_last_write_and_original_request_damage_rollback() {
         let (root,db,context,lease,child,request)=source_round_fixture();
         let check=|db:&rusqlite::Connection|agent_native_source_tool_authority(db,&context,"assignment.finish").map(|_|()).map_err(str::to_string);
         let rounds::Start::Dispatch(call)=rounds::start_authorized(&db,&lease,&child,1,&request,8_000,check).unwrap() else {panic!()};
-        crate::commands::agent_tests::replace_target_cost_coordinator(&db,&lease,true);
+        crate::scanning::agent_tests::replace_target_cost_coordinator(&db,&lease,true);
         db.execute_batch(&format!("CREATE TRIGGER damage_source_cost AFTER INSERT ON agent_model_cost_facts BEGIN {mutation} END;")).unwrap();
         let before=application_table_snapshot(&db);
         assert!(rounds::record_received(&db,&call,&source_round_result("late-tool","repo.inventory",json!({}))).is_err());
@@ -112,7 +112,7 @@ fn source_round_late_cost_estimates_and_overruns_keep_original_round_cap() {
         else {
             panic!()
         };
-        crate::commands::agent_tests::replace_target_cost_coordinator(&db, &lease, false);
+        crate::scanning::agent_tests::replace_target_cost_coordinator(&db, &lease, false);
         let mut response = source_round_result("late-tool", "repo.inventory", json!({}));
         response.usage_reported = reported;
         if reported {

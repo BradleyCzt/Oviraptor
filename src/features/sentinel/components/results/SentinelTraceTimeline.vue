@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed } from "vue";
 import { Cpu, Wrench } from "@lucide/vue";
-import type { AgentTraceDetail } from "../../../../types";
+import type { AgentTraceDetail } from "../../types";
 import { formatNumber } from "../../presentation";
 import RootDecisionSummary from "../RootDecisionSummary.vue";
 import { isRootModelRound } from "../../traces/rootDecisionContract";

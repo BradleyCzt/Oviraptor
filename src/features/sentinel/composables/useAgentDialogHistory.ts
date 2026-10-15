@@ -1,7 +1,7 @@
 import { computed, ref, watch, type Ref } from "vue";
 import { sentinelApi } from "../api";
 import { validTimelineRows } from "../timeline/projectionContract";
-import type { AgentTimelineItem, AgentTimelinePage, NativeScanStatus } from "../../../types";
+import type { AgentTimelineItem, AgentTimelinePage, NativeScanStatus } from "../types";
 
 type TaskView = { scanId: string; isCurrent: () => boolean };
 

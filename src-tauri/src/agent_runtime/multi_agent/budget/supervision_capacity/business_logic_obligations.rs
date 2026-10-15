@@ -63,7 +63,7 @@ pub(super) fn enabled_on(db: &Connection, root: &str) -> Result<bool, String> {
         if birth.is_some() {
             // Validate the old signed declaration before accepting old no-op;
             // missing definition/key/signature and scope drift propagate.
-            let proof = crate::commands::original_root_capture_mode(db, root)?;
+            let proof = crate::scanning::scope_contract::original_root_capture_mode(db, root)?;
             web_mode::root::verify_birth(db, root, &proof)?;
         }
         return Ok(false);
@@ -82,7 +82,7 @@ pub(super) fn enabled_on(db: &Connection, root: &str) -> Result<bool, String> {
     }
     super::super::root::RootOwner::load_original(db, root)?;
     let mode = mode.ok_or("web_mode_root_missing")?;
-    let original = crate::commands::original_root_capture_mode(db, root)?;
+    let original = crate::scanning::scope_contract::original_root_capture_mode(db, root)?;
     web_mode::root::verify_birth(db, root, &original)?;
     let protocol = mode.bootstrap_dispatch().unwrap_or(Value::Null);
     if mode.mode() != web_mode::WebMode::Multi
@@ -149,7 +149,7 @@ pub(super) fn pending_on(db: &Connection, actor: &CoordinatorLease) -> Result<i6
             run_id: run,
             role: AgentRole::BusinessLogic,
         };
-        if crate::commands::native_coordinator_business_logic_output_publication_replay_on(
+        if crate::scanning::publication_replay::native_coordinator_business_logic_output_publication_replay_on(
             db, actor, &child,
         )?
         .is_none()

@@ -25,7 +25,7 @@ async function mount(read) {
   const exports = {};
   new Function('require', 'exports', compiled)((name) => {
     if (name === 'vue') return vue;
-    if (name === '../../../api') return { api: { getNativeBudgetDiagnostics: async (...args) => {
+    if (name === '../api') return { sentinelApi: { getNativeBudgetDiagnostics: async (...args) => {
       calls.push(args); return read(...args);
     } } };
     if (name === '../../../i18n') return { useI18n: () => ({ tr: (zh) => zh }) };
@@ -206,7 +206,7 @@ test('actual budget template states supervision obligations and missing token/US
   const { loadWorkspaceModule } = require('./result_component_harness.cjs');
   const { renderToString } = require('@vue/server-renderer');
   const base = loadWorkspaceModule('src/features/sentinel/components/NativeBudgetDiagnostics.vue', {
-    '../../../api': { api: {} },
+    '../api': { sentinelApi: {} },
     '../../../i18n': { useI18n: () => ({ tr: zh => zh }) },
     '../../../composables/useCommittedRefresh': { useCommittedRefresh: () => {} },
     '../timeline/eventContract': { validCollaborationEvent: () => true },
@@ -269,7 +269,7 @@ test('actual Single diagnostic template separates closed history from permission
   const { loadWorkspaceModule } = require('./result_component_harness.cjs');
   const { renderToString } = require('@vue/server-renderer');
   const base = loadWorkspaceModule('src/features/sentinel/components/NativeBudgetDiagnostics.vue', {
-    '../../../api': { api: {} }, '../../../i18n': { useI18n: () => ({ tr: zh => zh }) },
+    '../api': { sentinelApi: {} }, '../../../i18n': { useI18n: () => ({ tr: zh => zh }) },
     '../../../composables/useCommittedRefresh': { useCommittedRefresh: () => {} },
     '../timeline/eventContract': { validCollaborationEvent: () => true },
   }).default;

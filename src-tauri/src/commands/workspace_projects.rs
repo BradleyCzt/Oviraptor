@@ -1,56 +1,8 @@
-#[tauri::command]
-pub async fn dashboard_stats(
-    state: State<'_, AppState>,
-    project_id: Option<i64>,
-) -> Result<DashboardStats, String> {
-    let connection = db::open(&state.db_path)?;
-    let project_count = connection
-        .query_row(
-            "SELECT COUNT(*) FROM projects WHERE status='active'",
-            [],
-            |row| row.get(0),
-        )
-        .map_err(|error| error.to_string())?;
-    let running_jobs = connection
-        .query_row(
-            "SELECT COUNT(*) FROM runs WHERE status IN ('queued','running','cancel_requested')",
-            [],
-            |row| row.get(0),
-        )
-        .map_err(|error| error.to_string())?;
-    let (asset_count, alive_count, pending_count, blocked_count) = connection
-        .query_row(
-            r#"SELECT COUNT(*),
-                      COALESCE(SUM(CASE WHEN a.probe_outcome IN ('web_alive','web_restricted','browser_render_required','virtual_host_required') AND COALESCE(a.content_category,'') NOT IN ('gambling','porn','custom_rule') THEN 1 ELSE 0 END),0),
-                      COALESCE(SUM(CASE WHEN pa.decision IN ('pending','uncertain','') THEN 1 ELSE 0 END),0),
-                      COALESCE(SUM(CASE WHEN a.probe_outcome='blocked_content' OR a.content_category IN ('gambling','porn','custom_rule') THEN 1 ELSE 0 END),0)
-               FROM project_assets pa JOIN assets a ON a.id=pa.asset_id
-               WHERE pa.is_deleted=0 AND (?1 IS NULL OR pa.project_id=?1)"#,
-            [project_id],
-            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
-        )
-        .map_err(|error| error.to_string())?;
-    let (new_count, changed_count) = connection
-        .query_row(
-            r#"SELECT COALESCE(SUM(CASE WHEN event_type='new' THEN 1 ELSE 0 END),0),
-                      COALESCE(SUM(CASE WHEN event_type='changed' THEN 1 ELSE 0 END),0)
-               FROM asset_events
-               WHERE created_at>=datetime('now','-30 day') AND (?1 IS NULL OR project_id=?1)"#,
-            [project_id],
-            |row| Ok((row.get(0)?, row.get(1)?)),
-        )
-        .map_err(|error| error.to_string())?;
-    Ok(DashboardStats {
-        project_count,
-        asset_count,
-        alive_count,
-        pending_count,
-        new_count,
-        changed_count,
-        blocked_count,
-        running_jobs,
-    })
-}
+//! Project identity and lifecycle. Cross-business counts are deletion guards;
+//! this module does not initialize assets, scans, chat, or model execution.
+use crate::{db, models::{Project, ProjectImpact, ProjectInput}, AppState};
+use rusqlite::params;
+use tauri::State;
 
 #[tauri::command]
 pub async fn list_projects(state: State<'_, AppState>) -> Result<Vec<Project>, String> {
@@ -138,7 +90,7 @@ fn project_other_record_count(
     Ok(total)
 }
 
-fn project_impact_for_connection(
+pub(super) fn project_impact_for_connection(
     connection: &rusqlite::Connection,
     project_id: i64,
 ) -> Result<ProjectImpact, String> {
@@ -290,7 +242,7 @@ pub fn delete_project(state: State<AppState>, project_id: i64) -> Result<(), Str
 }
 
 // The callback is a deterministic concurrency test seam; the command passes a no-op.
-fn delete_project_for_connection(
+pub(super) fn delete_project_for_connection(
     connection: &mut rusqlite::Connection,
     project_id: i64,
     after_admission: impl FnOnce(),
@@ -330,185 +282,22 @@ fn delete_project_for_connection(
     transaction.commit().map_err(|error| error.to_string())
 }
 
-#[tauri::command]
-pub fn get_app_settings(state: State<AppState>) -> Result<AppSettings, String> {
-    let connection = db::open(&state.db_path)?;
-    let value = |key: &str, fallback: &str| -> String {
-        connection
-            .query_row(
-                "SELECT value FROM app_settings WHERE key=?1",
-                [key],
-                |row| row.get(0),
-            )
-            .unwrap_or_else(|_| fallback.to_string())
-    };
-    Ok(AppSettings {
-        reminder_days: value("reminder_days", "7").parse().unwrap_or(7),
-        custom_icon: value("custom_icon", "false") == "true",
-        deduplicated_assets: value("last_deduplicated", "0").parse().unwrap_or(0),
-    })
-}
+#[cfg(test)]
+pub(crate) mod test_support {
+    use crate::workspace_models::ProjectImpact;
 
-#[tauri::command]
-pub fn get_app_icon_data_url(state: State<AppState>) -> Result<String, String> {
-    let custom = state.app_data_dir.join("custom-app-icon.png");
-    let bytes = if custom.is_file() {
-        let bytes = fs::read(custom).map_err(|error| error.to_string())?;
-        if Image::from_bytes(&bytes).is_ok() {
-            bytes
-        } else {
-            include_bytes!("../../icons/brand-icon.png").to_vec()
-        }
-    } else {
-        include_bytes!("../../icons/brand-icon.png").to_vec()
-    };
-    // A single base64 string is materially cheaper to serialize across Tauri
-    // IPC than hundreds of thousands of JSON array elements.
-    Ok(format!(
-        "data:image/png;base64,{}",
-        BASE64_STANDARD.encode(bytes)
-    ))
-}
-
-#[tauri::command]
-pub fn save_app_settings(state: State<AppState>, input: AppSettingsInput) -> Result<(), String> {
-    if !(1..=365).contains(&input.reminder_days) {
-        return Err("提醒天数必须在 1 到 365 之间".into());
+    pub(crate) fn delete_project_for_connection(
+        connection: &mut rusqlite::Connection,
+        project_id: i64,
+        after_admission: impl FnOnce(),
+    ) -> Result<(), String> {
+        super::delete_project_for_connection(connection, project_id, after_admission)
     }
-    db::open(&state.db_path)?
-        .execute(
-            "INSERT INTO app_settings(key,value) VALUES('reminder_days',?1) ON CONFLICT(key) DO UPDATE SET value=excluded.value",
-            [input.reminder_days.to_string()],
-        )
-        .map_err(|error| error.to_string())?;
-    Ok(())
-}
 
-#[tauri::command]
-pub fn save_app_icon(state: State<AppState>, bytes: Vec<u8>) -> Result<(), String> {
-    if bytes.is_empty() || bytes.len() > 5 * 1024 * 1024 {
-        return Err("图标必须是小于 5MB 的 PNG 文件".into());
+    pub(crate) fn project_impact_for_connection(
+        connection: &rusqlite::Connection,
+        project_id: i64,
+    ) -> Result<ProjectImpact, String> {
+        super::project_impact_for_connection(connection, project_id)
     }
-    let icon = Image::from_bytes(&bytes).map_err(|_| "无法解析 PNG 图标".to_string())?;
-    if icon.width() < 32 || icon.height() < 32 {
-        return Err("图标尺寸至少为 32×32".into());
-    }
-    let path = state.app_data_dir.join("custom-app-icon.png");
-    fs::write(&path, bytes).map_err(|error| error.to_string())?;
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        fs::set_permissions(&path, fs::Permissions::from_mode(0o600))
-            .map_err(|error| error.to_string())?;
-    }
-    db::open(&state.db_path)?
-        .execute(
-            "INSERT INTO app_settings(key,value) VALUES('custom_icon','true') ON CONFLICT(key) DO UPDATE SET value='true'",
-            [],
-        )
-        .map_err(|error| error.to_string())?;
-    Ok(())
 }
-
-#[tauri::command]
-pub fn reset_app_icon(state: State<AppState>) -> Result<(), String> {
-    let _ = fs::remove_file(state.app_data_dir.join("custom-app-icon.png"));
-    for directory in &state.legacy_icon_dirs {
-        let _ = fs::remove_file(directory.join("custom-app-icon.png"));
-    }
-    db::open(&state.db_path)?
-        .execute(
-            "INSERT INTO app_settings(key,value) VALUES('custom_icon','false') ON CONFLICT(key) DO UPDATE SET value='false'",
-            [],
-        )
-        .map_err(|error| error.to_string())?;
-    Ok(())
-}
-
-#[tauri::command]
-pub fn startup_status(state: State<AppState>) -> Result<StartupStatus, String> {
-    let connection = db::open(&state.db_path)?;
-    connection
-        .execute(
-            "UPDATE runs SET status='interrupted',stage='interrupted',error='上次运行时应用或电脑被关闭，任务未完成',finished_at=datetime('now','localtime') WHERE status IN ('queued','running','cancel_requested')",
-            [],
-        )
-        .map_err(|error| error.to_string())?;
-    let reminder_days: i64 = connection
-        .query_row(
-            "SELECT value FROM app_settings WHERE key='reminder_days'",
-            [],
-            |row| row.get::<_, String>(0),
-        )
-        .unwrap_or_else(|_| "7".into())
-        .parse()
-        .unwrap_or(7);
-
-    let mut stale_statement = connection.prepare(r#"
-        SELECT p.id,p.name,
-               MAX(CASE WHEN r.status IN ('completed','historical_import') OR r.stage='completed' THEN COALESCE(r.finished_at,r.created_at) END) AS last_run,
-               CAST(julianday('now','localtime')-julianday(MAX(CASE WHEN r.status IN ('completed','historical_import') OR r.stage='completed' THEN COALESCE(r.finished_at,r.created_at) END)) AS INTEGER) AS days_old
-        FROM projects p LEFT JOIN runs r ON r.project_id=p.id
-        WHERE p.status='active'
-          AND (EXISTS(SELECT 1 FROM targets t WHERE t.project_id=p.id AND t.enabled=1)
-               OR EXISTS(SELECT 1 FROM project_assets pa WHERE pa.project_id=p.id AND pa.is_deleted=0))
-        GROUP BY p.id,p.name
-        HAVING last_run IS NULL OR days_old>=?1
-        ORDER BY COALESCE(days_old,999999) DESC,p.name
-    "#).map_err(|error| error.to_string())?;
-    let stale_projects = stale_statement
-        .query_map([reminder_days], |row| {
-            Ok(StaleProject {
-                project_id: row.get(0)?,
-                project_name: row.get(1)?,
-                last_run_at: row.get(2)?,
-                days_since_update: row.get(3)?,
-            })
-        })
-        .map_err(|error| error.to_string())?
-        .collect::<Result<Vec<_>, _>>()
-        .map_err(|error| error.to_string())?;
-
-    let mut interrupted_statement = connection
-        .prepare(
-            r#"
-        SELECT r.id,r.project_id,p.name,r.profile_id,r.name,r.pipeline,r.created_at
-        FROM runs r JOIN projects p ON p.id=r.project_id
-        WHERE r.status='interrupted' ORDER BY r.id DESC LIMIT 30
-    "#,
-        )
-        .map_err(|error| error.to_string())?;
-    let interrupted_jobs = interrupted_statement
-        .query_map([], |row| {
-            Ok(InterruptedJob {
-                run_id: row.get(0)?,
-                project_id: row.get(1)?,
-                project_name: row.get(2)?,
-                profile_id: row.get(3)?,
-                name: row.get(4)?,
-                pipeline: row.get(5)?,
-                created_at: row.get(6)?,
-            })
-        })
-        .map_err(|error| error.to_string())?
-        .collect::<Result<Vec<_>, _>>()
-        .map_err(|error| error.to_string())?;
-    Ok(StartupStatus {
-        reminder_days,
-        stale_projects,
-        interrupted_jobs,
-    })
-}
-
-#[tauri::command]
-pub fn acknowledge_interrupted_run(state: State<AppState>, run_id: i64) -> Result<(), String> {
-    db::open(&state.db_path)?
-        .execute(
-            "UPDATE runs SET status='restarted',stage='restarted' WHERE id=?1 AND status='interrupted'",
-            [run_id],
-        )
-        .map_err(|error| error.to_string())?;
-    Ok(())
-}
-
-include!("workspace_config_profiles.rs");

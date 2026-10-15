@@ -61,7 +61,7 @@ async function mount(handlers = {}) {
   } });
   new Function('require', 'exports', transpile(script.content))(name => {
     if (name === 'vue') return vue;
-    if (name === '../../../api') return { api };
+    if (name === '../reconciliation/api') return { rootCostReconciliationApi: api };
     if (name === '../../../i18n') return { useI18n: () => ({ tr: zh => zh }) };
     if (name === '../reconciliation/contract') return contract;
     if (name === '../reconciliation/continuation') return continuationContract;

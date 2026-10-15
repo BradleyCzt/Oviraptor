@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed } from "vue";
 import { AlertTriangle, Check, LogIn, RefreshCw, ShieldCheck, X } from "@lucide/vue";
-import type { BrowserAuthSession, SentinelScan } from "../../../types";
+import type { BrowserAuthSession, SentinelScan } from "../types";
 
 const props = defineProps<{
   scan: SentinelScan;

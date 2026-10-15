@@ -52,6 +52,10 @@ const RETIREMENT_SOURCE_SCOPES: &[&str] = &[
     "tools", "scripts", "public",
 ];
 
+// Git does not retain empty directories. These two future source roots may be
+// absent, but when present they receive the same recursive and symlink checks.
+const RETIREMENT_OPTIONAL_SOURCE_SCOPES: &[&str] = &["scripts", "public"];
+
 fn retirement_reviewed_resource_path(value: &str) -> bool {
     // Deliberately a bounded project policy, not a second glob implementation.
     // Only these literal roots are scanned recursively on every platform.
@@ -122,7 +126,12 @@ fn retirement_scan_inputs(root: &Path) -> Result<std::collections::BTreeMap<Stri
     // Fixed in code rather than in the allowlist: removing a manifest entry
     // cannot shrink the scan. No extension filter, ignored files, or glob skips.
     for scope in RETIREMENT_SOURCE_SCOPES {
-        retirement_scan_path(root, &root.join(scope), &mut found)?;
+        let path = root.join(scope);
+        match fs::symlink_metadata(&path) {
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound
+                && RETIREMENT_OPTIONAL_SOURCE_SCOPES.contains(scope) => {}
+            _ => retirement_scan_path(root, &path, &mut found)?,
+        }
     }
     // Include immediate build/config inputs, including future config variants.
     // Generated outputs still need separate artifact acceptance; this inventory
@@ -230,6 +239,50 @@ fn retirement_package_fixture() -> PathBuf {
     for scope in RETIREMENT_SOURCE_SCOPES { fs::create_dir_all(root.join(scope)).unwrap(); }
     fs::write(root.join("src-tauri/tauri.conf.json"), b"{}").unwrap();
     root
+}
+
+#[test]
+fn retirement_optional_source_roots_are_absent_or_fully_audited() {
+    let root = retirement_package_fixture();
+    for scope in RETIREMENT_OPTIONAL_SOURCE_SCOPES {
+        fs::remove_dir_all(root.join(scope)).unwrap();
+    }
+    assert!(retirement_scan_inputs(&root).unwrap().is_empty());
+    for scope in RETIREMENT_OPTIONAL_SOURCE_SCOPES {
+        let relative = format!("{scope}/nested/input.custom");
+        let path = root.join(&relative);
+        fs::create_dir_all(path.parent().unwrap()).unwrap();
+        fs::write(path, b"StRiX").unwrap();
+        let found = retirement_scan_inputs(&root).unwrap();
+        assert_eq!(found[&relative]["literalOccurrences"], 1);
+    }
+    for required in ["src", "tools"] {
+        let path = root.join(required);
+        fs::remove_dir_all(&path).unwrap();
+        let error = retirement_scan_inputs(&root).unwrap_err();
+        assert!(error.contains(&path.display().to_string()), "{error}");
+        fs::create_dir(path).unwrap();
+    }
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[cfg(unix)]
+#[test]
+fn retirement_optional_source_roots_still_reject_root_and_nested_symlinks() {
+    let root = retirement_package_fixture();
+    for scope in RETIREMENT_OPTIONAL_SOURCE_SCOPES {
+        let path = root.join(scope);
+        fs::remove_dir_all(&path).unwrap();
+        std::os::unix::fs::symlink("missing", &path).unwrap();
+        assert!(retirement_scan_inputs(&root).unwrap_err().contains("symlinks"));
+        fs::remove_file(&path).unwrap();
+        let nested = path.join("nested/link.custom");
+        fs::create_dir_all(nested.parent().unwrap()).unwrap();
+        std::os::unix::fs::symlink("missing", &nested).unwrap();
+        assert!(retirement_scan_inputs(&root).unwrap_err().contains("symlinks"));
+        fs::remove_file(nested).unwrap();
+    }
+    fs::remove_dir_all(root).unwrap();
 }
 
 #[test]

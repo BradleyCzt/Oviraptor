@@ -1,5 +1,5 @@
 import { onUnmounted, ref, watch } from "vue";
-import type { AgentTraceDetail } from "../../../types";
+import type { AgentTraceDetail } from "../types";
 import { isTraceDetailForTask } from "./traceDetailContract";
 
 // Read-only Board state. No execution, polling or automatic retry is added.

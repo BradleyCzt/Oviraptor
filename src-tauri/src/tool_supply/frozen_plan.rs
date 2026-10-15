@@ -85,7 +85,7 @@ fn schema(db: &Connection) -> Result<(), String> {
 }
 fn scope_on(db: &Connection, root: &str) -> Result<(Value, VerifiedMode, Vec<String>), String> {
     RootOwner::load_original(db, root)?;
-    let mode = crate::commands::original_root_capture_mode(db, root)?;
+    let mode = crate::scanning::scope_contract::original_root_capture_mode(db, root)?;
     let declaration = crate::agent_runtime::web_mode::root::read(db, root)?
         .ok_or("tool_supply_original_mode_missing")?;
     let web: bool = db

@@ -3,7 +3,7 @@
 // stable code, and a payload that does not match the shape is rejected so a broken
 // response can never overwrite the last trustworthy snapshot.
 
-import type { ExposureFinding, ExposureRun, ExposureSourceResult } from "../../../types";
+import type { ExposureFinding, ExposureRun, ExposureSourceResult } from "../types";
 
 export type ExposureReviewStatus = "new" | "reviewing" | "confirmed" | "dismissed";
 

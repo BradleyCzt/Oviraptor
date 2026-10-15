@@ -173,11 +173,11 @@ fn github_project(connection: &Connection, project_id: i64, site: &Fixture, sour
         .query_row("SELECT COALESCE(MAX(version),0) FROM exposure_settings WHERE project_id=?1", [project_id], |row| row.get(0))
         .unwrap();
     save(connection, &value, current).expect("配置必须能保存");
-    super::super::exposure_scan_settings(connection, project_id).expect("配置必须可读")
+    super::exposure_scan_settings(connection, project_id).expect("配置必须可读")
 }
 
-fn fixture_endpoints(index: &Fixture, credential: CredentialLookup) -> super::super::SourceEndpoints {
-    super::super::SourceEndpoints {
+fn fixture_endpoints(index: &Fixture, credential: CredentialLookup) -> super::SourceEndpoints {
+    super::SourceEndpoints {
         ct: vec![index.origin.clone()],
         archive: vec![index.origin.clone()],
         github: endpoint(index),
@@ -187,9 +187,9 @@ fn fixture_endpoints(index: &Fixture, credential: CredentialLookup) -> super::su
     }
 }
 
-fn run_worker(db_path: &Path, run_id: i64, project_id: i64, settings: &JsonValue, endpoints: super::super::SourceEndpoints) {
-    super::super::use_test_endpoints_once(endpoints);
-    super::super::execute_exposure_run(db_path.to_path_buf(), run_id, project_id, "g2-worker".into(), settings.clone());
+fn run_worker(db_path: &Path, run_id: i64, project_id: i64, settings: &JsonValue, endpoints: super::SourceEndpoints) {
+    super::use_test_endpoints_once(endpoints);
+    super::execute_exposure_run(db_path.to_path_buf(), run_id, project_id, "g2-worker".into(), settings.clone());
 }
 
 fn source_result(connection: &Connection, run_id: i64, source: &str) -> (String, String) {
@@ -220,7 +220,7 @@ fn disposition(connection: &Connection, project_id: i64, url: &str) -> (String, 
 
 #[test]
 fn g2_0_production_endpoints_are_constants_and_the_test_override_is_used_once() {
-    let production = super::super::SourceEndpoints::production();
+    let production = super::SourceEndpoints::production();
     assert_eq!(production.ct, vec!["https://crt.sh".to_string()]);
     assert_eq!(production.archive, vec!["https://web.archive.org".to_string()]);
     assert_eq!(production.github, GithubEndpoint { api_origin: "https://api.github.com".into(), allow_private: false });
@@ -234,10 +234,10 @@ fn g2_0_production_endpoints_are_constants_and_the_test_override_is_used_once() 
         other => panic!("生产凭据端口必须未装配：{other:?}"),
     }
     let fixture = site();
-    super::super::use_test_endpoints_once(fixture_endpoints(&fixture, CredentialLookup::production()));
-    assert_eq!(super::super::source_endpoints().github.api_origin, fixture.origin);
+    super::use_test_endpoints_once(fixture_endpoints(&fixture, CredentialLookup::production()));
+    assert_eq!(super::source_endpoints().github.api_origin, fixture.origin);
     // 用一次即清空：下一次取到的又是生产常量。
-    assert_eq!(super::super::source_endpoints().github.api_origin, "https://api.github.com");
+    assert_eq!(super::source_endpoints().github.api_origin, "https://api.github.com");
 }
 
 #[test]
@@ -776,7 +776,7 @@ fn g2_3_the_settings_view_lists_each_github_capability_separately() {
     let root = sandbox("view");
     let (connection, _) = database(&root);
     connection.execute("INSERT INTO projects(id,name,status) VALUES(531,'g2','active')", []).unwrap();
-    let view = super::super::exposure_settings_view_in(&connection, 531).expect("配置视图");
+    let view = super::exposure_settings_view_in(&connection, 531).expect("配置视图");
     let caps = view["sourceCapabilities"].as_array().unwrap();
     let state = |cap: &str| caps.iter().find(|row| row["capability"] == cap).unwrap().clone();
     assert_eq!(state("repository_metadata")["state"], "configured");

@@ -45,7 +45,7 @@ fn desktop_financial_continuation_acceptance_seed() {
     assert!(
         args.iter().any(|arg| arg == "--exact")
             && args.iter().any(|arg| arg
-                == "commands::agent_tests::desktop_financial_continuation_acceptance_seed"),
+                == "scanning::agent_tests::desktop_financial_continuation_acceptance_seed"),
         "desktop seed must be selected as one exact test"
     );
     let acceptance = crate::startup_profile::acceptance_root()
