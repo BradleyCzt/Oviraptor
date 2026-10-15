@@ -111,7 +111,7 @@ fn page_findings(connection: &Connection, project_id: i64, cursor: &str) -> (f64
     let start = Instant::now();
     let input = super::contract::ExposureFindingPageInput { project_id, page_size: 50, cursor: cursor.to_string(), ..Default::default() };
     let query = input.normalize().unwrap();
-    let page = super::super::finding_page_view(connection, &query).unwrap();
+    let page = super::finding_page_view(connection, &query).unwrap();
     let elapsed = ms(start);
     let value = serde_json::to_value(&page).unwrap();
     (elapsed, value["nextCursor"].as_str().unwrap_or_default().to_string(), value["total"].as_i64().unwrap_or(-1))
@@ -147,7 +147,7 @@ fn g4_4_scale_tier() {
     settings.sources = vec!["passive_web".into()];
     settings.max_items = n;
     save(&connection, &settings, 0).unwrap();
-    let frozen = super::super::exposure_scan_settings(&connection, pid).unwrap();
+    let frozen = super::exposure_scan_settings(&connection, pid).unwrap();
     let start = Instant::now();
     let started = start_or_reuse(&connection, pid, &frozen).unwrap();
     out.insert("planBuildMs".into(), json!(ms(start)));
@@ -253,12 +253,12 @@ fn g4_4_scale_tier() {
     std::fs::create_dir_all(&exports).unwrap();
     let now = chrono::Local::now();
     let start = Instant::now();
-    let (findings_path, rows) = super::super::export_exposure_in(&connection, &exports, pid, "findings", now).unwrap();
+    let (findings_path, rows) = super::export_exposure_in(&connection, &exports, pid, "findings", now).unwrap();
     let findings_ms = ms(start);
     assert_eq!(rows as i64, n);
     let verified = super::export::verify_written(&findings_path).unwrap();
     let start = Instant::now();
-    let (ledger_path, ledger_rows) = super::super::export_exposure_in(&connection, &exports, pid, "ledger", now).unwrap();
+    let (ledger_path, ledger_rows) = super::export_exposure_in(&connection, &exports, pid, "ledger", now).unwrap();
     let ledger_ms = ms(start);
     let ledger_check = super::export::verify_written(&ledger_path).unwrap();
     assert_eq!(ledger_check["rowKinds"]["incident"], n / 10 + 3 * n / 10);
@@ -513,7 +513,7 @@ fn rem_scale_tier_with_per_asset_projection() {
     settings.sources = vec!["passive_web".into()];
     settings.max_items = n;
     save(&connection, &settings, 0).unwrap();
-    let frozen = super::super::exposure_scan_settings(&connection, pid).unwrap();
+    let frozen = super::exposure_scan_settings(&connection, pid).unwrap();
     let start = Instant::now();
     let started = start_or_reuse(&connection, pid, &frozen).unwrap();
     let plan_ms = ms(start);
@@ -1057,14 +1057,14 @@ fn rem2_cancelling_another_projects_scan_is_refused_without_writing() {
     };
     let before = snapshot(&connection);
     let changes = connection.total_changes();
-    let refused = crate::commands::cancel_exposure_scan_in(&connection, 921, run_b);
+    let refused = crate::commands::exposure::cancel_exposure_scan_in(&connection, 921, run_b);
     assert!(refused.as_ref().is_err_and(|error| error.contains("exposure_run_project_mismatch")), "{refused:?}");
     assert_eq!(connection.total_changes(), changes, "被拒绝的取消不能写库");
     assert_eq!(snapshot(&connection), before);
-    let missing = crate::commands::cancel_exposure_scan_in(&connection, 921, run_b + 100);
+    let missing = crate::commands::exposure::cancel_exposure_scan_in(&connection, 921, run_b + 100);
     assert!(missing.as_ref().is_err_and(|error| error.contains("exposure_run_not_found")), "{missing:?}");
     assert_eq!(connection.total_changes(), changes);
-    crate::commands::cancel_exposure_scan_in(&connection, 922, run_b).unwrap();
+    crate::commands::exposure::cancel_exposure_scan_in(&connection, 922, run_b).unwrap();
     let (flag, stage): (i64, String) = connection
         .query_row("SELECT cancel_requested,stage FROM exposure_runs WHERE id=?1", [run_b], |r| Ok((r.get(0)?, r.get(1)?)))
         .unwrap();

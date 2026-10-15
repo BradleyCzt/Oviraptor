@@ -229,11 +229,11 @@ fn document_project(connection: &Connection, project_id: i64, site: &Fixture, so
         .query_row("SELECT COALESCE(MAX(version),0) FROM exposure_settings WHERE project_id=?1", [project_id], |row| row.get(0))
         .unwrap();
     save(connection, &value, current).expect("配置必须能保存");
-    super::super::exposure_scan_settings(connection, project_id).expect("配置必须可读")
+    super::exposure_scan_settings(connection, project_id).expect("配置必须可读")
 }
 
-fn fixture_endpoints() -> super::super::SourceEndpoints {
-    super::super::SourceEndpoints {
+fn fixture_endpoints() -> super::SourceEndpoints {
+    super::SourceEndpoints {
         ct: Vec::new(),
         archive: Vec::new(),
         github: GithubEndpoint { api_origin: "http://127.0.0.1:9".into(), allow_private: true },
@@ -245,8 +245,8 @@ fn fixture_endpoints() -> super::super::SourceEndpoints {
 
 fn run_round(connection: &Connection, db_path: &Path, project_id: i64, settings: &JsonValue) -> i64 {
     let started = start_or_reuse(connection, project_id, settings).expect("计划必须能建立");
-    super::super::use_test_endpoints_once(fixture_endpoints());
-    super::super::execute_exposure_run(db_path.to_path_buf(), started.run_id, project_id, "g3-worker".into(), settings.clone());
+    super::use_test_endpoints_once(fixture_endpoints());
+    super::execute_exposure_run(db_path.to_path_buf(), started.run_id, project_id, "g3-worker".into(), settings.clone());
     started.run_id
 }
 
@@ -483,9 +483,9 @@ fn g3_0_an_interrupted_import_is_not_resumed_as_if_the_text_were_still_there() {
     connection.execute("UPDATE exposure_runs SET status='running' WHERE id=?1", [run_id]).unwrap();
     connection.execute("UPDATE exposure_work_items SET status='pending',owner='',claim_version=claim_version+1 WHERE run_id=?1", [run_id]).unwrap();
     connection.execute("UPDATE exposure_import_batches SET status='running' WHERE run_id=?1", [run_id]).unwrap();
-    let settings = super::super::exposure_scan_settings(&connection, pid).unwrap();
-    super::super::use_test_endpoints_once(fixture_endpoints());
-    super::super::execute_exposure_run(db_path.clone(), run_id, pid, "g3-resume".into(), settings);
+    let settings = super::exposure_scan_settings(&connection, pid).unwrap();
+    super::use_test_endpoints_once(fixture_endpoints());
+    super::execute_exposure_run(db_path.clone(), run_id, pid, "g3-resume".into(), settings);
     let (status, reason): (String, String) = connection
         .query_row("SELECT status,reason FROM exposure_work_items WHERE run_id=?1", [run_id], |row| Ok((row.get(0)?, row.get(1)?)))
         .unwrap();
@@ -989,7 +989,7 @@ fn g3_4_the_settings_view_lists_document_capabilities_and_named_unsupported_dire
             .clone();
         (row["state"].as_str().unwrap().to_string(), row["reason"].as_str().unwrap_or_default().to_string())
     };
-    let view = super::super::exposure_settings_view_in(&connection, pid).unwrap();
+    let view = super::exposure_settings_view_in(&connection, pid).unwrap();
     assert_eq!(state_of(&view, "explicit_document_url").0, "unconfigured");
     let (import_state, import_reason) = state_of(&view, "file_import");
     assert_eq!(import_state, "configured");
@@ -1005,7 +1005,7 @@ fn g3_4_the_settings_view_lists_document_capabilities_and_named_unsupported_dire
     assert!(view["bounds"]["sources"].as_array().unwrap().iter().any(|row| row == "document_link"));
     assert!(!view["defaultSources"].as_array().unwrap().iter().any(|row| row == "document_link"));
     document_project(&connection, pid, &site, &["passive_web", "document_link"], vec![entry("https://docs.example.test/a")]);
-    let view = super::super::exposure_settings_view_in(&connection, pid).unwrap();
+    let view = super::exposure_settings_view_in(&connection, pid).unwrap();
     let (state, reason) = state_of(&view, "explicit_document_url");
     assert_eq!(state, "configured");
     assert!(reason.contains("1 个地址"), "{reason}");

@@ -5,7 +5,7 @@
 
 use rusqlite::{params, Connection, OptionalExtension, Row};
 
-use crate::models::{ExposureFinding, ExposureRun, ExposureSourceResult};
+use crate::asset_models::{ExposureFinding, ExposureRun, ExposureSourceResult};
 
 use super::contract::{
     decode_id_cursor, encode_id_cursor, escape_like, ExposureFindingPageQuery, ExposurePage,
@@ -451,7 +451,7 @@ pub fn exposure_evidence(
                 "currentAccessible": match accessible { 1 => serde_json::json!(true), 0 => serde_json::json!(false), _ => serde_json::Value::Null },
                 "indexedAt": row.get::<_, String>(16)?,
                 "queriedAt": row.get::<_, String>(17)?,
-                "evidence": crate::commands::json(row.get::<_, String>(18)?),
+                "evidence": serde_json::from_str::<serde_json::Value>(&row.get::<_, String>(18)?).unwrap_or_else(|_| serde_json::Value::Object(Default::default())),
             }))
         })
          .map_err(page_error)?

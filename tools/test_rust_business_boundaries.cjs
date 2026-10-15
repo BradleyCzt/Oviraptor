@@ -113,3 +113,73 @@ test('environment preparation shares pinned worker mechanisms without scan comma
   assert.match(read('src-tauri/src/commands/environment.rs'), /db::begin_environment_preparation\(&state.db_path\)/);
   assert.match(read('src-tauri/src/worker.rs'), /commands::environment::check_environment\(/);
 });
+
+
+test('exposure facade and collection kernel share one explicit Assets owner', () => {
+  const source = read('src-tauri/src/commands/exposure.rs');
+  assert.match(legacy, /^pub\(crate\) mod exposure;$/m);
+  // Its children use exposure/, which an explicit path on this module changes.
+  assert.doesNotMatch(legacy, /#\[path = "commands\/exposure\.rs"\]\s*pub\(crate\) mod exposure;/);
+  assert.doesNotMatch(legacy, /include!\("commands\/exposure\.rs"\)/);
+  assert.doesNotMatch(source, /pub mod exposure\s*\{/);
+  assert.doesNotMatch(source, /use\s+(?:super|crate::commands)::\s*\*/);
+  assert.doesNotMatch(source, /crate::models::|(?:^|[\s,{])models::\{/m);
+  assert.match(source, /asset_models::\{/);
+  assert.doesNotMatch(source, /include!\s*\(/);
+  for (const core of ['scope', 'state', 'orchestrator', 'recovery', 'repository', 'units']) {
+    assert.match(source, new RegExp(`^pub mod ${core};$`, 'm'));
+  }
+  const commands = [
+    "page_exposure_findings",
+    "page_exposure_runs",
+    "list_exposure_source_results_for_project",
+    "read_exposure_finding",
+    "exposure_scope_summary",
+    "exposure_known_limits",
+    "exposure_summary",
+    "list_exposure_findings",
+    "save_exposure_finding",
+    "list_exposure_runs",
+    "list_exposure_source_results",
+    "cancel_exposure_scan",
+    "export_exposure_findings",
+    "page_exposure_incidents",
+    "read_exposure_incident",
+    "page_exposure_incident_locations",
+    "exposure_coverage_drilldown",
+    "act_on_exposure_incident",
+    "propose_exposure_incidents",
+    "verify_exposure_export",
+    "review_exposure_finding_scoped",
+    "list_exposure_review_trail",
+    "save_exposure_remediation",
+    "page_exposure_remediations",
+    "start_exposure_retest",
+    "read_exposure_retest_outcome",
+    "mark_exposure_remediation",
+    "exposure_review_taxonomy",
+    "start_exposure_scan",
+    "resume_exposure_scan",
+    "get_exposure_settings",
+    "save_exposure_settings",
+    "list_exposure_setting_versions",
+    "page_exposure_pending_discoveries",
+    "page_exposure_clusters",
+    "page_exposure_cluster_members",
+    "read_exposure_evidence",
+    "import_exposure_documents",
+    "reclassify_exposure_finding",
+    "grade_exposure_intel",
+  ];
+  // Attributes on the existing coverage command must not hide it from this count.
+  const exported = [...source.matchAll(/#\[tauri::command\]\s*(?:#\[[^\]]*\]\s*)*pub fn (\w+)/g)].map(match => match[1]);
+  assert.equal(commands.length, 40);
+  assert.deepEqual(exported.sort(), [...commands].sort());
+  for (const command of commands) {
+    const routes = [...registration.matchAll(new RegExp(`commands::(?:[a-z_]+::)?${command}(?=,)`, 'g'))];
+    assert.deepEqual(routes.map(match => match[0]), [`commands::exposure::${command}`]);
+  }
+  for (const core of ['repository', 'classify']) {
+    assert.doesNotMatch(read(`src-tauri/src/commands/exposure/${core}.rs`), /crate::commands::json\(/);
+  }
+});

@@ -851,7 +851,7 @@ pub fn classifications_of(
                 "sourceChannel": row.get::<_, String>(4)?,
                 "disposition": row.get::<_, String>(5)?,
                 "reason": row.get::<_, String>(6)?,
-                "markers": crate::commands::json(row.get::<_, String>(7)?),
+                "markers": serde_json::from_str::<serde_json::Value>(&row.get::<_, String>(7)?).unwrap_or_else(|_| serde_json::Value::Object(Default::default())),
                 "createdAt": row.get::<_, String>(8)?,
             }))
         })

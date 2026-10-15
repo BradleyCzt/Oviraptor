@@ -470,7 +470,7 @@ test('P1 UI a failed drill-down says so and never reads as "no gaps"; the page m
   assert.match(page, /<ExposureCoverageDrill/, '覆盖页挂上钻取面板');
   assert.match(page, /:data-drill="row\.sourceKey"/, '每一行都有钻取入口');
   assert.match(readSource(E + 'api.ts'), /exposure_coverage_drilldown/);
-  assert.match(readSource('src-tauri/src/lib.rs'), /commands::exposure_coverage_drilldown,/, '钻取命令已注册');
+  assert.match(readSource('src-tauri/src/lib.rs'), /commands::exposure::exposure_coverage_drilldown,/, '钻取命令已注册');
 });
 
 // ───────────── FIX3（2026-10-09 17:29） ─────────────

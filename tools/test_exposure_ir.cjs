@@ -95,10 +95,10 @@ test('ir15 ir01 ir14 the handler, the shared export, and the exposure api match 
     'import_exposure_documents',
     'grade_exposure_intel',
   ]) {
-    assert.match(lib, new RegExp(`commands::${name},`), name);
+    assert.match(lib, new RegExp(`commands::exposure::${name},`), name);
   }
-  assert.match(lib, /commands::review_exposure_finding_scoped,/);
-  assert.doesNotMatch(lib, /commands::review_exposure_finding,/);
+  assert.match(lib, /commands::exposure::review_exposure_finding_scoped,/);
+  assert.doesNotMatch(lib, /commands::(?:exposure::)?review_exposure_finding,/);
   const shared = readSource('src/features/assets/api.ts');
   assert.doesNotMatch(shared, /invoke<void>\("review_exposure_finding"/);
   assert.doesNotMatch(shared, /reviewExposureFinding:/);

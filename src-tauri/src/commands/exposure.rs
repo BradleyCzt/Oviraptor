@@ -1,80 +1,90 @@
-// The exposure surface's own directory: the read-only pagination kernel (§Q1), the
-// authorization and egress contract (§Q2), the durable work items and recovery (§Q3), the
-// public indexes (§Q4), and the evidence/version/export layer (§Q5–§Q6). The command门面
-// below stays thin, and `start_exposure_scan` / `resume_exposure_scan` now execute through
-// that layer. The read-only additions are still missing one thing this slice is not allowed
-// to do: registration in `lib.rs`, which is a patch handed to the coordinator.
-#[allow(dead_code)]
-pub mod exposure {
-    pub mod cache;
-    pub mod classify;
-    pub mod cluster_repository;
-    pub mod clusters;
-    pub mod remediation;
-    pub mod adapters {
-        pub mod certificate_transparency;
-        pub mod documents;
-        pub mod github;
-        pub mod http;
-        pub mod passive_web;
-        pub mod web_archive;
-    }
-    pub mod contract;
-    pub mod coverage;
-    pub mod export;
-    pub mod fingerprint;
-    pub mod imports;
-    pub mod incidents;
-    pub mod live;
-    pub mod observations;
-    pub mod orchestrator;
-    pub mod recovery;
-    pub mod redaction;
-    pub mod repository;
-    pub mod rules;
-    pub mod scope;
-    pub mod settings;
-    pub mod state;
-    pub mod summary;
-    pub mod transaction;
-    pub mod units;
-    pub mod work_items;
+//! Exposure collection, evidence and review, with explicit ownership read dependencies.
+#![allow(dead_code)]
+use crate::{
+    asset_models::{
+        ExportResult, ExposureFinding, ExposureFindingInput, ExposureRun, ExposureSourceResult,
+        ExposureSummary,
+    },
+    db,
+    AppState,
+};
+use rusqlite::{params, OptionalExtension, Row};
+use serde_json::Value as JsonValue;
+use std::{fs, path::PathBuf, thread};
+use tauri::State;
+use uuid::Uuid;
 
-    #[cfg(test)]
-    pub mod fixture;
-    #[cfg(test)]
-    mod tests;
-    #[cfg(test)]
-    mod tests_e2;
-    #[cfg(test)]
-    mod tests_e3;
-    #[cfg(test)]
-    mod tests_e4;
-    #[cfg(test)]
-    mod tests_e5;
-    #[cfg(test)]
-    mod tests_q2;
-    #[cfg(test)]
-    mod tests_q3;
-    #[cfg(test)]
-    mod tests_q4;
-    #[cfg(test)]
-    mod tests_q5;
-    #[cfg(test)]
-    mod tests_q6;
-    #[cfg(test)]
-    mod tests_g0;
-    #[cfg(test)]
-    mod tests_g1;
-    #[cfg(test)]
-    mod tests_g2;
-    #[cfg(test)]
-    mod tests_g3;
-    #[cfg(test)]
-    mod tests_g4;
-    #[cfg(test)]
-    mod tests_g4_scale;
+// The facade and its collection kernel have the same actual module owner.
+use crate::commands::exposure as exposure;
+
+pub mod cache;
+pub mod classify;
+pub mod cluster_repository;
+pub mod clusters;
+pub mod remediation;
+pub mod adapters {
+    pub mod certificate_transparency;
+    pub mod documents;
+    pub mod github;
+    pub mod http;
+    pub mod passive_web;
+    pub mod web_archive;
 }
+pub mod contract;
+pub mod coverage;
+pub mod export;
+pub mod fingerprint;
+pub mod imports;
+pub mod incidents;
+pub mod live;
+pub mod observations;
+pub mod orchestrator;
+pub mod recovery;
+pub mod redaction;
+pub mod repository;
+pub mod rules;
+pub mod scope;
+pub mod settings;
+pub mod state;
+pub mod summary;
+pub mod transaction;
+pub mod units;
+pub mod work_items;
+
+#[cfg(test)]
+pub mod fixture;
+#[cfg(test)]
+mod tests;
+#[cfg(test)]
+mod tests_e2;
+#[cfg(test)]
+mod tests_e3;
+#[cfg(test)]
+mod tests_e4;
+#[cfg(test)]
+mod tests_e5;
+#[cfg(test)]
+mod tests_q2;
+#[cfg(test)]
+mod tests_q3;
+#[cfg(test)]
+mod tests_q4;
+#[cfg(test)]
+mod tests_q5;
+#[cfg(test)]
+mod tests_q6;
+#[cfg(test)]
+mod tests_g0;
+#[cfg(test)]
+mod tests_g1;
+#[cfg(test)]
+mod tests_g2;
+#[cfg(test)]
+mod tests_g3;
+#[cfg(test)]
+mod tests_g4;
+#[cfg(test)]
+mod tests_g4_scale;
 
 use exposure::{
     contract::{

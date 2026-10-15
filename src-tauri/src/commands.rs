@@ -78,7 +78,7 @@ use workspace_config_profiles::{delete_config_profile_inner, persist_config_prof
 pub(crate) mod ownership;
 // Transitional bridge for the retained scan/Agent include scope's two domain reads.
 use ownership::{domain_matches, normalize_ownership_domain};
-include!("commands/exposure.rs");
+pub(crate) mod exposure;
 include!("commands/hackerone.rs");
 #[path = "commands/environment.rs"]
 pub(crate) mod environment;
