@@ -34,7 +34,8 @@
     "test:plugins": "node --test --test-concurrency=1 tools/test_builtin_plugins.cjs tools/test_conversation_plugins.cjs tools/test_plugin_workspaces.cjs",
     "test:conversation-markdown": "node --test tools/test_conversation_markdown.cjs",
     "test:conversation-steering": "node --test tools/test_conversation_steering.cjs",
-    "test:module-boundaries": "node --test tools/test_module_boundaries.cjs"
+    "test:module-boundaries": "node --test tools/test_module_boundaries.cjs tools/test_rust_business_boundaries.cjs",
+    "test:conversation-access": "node --test tools/test_conversation_access.cjs tools/test_conversation_access_activation.cjs"
   },
   "dependencies": {
     "@lucide/vue": "^1.24.0",
