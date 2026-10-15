@@ -2,15 +2,20 @@
 
 This fixture compiles the actual Vue app and renders it in Chromium. All Tauri IPC is intercepted with synthetic project/history/reply data. Unimplemented native operations fail closed; non-local network requests are aborted. There are no credentials, provider calls, scan targets, user files, or Mac access. Writes affect only in-memory fixtures.
 
-Do not commit generated bundles/screenshots or install test dependencies in the app package. In CI from repository root:
+Do not commit generated bundles/screenshots or install test dependencies in the app package or any audited source tree. Keep the pinned QA package and its lockfile under an external temporary prefix; nested `tools/**/node_modules` contains generated executable links and intentionally fails the source retirement audit. In CI from repository root:
 
     npm ci --ignore-scripts
-    npm ci --prefix tools/qa/chat-ui --ignore-scripts --no-audit --no-fund
-    tools/qa/chat-ui/node_modules/.bin/playwright install --with-deps chromium
+    qa_dependencies=$(mktemp -d "${RUNNER_TEMP:-/tmp}/oviraptor-chat-ui-deps.XXXXXX")
+    cp tools/qa/chat-ui/package.json tools/qa/chat-ui/package-lock.json "$qa_dependencies/"
+    npm ci --prefix "$qa_dependencies" --ignore-scripts --no-audit --no-fund --registry=https://registry.npmjs.org
+    export NODE_PATH="$qa_dependencies/node_modules${NODE_PATH:+:$NODE_PATH}"
+    "$qa_dependencies/node_modules/.bin/playwright" install --with-deps chromium
     export OVIRAPTOR_REPO_ROOT="$GITHUB_WORKSPACE"
     export OVIRAPTOR_QA_OUTPUT="$RUNNER_TEMP/chat-ui-qa"
     node tools/qa/chat-ui/build.mjs
     node tools/qa/chat-ui/browser-qa.cjs
+
+This cloud task retains the existing installation at `/workspace/qa-dependencies/node_modules`. Reuse it without reinstalling by running `NODE_PATH=/workspace/qa-dependencies/node_modules node tools/qa/chat-ui/browser-qa.cjs` with the same `OVIRAPTOR_REPO_ROOT`, `OVIRAPTOR_QA_OUTPUT`, browser executable and library-path settings recorded for the accepted browser run. To rebuild its fixture first, use the same `NODE_PATH` with `node tools/qa/chat-ui/build.mjs`. The relocation preserves the pinned Playwright 1.58.2 installation; it does not change browser fixture code or assertions.
 
 Upload OVIRAPTOR_QA_OUTPUT as an Actions artifact even on failure. browser-results.json is the assertion report; screenshots/ contains actual browser captures, not serialized DOM. Inspect screenshots to assess visual quality; assertions only cover selected layout/interaction properties.
 
