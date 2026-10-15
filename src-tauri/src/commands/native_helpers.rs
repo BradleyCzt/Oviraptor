@@ -78,51 +78,6 @@ fn native_helper_stderr_note(error_output: &[u8]) -> String {
     bounded_redacted_text(trimmed, 1200)
 }
 
-/// The shipped JavaScript is part of the application release, not a mutable
-/// tool installed from the host PATH. Compare against bytes compiled into this
-/// release; a missing or modified resource is an unavailable capability.
-/// This is integrity checking, not a process/network sandbox or a signature
-/// for separately downloaded capability bundles.
-fn verify_bundled_worker(helper: &Path) -> Result<(), String> {
-    fn verify_file(path: &Path, expected: &[u8], missing: &str, mismatch: &str) -> Result<(), String> {
-        let metadata = fs::symlink_metadata(path).map_err(|_| missing.to_string())?;
-        if !metadata.is_file() || metadata.file_type().is_symlink() {
-            return Err(mismatch.into());
-        }
-        let actual = fs::read(path).map_err(|_| mismatch.to_string())?;
-        if Sha256::digest(&actual) != Sha256::digest(expected) {
-            return Err(mismatch.into());
-        }
-        Ok(())
-    }
-
-    match helper.file_name().and_then(|name| name.to_str()) {
-        Some("9_frontend_runtime_probe.cjs") => {
-            verify_file(helper, include_bytes!("../../resources/workers/9_frontend_runtime_probe.cjs"),
-                "bundled_worker_missing", "bundled_worker_digest_mismatch")?;
-            let config = helper.parent().and_then(Path::parent)
-                .ok_or("bundled_worker_browser_locations_missing")?.join("config/browser-locations.json");
-            verify_file(&config, include_bytes!("../../resources/config/browser-locations.json"),
-                "bundled_worker_browser_locations_missing", "bundled_worker_browser_locations_mismatch")
-        },
-        Some("8_js_ast_analyzer.cjs") => {
-            verify_file(
-                helper,
-                include_bytes!("../../resources/workers/8_js_ast_analyzer.cjs"),
-                "bundled_worker_missing",
-                "bundled_worker_digest_mismatch",
-            )?;
-            verify_file(
-                &helper.with_file_name("babel-parser.cjs"),
-                include_bytes!("../../resources/workers/babel-parser.cjs"),
-                "bundled_worker_parser_missing",
-                "bundled_worker_parser_digest_mismatch",
-            )
-        }
-        _ => Err("bundled_worker_unregistered".into()),
-    }
-}
-
 // Both old JSON API and diagnostics use this actual private capture path.
 fn run_native_json_helper(helper:&Path,payload:&JsonValue,runtime_path:&OsString,
  proxy:Option<&str>,no_proxy:&str,timeout:Duration,control:&NativeReconControl)->Result<JsonValue,String>{

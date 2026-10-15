@@ -1,3 +1,115 @@
+// Scanning policy is separate from the shared model connection. Preserve the
+// historical serialized snapshot and all original resource-policy tuple fields.
+#[derive(Clone, serde::Serialize)]
+pub(crate) struct ModelRuntimeEnv {
+    llm: String,
+    api_key: String,
+    api_base: String,
+    deployment: String,
+    full_power: bool,
+    prompt_audit_mode: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct LocalModelRuntimePolicy {
+    parameter_billions: Option<u32>,
+    unified_memory_gb: u64,
+    max_concurrent_requests: usize,
+    max_context_tokens: u64,
+    max_output_tokens: Option<u64>,
+    frontend_packet_budget_bytes: usize,
+    memory_guard_tier: &'static str,
+    startup_idle_seconds: u64,
+    startup_hard_seconds: u64,
+}
+
+impl ModelRuntimeEnv {
+    pub(crate) fn as_connection(&self) -> crate::model_configuration::ModelConnection {
+        crate::model_configuration::ModelConnection {
+            llm: self.llm.clone(),
+            api_key: self.api_key.clone(),
+            api_base: self.api_base.clone(),
+            deployment: self.deployment.clone(),
+        }
+    }
+}
+
+fn model_runtime_env(settings: &JsonValue) -> Result<ModelRuntimeEnv, String> {
+    let normalized = crate::model_configuration::NormalizedModelSettings::new(settings);
+    let connection = crate::model_configuration::model_connection(&normalized)?;
+    let settings = normalized.as_value();
+    let deployment = connection.deployment;
+    let full_power = deployment == "local"
+        && settings
+            .get("agentLocalFullPower")
+            .and_then(JsonValue::as_bool)
+            .unwrap_or(false);
+    let prompt_audit_mode = match settings
+        .get("agentPromptAuditMode")
+        .and_then(JsonValue::as_str)
+        .unwrap_or("off")
+    {
+        "metadata" => "metadata",
+        "full" => "full",
+        _ => "off",
+    }
+    .to_string();
+    Ok(ModelRuntimeEnv {
+        llm: connection.llm,
+        api_key: connection.api_key,
+        api_base: connection.api_base,
+        deployment,
+        full_power,
+        prompt_audit_mode,
+    })
+}
+
+fn local_model_runtime_policy_for_memory(
+    environment: &ModelRuntimeEnv,
+    unified_memory_gb: u64,
+) -> LocalModelRuntimePolicy {
+    let policy = crate::model_configuration::model_resource_policy_for_memory(
+        &environment.as_connection(),
+        unified_memory_gb,
+    );
+    let (startup_idle_seconds, startup_hard_seconds) = if environment.deployment == "local" {
+        match policy.parameter_billions {
+            Some(size) if size >= 60 => (300, 1_800),
+            Some(size) if size >= 20 => (240, 1_200),
+            Some(size) if size >= 13 => (210, 1_200),
+            Some(_) => (180, 900),
+            None => (240, 1_200),
+        }
+    } else {
+        (90, 300)
+    };
+    LocalModelRuntimePolicy {
+        parameter_billions: policy.parameter_billions,
+        unified_memory_gb: policy.unified_memory_gb,
+        max_concurrent_requests: policy.max_concurrent_requests,
+        max_context_tokens: policy.max_context_tokens,
+        max_output_tokens: policy.max_output_tokens,
+        memory_guard_tier: policy.memory_guard_tier,
+        frontend_packet_budget_bytes: if environment.deployment != "local" {
+            24 * 1024
+        } else if unified_memory_gb <= 18 {
+            6 * 1024
+        } else if unified_memory_gb <= 32 {
+            8 * 1024
+        } else {
+            12 * 1024
+        },
+        startup_idle_seconds,
+        startup_hard_seconds,
+    }
+}
+
+fn local_model_runtime_policy(environment: &ModelRuntimeEnv) -> LocalModelRuntimePolicy {
+    local_model_runtime_policy_for_memory(
+        environment,
+        crate::model_configuration::system_unified_memory_gb(),
+    )
+}
 fn agent_skill_instructions(
     connection: &rusqlite::Connection,
     skill_ids: &[i64],
@@ -86,117 +198,6 @@ fn compact_skill_context(body: &str, max_chars: usize) -> String {
 
 fn agent_skill_row(row: &Row<'_>) -> rusqlite::Result<(String, String)> {
     Ok((row.get(0)?, row.get(1)?))
-}
-
-fn resolve_frontend_recon_worker(app: &AppHandle) -> Result<PathBuf, String> {
-    let mut candidates = Vec::new();
-    if let Ok(resource_dir) = app.path().resource_dir() {
-        candidates.push(resource_dir.join("resources/workers/9_frontend_runtime_probe.cjs"));
-        candidates.push(resource_dir.join("workers/9_frontend_runtime_probe.cjs"));
-    }
-    candidates.push(
-        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("resources/workers/9_frontend_runtime_probe.cjs"),
-    );
-    let worker = candidates
-        .into_iter()
-        .find(|path| path.is_file())
-        .ok_or_else(|| "应用内置 CDP 运行时探测器 9_frontend_runtime_probe.cjs 缺失".to_string())?;
-    verify_bundled_worker(&worker)?;
-    Ok(worker)
-}
-
-fn sentinel_runtime_path(home: &Path) -> OsString {
-    // Prefer Homebrew before /usr/local so Apple Silicon machines do not pick up an
-    // ancient Intel-era Node (e.g. v16) that breaks CDP helper handshakes.
-    #[cfg(not(windows))]
-    let preferred = [
-        PathBuf::from("/opt/homebrew/bin"),
-        PathBuf::from("/usr/local/bin"),
-        home.join(".pyenv/shims"),
-        PathBuf::from("/usr/bin"),
-        PathBuf::from("/bin"),
-        PathBuf::from("/usr/sbin"),
-        PathBuf::from("/sbin"),
-    ];
-    #[cfg(windows)]
-    let preferred = [home.join(".pyenv/shims")];
-    let mut paths: Vec<PathBuf> = preferred.to_vec();
-    if let Some(existing) = std::env::var_os("PATH") {
-        for path in std::env::split_paths(&existing) {
-            if !paths.contains(&path) {
-                paths.push(path);
-            }
-        }
-    }
-    std::env::join_paths(paths).unwrap_or_else(|_| std::env::var_os("PATH").unwrap_or_default())
-}
-
-// Enumerate without executing anything. Keep missing paths: installing a new
-// candidate can change the resolver's winner even if PATH itself is unchanged.
-fn helper_node_candidates(runtime_path: &std::ffi::OsStr, configured: Option<OsString>) -> Vec<PathBuf> {
-    let mut candidates: Vec<PathBuf> = Vec::new();
-    if let Some(configured) = configured {
-        candidates.push(PathBuf::from(configured));
-    }
-    for dir in std::env::split_paths(runtime_path) {
-        let candidate = dir.join(if cfg!(windows) { "node.exe" } else { "node" });
-        candidates.push(candidate);
-    }
-    #[cfg(not(windows))]
-    for path in [
-        PathBuf::from("/opt/homebrew/bin/node"),
-        PathBuf::from("/usr/local/bin/node"),
-        PathBuf::from("/usr/bin/node"),
-    ] {
-        candidates.push(path);
-    }
-    let mut seen = HashSet::new();
-    candidates.retain(|path| seen.insert(path.clone()));
-    candidates
-}
-
-/// Pick a Node binary for CDP / AST helpers. Nest GUI PATH historically preferred
-/// `/usr/local/bin/node` (often Node 16); Chrome's CDP pipe needs a modern Node.
-fn resolve_helper_node(runtime_path: &OsString) -> Result<PathBuf, String> {
-    let candidates: Vec<_> = helper_node_candidates(runtime_path, std::env::var_os("OVIRAPTOR_NODE_EXECUTABLE"))
-        .into_iter().filter(|path| path.is_file()).collect();
-    if candidates.is_empty() {
-        return Err("未找到可用的 Node.js；浏览器采集 helper 无法启动".into());
-    }
-
-    let mut scored: Vec<(u32, u32, u32, PathBuf, String)> = Vec::new();
-    for path in candidates {
-        let Ok(output) = Command::new(&path).arg("-v").output() else {
-            continue;
-        };
-        if !output.status.success() {
-            continue;
-        }
-        let text = String::from_utf8_lossy(&output.stdout);
-        let version = text.trim().trim_start_matches('v');
-        let mut parts = version.split('.');
-        let major = parts.next().and_then(|v| v.parse::<u32>().ok()).unwrap_or(0);
-        let minor = parts.next().and_then(|v| v.parse::<u32>().ok()).unwrap_or(0);
-        let patch = parts
-            .next()
-            .and_then(|v| v.split(|c: char| !c.is_ascii_digit()).next())
-            .and_then(|v| v.parse::<u32>().ok())
-            .unwrap_or(0);
-        scored.push((major, minor, patch, path, format!("v{version}")));
-    }
-    if scored.is_empty() {
-        return Err("Node.js 存在但无法读取版本".into());
-    }
-    scored.sort_by(|a, b| b.0.cmp(&a.0).then(b.1.cmp(&a.1)).then(b.2.cmp(&a.2)));
-    if let Some((_, _, _, path, _)) = scored.iter().find(|(major, _, _, _, _)| *major >= 18) {
-        return Ok(path.clone());
-    }
-    let (major, _, _, path, version) = &scored[0];
-    Err(format!(
-        "浏览器采集需要 Node.js 18+，当前最新可用为 {}（{}，主版本 {major}）",
-        path.display(),
-        version
-    ))
 }
 
 #[cfg(test)]

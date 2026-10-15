@@ -1,4 +1,13 @@
 use crate::{db, llm_hook, models::*, AppState};
+use crate::model_configuration::{
+    default_settings as sentinel_settings, openai_chat_completion_model,
+};
+#[cfg(test)]
+use crate::model_configuration::model_parameter_billions;
+use crate::worker_resources::{
+    helper_node_candidates, resolve_frontend_recon_worker, resolve_helper_node,
+    sentinel_runtime_path, verify_bundled_worker,
+};
 use base64::{engine::general_purpose::STANDARD as BASE64_STANDARD, Engine as _};
 use rusqlite::{params, params_from_iter, types::Value as SqlValue, OptionalExtension, Row};
 use serde_json::Value as JsonValue;
@@ -75,7 +84,12 @@ include!("commands/ownership_unit_projection.rs");
 include!("commands/ownership_o3_tests.rs");
 include!("commands/exposure.rs");
 include!("commands/hackerone.rs");
-include!("commands/environment.rs");
+#[path = "commands/environment.rs"]
+pub(crate) mod environment;
+#[path = "commands/model_profiles.rs"]
+pub(crate) mod model_profiles;
+#[cfg(test)]
+use environment::ensure_environment_install_idle;
 #[path = "commands/tool_administrator.rs"]
 pub(crate) mod tool_administrator;
 include!("commands/src_assurance.rs");
@@ -229,18 +243,6 @@ include!("commands/web_mode_test_support.rs");
 include!("commands/tests.rs");
 include!("commands/agent_tests.rs");
 include!("commands/agent_acceptance.rs");
-include!("commands/agent_entries.rs");
 
 #[path="commands/agent_homogeneous_execution.rs"]
 pub(crate) mod homogeneous_execution;
-
-// Narrow credential-owning bridge for standalone, tool-free conversations.
-// Callers receive the existing strict gateway profile, never another resolver.
-pub(crate) fn conversation_model_profile(
-    connection: &rusqlite::Connection,
-) -> Result<crate::agent_runtime::model::GatewayProfile, String> {
-    let environment = model_runtime_env(&sentinel_settings(connection))
-        .map_err(|_| "conversation_model_unavailable".to_string())?;
-    agent_model_profile(&environment, None)
-        .map_err(|_| "conversation_model_unavailable".to_string())
-}

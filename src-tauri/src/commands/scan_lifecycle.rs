@@ -1029,18 +1029,6 @@ pub fn rescan_sentinel_scan(
     start_web_scan(app, state, scan_id, WebStartMode::Retry)
 }
 
-fn sentinel_settings(connection: &rusqlite::Connection) -> JsonValue {
-    connection
-        .query_row(
-            "SELECT settings_json FROM config_profiles ORDER BY is_default DESC,id LIMIT 1",
-            [],
-            |row| row.get::<_, String>(0),
-        )
-        .ok()
-        .and_then(|value| serde_json::from_str(&value).ok())
-        .unwrap_or_default()
-}
-
 #[tauri::command]
 pub fn list_agent_instructions(state: State<AppState>) -> Result<Vec<AgentSkill>, String> {
     let connection = db::open(&state.db_path)?;

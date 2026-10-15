@@ -4,8 +4,7 @@
 // maps the shared model-profile resolution onto its plain input types, so
 // there is exactly one model client in the codebase.
 use crate::agent_runtime::model::{
-    compact_messages, CancelToken, GatewayProfile, LocalResourcePolicy,
-    ModelError, ModelGateway, ModelRequest, ResolvedModelProfile,
+    compact_messages, CancelToken, GatewayProfile, ModelError, ModelGateway, ModelRequest,
     ToolSchema, UsageDelta,
 };
 
@@ -22,20 +21,7 @@ fn agent_model_profile(
     environment: &ModelRuntimeEnv,
     proxy: Option<&str>,
 ) -> Result<AgentModelProfile, String> {
-    let policy = local_model_runtime_policy(environment);
-    AgentModelProfile::resolve(
-        &ResolvedModelProfile {
-            model: openai_chat_completion_model(&environment.llm),
-            api_base: environment.api_base.clone(),
-            api_key: environment.api_key.clone(),
-            deployment: environment.deployment.clone(),
-        },
-        &LocalResourcePolicy {
-            max_output_tokens: policy.max_output_tokens,
-            max_context_tokens: policy.max_context_tokens,
-        },
-        proxy,
-    )
+    crate::model_configuration::gateway_profile(&environment.as_connection(), proxy)
 }
 
 /// Pause and cancel are database facts, so the gateway stays storage-agnostic.
@@ -44,9 +30,7 @@ fn agent_model_profile(
 fn agent_scan_cancel_token(db_path: &Path, scan_id: &str, attempt: i64) -> CancelToken {
     let database = db_path.to_path_buf();
     let scan = scan_id.to_string();
-    CancelToken::from_checker(move || {
-        !native_web_attempt_active(&database, &scan, attempt)
-    })
+    CancelToken::from_checker(move || !native_web_attempt_active(&database, &scan, attempt))
 }
 
 fn agent_model_request(messages: Vec<JsonValue>, specs: &[AgentToolSpec]) -> ModelRequest {

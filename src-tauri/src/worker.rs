@@ -312,7 +312,7 @@ fn handle_worker_request(app: &AppHandle, mut stream: TcpStream, token: &str) {
     let state = app.state::<AppState>();
     let result: Result<Value, String> = match (method.as_str(), path) {
         ("GET", "/v1/health") => worker_health(&state),
-        ("GET", "/v1/environment") => commands::check_environment(app.clone(), state.clone(), None)
+        ("GET", "/v1/environment") => commands::environment::check_environment(app.clone(), state.clone(), None)
             .and_then(|report| serde_json::to_value(report).map_err(|error| error.to_string())),
         ("GET", "/v1/projects") => worker_projects(&state),
         ("GET", "/v1/scans") => {

@@ -17,6 +17,8 @@ mod llm_hook;
 mod log_display;
 mod log_framing;
 mod models;
+mod model_configuration;
+mod worker_resources;
 mod native_pipeline;
 mod snapshot_export;
 mod startup_profile;
@@ -462,19 +464,19 @@ pub fn run() {
             commands::list_hackerone_events,
             commands::sync_hackerone,
             commands::add_hackerone_scopes_to_project,
-            commands::check_environment,
+            commands::environment::check_environment,
             commands::tool_administrator::approve_tool_inventory,
             commands::tool_administrator::revoke_tool_inventory,
             commands::tool_administrator::read_tool_approval_inventory,
-            commands::install_environment_dependencies,
-            commands::list_environment_install_logs,
-            commands::get_environment_preparation_status,
-            commands::recover_environment_preparation,
+            commands::environment::install_environment_dependencies,
+            commands::environment::list_environment_install_logs,
+            commands::environment::get_environment_preparation_status,
+            commands::environment::recover_environment_preparation,
             commands::create_sentinel_scan,
             commands::create_sentinel_url_scan,
             commands::create_sentinel_homogeneous_url_scan,
             commands::create_sentinel_url_scan_with_tool_selection,
-            commands::test_model_profile,
+            commands::model_profiles::test_model_profile,
             commands::test_fofa_api,
             commands::list_agent_instructions,
             commands::list_capability_bundles,
