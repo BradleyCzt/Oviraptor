@@ -9,6 +9,7 @@ mod collaboration_events;
 mod commands;
 mod conversations;
 mod skill_packages;
+mod skills_catalog;
 mod db;
 mod execution_service;
 mod installation_logs;
@@ -17,6 +18,20 @@ mod llm_hook;
 mod log_display;
 mod log_framing;
 mod models;
+#[path = "assets/model.rs"]
+mod asset_models;
+#[path = "scanning/model.rs"]
+mod scanning_models;
+#[path = "workspaces/model.rs"]
+mod workspace_models;
+#[path = "configuration/model.rs"]
+mod configuration_models;
+#[path = "application/model.rs"]
+mod application_models;
+#[path = "environment/model.rs"]
+mod environment_models;
+#[path = "hackerone/model.rs"]
+mod hackerone_models;
 mod model_configuration;
 mod worker_resources;
 mod native_pipeline;
@@ -478,34 +493,34 @@ pub fn run() {
             commands::create_sentinel_url_scan_with_tool_selection,
             commands::model_profiles::test_model_profile,
             commands::test_fofa_api,
-            commands::list_agent_instructions,
+            skills_catalog::instructions::list_agent_instructions,
             commands::list_capability_bundles,
             commands::list_role_config_drafts,
             commands::save_role_config_draft,
             commands::role_config_draft_status_label,
             commands::save_authorization_control,
             commands::get_authorization_control_setup,
-            commands::save_agent_instruction,
-            commands::delete_agent_instruction,
-            commands::export_agent_instructions,
-            commands::import_agent_instructions,
-            commands::import_sec_skill_knowledge,
-            commands::ingest_agent_knowledge_source,
+            skills_catalog::instructions::save_agent_instruction,
+            skills_catalog::instructions::delete_agent_instruction,
+            skills_catalog::instructions::export_agent_instructions,
+            skills_catalog::instructions::import_agent_instructions,
+            skills_catalog::instructions::import_sec_skill_knowledge,
+            skills_catalog::sources::ingest_agent_knowledge_source,
             commands::list_agent_traces,
             commands::get_agent_trace,
-            commands::list_agent_knowledge,
-            commands::list_agent_learning_candidates,
+            skills_catalog::knowledge::list_agent_knowledge,
+            skills_catalog::knowledge::list_agent_learning_candidates,
             commands::generate_agent_learning_candidate,
-            commands::review_agent_learning_candidate,
-            commands::delete_agent_learning_candidate,
-            commands::apply_agent_learning_candidate,
+            skills_catalog::knowledge::review_agent_learning_candidate,
+            skills_catalog::knowledge::delete_agent_learning_candidate,
+            skills_catalog::knowledge::apply_agent_learning_candidate,
             commands::analyze_agent_trace,
             commands::aggregate_agent_knowledge,
-            commands::delete_agent_knowledge,
-            commands::convert_agent_knowledge_to_instruction,
-            commands::refine_agent_instruction_with_knowledge,
-            commands::export_agent_knowledge,
-            commands::import_agent_knowledge,
+            skills_catalog::knowledge::delete_agent_knowledge,
+            skills_catalog::knowledge::convert_agent_knowledge_to_instruction,
+            skills_catalog::knowledge::refine_agent_instruction_with_knowledge,
+            skills_catalog::knowledge::export_agent_knowledge,
+            skills_catalog::knowledge::import_agent_knowledge,
             commands::list_security_rule_packs,
             commands::save_security_rule_pack,
             commands::delete_security_rule_pack,

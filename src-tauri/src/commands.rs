@@ -99,7 +99,15 @@ include!("commands/historical_agent_trace.rs");
 include!("commands/trace_display_privacy.rs");
 include!("commands/scan_lifecycle.rs");
 include!("commands/knowledge_learning.rs");
-include!("commands/knowledge_learning_skills.rs");
+// Scanning supplies retained evidence; Skills owns the saved instruction and
+// knowledge lifecycle. Only the structured learning model service is shared.
+#[cfg(test)]
+use crate::skills_catalog::{
+    instructions::{import_agent_instructions_path,upsert_sec_skill_package},
+    knowledge::import_agent_knowledge_path,
+    patch::apply_skill_patch,
+    sources::sec_skill_line_is_unsafe,
+};
 include!("commands/knowledge_learning_traces.rs");
 include!("commands/knowledge_learning_candidates.rs");
 include!("commands/knowledge_learning_quality.rs");

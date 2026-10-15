@@ -1,4 +1,5 @@
-// HackerOne programs, scopes and sync events. Included from models.rs.
+//! Hackerone transport contracts. Compatibility exports live in `crate::models`.
+use serde::{Serialize};
 
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]

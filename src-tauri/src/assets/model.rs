@@ -1,5 +1,132 @@
-// The asset workspace: query, paging, bulk decisions and ownership assessment types.
-// Included from models.rs.
+//! Assets transport contracts. Compatibility exports live in `crate::models`.
+use serde::{Deserialize, Serialize};
+use serde_json::Value;
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Target {
+    pub id: i64,
+    pub project_id: i64,
+    pub target_type: String,
+    pub value: String,
+    pub enabled: bool,
+    pub created_at: String,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TargetImportInput {
+    pub project_id: i64,
+    pub target_type: String,
+    pub values: Vec<String>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct JobRun {
+    pub id: i64,
+    pub project_id: i64,
+    pub profile_id: Option<i64>,
+    pub project_name: String,
+    pub name: String,
+    pub pipeline: String,
+    pub status: String,
+    pub stage: String,
+    pub progress: f64,
+    pub processed: i64,
+    pub total: i64,
+    pub output_dir: String,
+    pub error: String,
+    pub started_at: Option<String>,
+    pub finished_at: Option<String>,
+    pub created_at: String,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct InterruptedJob {
+    pub run_id: i64,
+    pub project_id: i64,
+    pub project_name: String,
+    pub profile_id: Option<i64>,
+    pub name: String,
+    pub pipeline: String,
+    pub created_at: String,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct StartJobInput {
+    pub project_id: i64,
+    pub profile_id: i64,
+    pub name: String,
+    #[serde(default = "default_pipeline")]
+    pub pipeline: String,
+}
+
+fn default_pipeline() -> String {
+    "collect".to_string()
+}
+
+#[derive(Debug, Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct JobProgressEvent {
+    pub run_id: i64,
+    pub status: String,
+    pub stage: String,
+    pub progress: f64,
+    pub message: String,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LogEntry {
+    pub id: i64,
+    pub run_id: Option<i64>,
+    pub level: String,
+    pub stage: String,
+    pub message: String,
+    pub created_at: String,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AssetEvent {
+    pub id: i64,
+    pub project_id: i64,
+    pub asset_id: i64,
+    pub asset_key: String,
+    pub company: String,
+    pub host: String,
+    pub event_type: String,
+    pub summary: String,
+    pub run_id: Option<i64>,
+    pub created_at: String,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ExportRequest {
+    pub query: AssetQuery,
+    pub fields: Vec<String>,
+    #[serde(default)]
+    pub chinese_headers: bool,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ExportResult {
+    pub path: String,
+    pub rows: i64,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ImportResult {
+    pub inserted: i64,
+    pub updated: i64,
+    pub invalid: i64,
+}
 
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -227,4 +354,98 @@ pub struct AssetOwnershipSummary {
 pub struct AssetOwnershipAssessmentResult {
     pub assessed: i64,
     pub summary: AssetOwnershipSummary,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FofaApiTestInput {
+    pub key: String,
+    #[serde(default)]
+    pub proxy_url: String,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FofaApiTestResult {
+    pub ok: bool,
+    pub status: String,
+    pub message: String,
+    pub account: String,
+    pub plan: String,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ExposureFinding {
+    pub id: i64,
+    pub project_id: i64,
+    pub asset_id: Option<i64>,
+    pub category: String,
+    pub title: String,
+    pub source_type: String,
+    pub source_url: String,
+    pub evidence_excerpt: String,
+    pub severity: String,
+    pub confidence: i64,
+    pub status: String,
+    pub note: String,
+    pub asset_label: String,
+    pub exposure_eligible: bool,
+    pub first_seen_at: String,
+    pub last_seen_at: String,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ExposureFindingInput {
+    pub project_id: i64,
+    pub asset_id: Option<i64>,
+    pub category: String,
+    pub title: String,
+    pub source_type: String,
+    pub source_url: String,
+    pub evidence_excerpt: String,
+    pub severity: String,
+    pub confidence: i64,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ExposureSummary {
+    pub eligible_assets: i64,
+    pub total: i64,
+    pub new_count: i64,
+    pub reviewing: i64,
+    pub confirmed: i64,
+    pub dismissed: i64,
+    pub high_risk: i64,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ExposureRun {
+    pub id: i64,
+    pub project_id: i64,
+    pub status: String,
+    pub eligible_assets: i64,
+    pub scanned_assets: i64,
+    pub fetched_resources: i64,
+    pub findings: i64,
+    pub stage: String,
+    pub current_source: String,
+    pub error: String,
+    pub created_at: String,
+    pub started_at: String,
+    pub completed_at: String,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ExposureSourceResult {
+    pub run_id: i64,
+    pub source_key: String,
+    pub status: String,
+    pub item_count: i64,
+    pub error: String,
+    pub completed_at: String,
 }

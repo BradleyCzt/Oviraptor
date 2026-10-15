@@ -148,7 +148,7 @@ test('ir10 and ir01 and ir08 and ir04 are locked in source', () => {
   assert.match(pkg, /"test:exposure-g1"/);
   assert.match(pkg, /"test:exposure-ir"/);
   assert.match(pkg, /"test:exposure"/);
-  const models = readSource('src-tauri/src/models_appsec.rs');
+  const models = readSource('src-tauri/src/assets/model.rs');
   assert.doesNotMatch(models, /ExposureFindingReviewInput/);
   const lib = readSource('src-tauri/src/lib.rs');
   assert.match(lib, /reclassify_exposure_finding/);
