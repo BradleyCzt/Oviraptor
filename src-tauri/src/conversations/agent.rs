@@ -214,8 +214,12 @@ where
             Ok(value) => {
                 let summary = match name {
                     "assets_search" => format!(
-                        "Read {} saved assets from the selected project",
-                        value["items"].as_array().map_or(0, Vec::len)
+                        "Read {} of {} matching saved asset members; more pages: {}",
+                        value["returned"], value["total"], value["hasMore"]
+                    ),
+                    "assets_get_stats" => format!(
+                        "Counted saved project members: {} active, {} trashed, {} matching filters",
+                        value["activeTotal"], value["trashedTotal"], value["filteredTotal"]
                     ),
                     "scans_search" => format!(
                         "Read {} saved investigation summaries from the selected project",

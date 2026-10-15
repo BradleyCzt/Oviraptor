@@ -10,11 +10,14 @@ use crate::agent_runtime::{
     model::ToolSchema,
     secrets::{redact_json, redact_text_with},
 };
+use crate::commands::assets::statistics::{self as asset_statistics, ProjectAssetFilter};
 use rusqlite::{params, Connection, OptionalExtension};
 use serde_json::{json, Value};
 
 pub(super) fn bounded(value: &str, length: usize) -> String {
-    redact_text_with(&value.chars().take(length).collect::<String>(), None)
+    // Redact before clipping: cutting before a URL's @ could hide its userinfo
+    // structure from the redactor while retaining a credential prefix.
+    redact_text_with(value, None).chars().take(length).collect()
 }
 pub(super) fn project_context(db: &Connection, item: &Conversation) -> Result<Value, String> {
     store::conversation(db, item.project_id, &item.id)?;
@@ -33,6 +36,30 @@ pub(super) fn project_context(db: &Connection, item: &Conversation) -> Result<Va
 fn object(properties: Value, required: &[&str]) -> Value {
     json!({"type":"object","properties":properties,"required":required,"additionalProperties":false})
 }
+fn asset_filter_properties() -> Value {
+    json!({
+        "query":{"type":"string","maxLength":120},
+        "deletedView":{"type":"string","enum":["active","trash","all"]},
+        "decisionView":{"type":"string","enum":["all","review","pending","uncertain","confirmed","rejected","not_applicable"]},
+        "probeView":{"type":"string","enum":["all","browser_review","browser_accessible","restricted","service","abnormal","blocked"]},
+        "probeOutcomeView":{"type":"string","enum":["all","alive_clean","web_alive","web_restricted","browser_render_required","virtual_host_required","web_abnormal","tcp_alive_non_http","blocked_content","unreachable","skipped"]}
+    })
+}
+fn asset_filter(args: &Value) -> ProjectAssetFilter {
+    let choice = |key: &str, default: &str| {
+        args.get(key)
+            .and_then(Value::as_str)
+            .unwrap_or(default)
+            .to_string()
+    };
+    ProjectAssetFilter {
+        query: choice("query", ""),
+        deleted_view: choice("deletedView", "active"),
+        decision_view: choice("decisionView", "all"),
+        probe_view: choice("probeView", "all"),
+        probe_outcome_view: choice("probeOutcomeView", "all"),
+    }
+}
 pub(super) fn specs(db: &Connection, item: &Conversation) -> Result<Vec<ToolSchema>, String> {
     let grants = access::snapshot(db, item.project_id, &item.id)?;
     if !grants.agent_enabled {
@@ -44,7 +71,12 @@ pub(super) fn specs(db: &Connection, item: &Conversation) -> Result<Vec<ToolSche
         &[],
     );
     if grants.provider_disclosure_accepted && grants.read_assets {
-        out.push(ToolSchema::new("assets_search", "Search existing assets belonging to this selected project only. Reads stored metadata, does not probe targets.", search.clone()));
+        out.push(ToolSchema::new("assets_get_stats", "Get exact saved asset-member counts for the selected project. Use this for quantity or distribution questions; never infer totals from IDs or a search sample. Defaults to all non-trashed members, including rejected/not_applicable decisions. Returns project/active/trash/filtered totals, exhaustive decision/probe/HTTP-status buckets including unknown or unclassified, and asOf for this database read only. Different dimensions overlap; do not sum across them. Query matches the Assets list's eight fields using LIKE (% and _ are wildcards). Trash/all filters disclose aggregate counts only, never recycled row contents. Reads saved inventory; does not establish current reachability or start a probe.", object(asset_filter_properties(), &[])));
+        let mut properties = asset_filter_properties();
+        properties["deletedView"] = json!({"type":"string","enum":["active"]});
+        properties["limit"] = json!({"type":"integer","minimum":1,"maximum":20});
+        properties["cursor"] = json!({"type":"string","minLength":1,"maxLength":2048});
+        out.push(ToolSchema::new("assets_search", "Read one bounded page of this project's non-trashed saved assets, with exact matching total, returned, hasMore and nextCursor. Recycled row contents are unavailable. Items are a page, never the project total; counts do not require visiting every page. Cursor requires the same complete filters and project; separate reads are not a persistent snapshot. Defaults to all non-trashed members, including rejected/not_applicable. Query matches project name/company/host/link/ip/domain/title/asset_key using parameterized LIKE (% and _ wildcards), matching the Assets list. Use assets_get_stats for quantities/distributions. Does not probe targets.", object(properties, &[])));
         out.push(ToolSchema::new("assets_read", "Read one existing asset's safe metadata and this project's note. Only current project membership permits access; no raw HTTP data or secrets.", object(json!({"assetId":{"type":"integer","minimum":1,"maximum":9007199254740991_i64}}), &["assetId"])));
     }
     if grants.provider_disclosure_accepted && grants.read_scans {
@@ -130,6 +162,9 @@ pub(super) fn execute(
     name: &str,
     args: &Value,
 ) -> Result<Value, String> {
+    if matches!(name, "assets_get_stats" | "assets_search") && !db.is_autocommit() {
+        return Err("conversation_access_requires_current_connection".into());
+    }
     store::conversation(db, item.project_id, &item.id)?;
     let schema = specs(db, item)?
         .into_iter()
@@ -140,12 +175,25 @@ pub(super) fn execute(
     let limit = args.get("limit").and_then(Value::as_i64).unwrap_or(10);
     let result=match name {
         "project_get_context" => project_context(db,item)?,
-        "assets_search" => {
-            let mut stmt=db.prepare("SELECT a.id,a.host,a.title,a.protocol,a.port,a.status_code,pa.decision FROM project_assets pa JOIN assets a ON a.id=pa.asset_id WHERE pa.project_id=?1 AND pa.is_deleted=0 AND (?2='' OR instr(lower(a.host),lower(?2))>0 OR instr(lower(a.title),lower(?2))>0) ORDER BY pa.last_seen DESC,a.id LIMIT ?3").map_err(store::err)?;
-            let rows=stmt.query_map(params![item.project_id,query,limit],|r|Ok(json!({"id":r.get::<_,i64>(0)?,"host":bounded(&r.get::<_,String>(1)?,256),"title":bounded(&r.get::<_,String>(2)?,256),"protocol":r.get::<_,String>(3)?,"port":r.get::<_,String>(4)?,"statusCode":r.get::<_,String>(5)?,"decision":r.get::<_,String>(6)?}))).map_err(store::err)?.collect::<Result<Vec<_>,_>>().map_err(store::err)?;
-            json!({"items":rows,"limit":limit,"source":"saved_project_assets"})
+        "assets_get_stats" => {
+            let stats=asset_statistics::stats_on(db,item.project_id,&asset_filter(args))?;
+            let mut value=serde_json::to_value(stats).map_err(|_|"conversation_asset_statistics_invalid")?;
+            value["source"]=json!("saved_project_assets");
+            value["breakdownSemantics"]=json!("Each decision/probe/HTTP-status dimension independently sums to filteredTotal, including unknown/unclassified. Dimensions overlap; never add counts from different dimensions. Saved probe/status fields may be historical, not current live verification.");
+            value
         }
-        "assets_read" => db.query_row("SELECT a.id,a.host,a.title,a.protocol,a.port,a.status_code,a.domain,pa.decision,pa.note,pa.last_seen FROM project_assets pa JOIN assets a ON a.id=pa.asset_id WHERE pa.project_id=?1 AND pa.is_deleted=0 AND a.id=?2",params![item.project_id,args["assetId"].as_i64()],|r|Ok(json!({"id":r.get::<_,i64>(0)?,"host":bounded(&r.get::<_,String>(1)?,256),"title":bounded(&r.get::<_,String>(2)?,512),"protocol":r.get::<_,String>(3)?,"port":r.get::<_,String>(4)?,"statusCode":r.get::<_,String>(5)?,"domain":bounded(&r.get::<_,String>(6)?,256),"decision":r.get::<_,String>(7)?,"projectNote":bounded(&r.get::<_,String>(8)?,2048),"lastSeen":r.get::<_,String>(9)?}))).optional().map_err(store::err)?.ok_or("conversation_asset_unavailable")?,
+        "assets_search" => {
+            let filter=asset_filter(args);
+            // Aggregate permission does not expand the legacy row-content
+            // boundary. Repeat this at dispatch even if schemas later change.
+            if filter.deleted_view != "active" { return Err("conversation_tool_permission_denied".into()); }
+            let page=asset_statistics::search_on(db,item.project_id,&filter,limit,args.get("cursor").and_then(Value::as_str))?;
+            let mut value=serde_json::to_value(page).map_err(|_|"conversation_asset_search_invalid")?;
+            value["source"]=json!("saved_project_assets");
+            value["itemsArePage"]=json!(true);
+            value
+        }
+        "assets_read" => db.query_row("SELECT a.id,a.host,a.title,a.protocol,a.port,a.status_code,a.domain,pa.decision,pa.note,pa.last_seen FROM project_assets pa JOIN assets a ON a.id=pa.asset_id WHERE pa.project_id=?1 AND pa.is_deleted=0 AND a.id=?2",params![item.project_id,args["assetId"].as_i64()],|r|Ok(json!({"id":r.get::<_,i64>(0)?,"host":bounded(&r.get::<_,String>(1)?,256),"title":bounded(&r.get::<_,String>(2)?,512),"protocol":bounded(&r.get::<_,String>(3)?,64),"port":bounded(&r.get::<_,String>(4)?,16),"statusCode":bounded(&r.get::<_,String>(5)?,32),"domain":bounded(&r.get::<_,String>(6)?,256),"decision":bounded(&r.get::<_,String>(7)?,40),"projectNote":bounded(&r.get::<_,String>(8)?,2048),"lastSeen":bounded(&r.get::<_,String>(9)?,96)}))).optional().map_err(store::err)?.ok_or("conversation_asset_unavailable")?,
         "scans_search" => {
             let mut stmt=db.prepare("SELECT s.id,s.task_name,s.status,s.scan_type,s.created_at,s.updated_at FROM sentinel_scans s WHERE s.project_id=?1 AND NOT EXISTS(SELECT 1 FROM sentinel_deleted_scans d WHERE d.scan_id=s.id) AND (?2='' OR instr(lower(s.task_name),lower(?2))>0) ORDER BY s.updated_at DESC,s.id LIMIT ?3").map_err(store::err)?;
             let rows=stmt.query_map(params![item.project_id,query,limit],|r|Ok(json!({"id":r.get::<_,String>(0)?,"name":bounded(&r.get::<_,String>(1)?,256),"status":r.get::<_,String>(2)?,"type":r.get::<_,String>(3)?,"createdAt":r.get::<_,String>(4)?,"updatedAt":r.get::<_,String>(5)?}))).map_err(store::err)?.collect::<Result<Vec<_>,_>>().map_err(store::err)?;

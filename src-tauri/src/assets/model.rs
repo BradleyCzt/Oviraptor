@@ -309,6 +309,7 @@ pub struct AssetSummary {
     pub confirmed: i64,
     pub rejected: i64,
     pub not_applicable: i64,
+    pub unknown: i64,
     pub sent_to_agent: i64,
 }
 
