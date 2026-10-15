@@ -1,6 +1,13 @@
 // Preserve real HTTP/SDK original invoices and use the production delivery writer.
 // This fixture stops immediately after delivery so the first assessment is unpaid.
 fn new_evidence_closed_original_fixture(tag: &str) -> InputParserRootFixture {
+    new_evidence_closed_original_fixture_with_financial_drain(tag, false)
+}
+
+fn new_evidence_closed_original_fixture_with_financial_drain(
+    tag: &str,
+    drain_financial: bool,
+) -> InputParserRootFixture {
     let f = input_parser_root_fixture(tag, &["dispatch:input_parser"]);
     let db = db::open(&f.h.db_path).unwrap();
     let session = f.session.as_ref().unwrap();
@@ -11,6 +18,48 @@ fn new_evidence_closed_original_fixture(tag: &str) -> InputParserRootFixture {
     drop(idle);
     let payload = json!({"terminalCode":f.outcome.terminal_code(),"summary":f.outcome.detail(),
         "usage":{"totalTokens":usage.total_tokens,"modelRequests":usage.model_requests}});
+    if drain_financial {
+        // A later full finish may only replay assessments already published
+        // before logical closure. Keep the first new-evidence assessment unpaid.
+        native_coordinator_budget_consumption_after_settlement(
+            &f.h.context, &session.lease, &session.executor, &payload, &f.outcome.detail(),
+        ).unwrap();
+        native_coordinator_http_budget_consumption_after_settlement(
+            &f.h.context, &session.lease, &session.executor, &payload, &f.outcome.detail(),
+        ).unwrap();
+        let phases = followup_original_root_phase_counts(&db, &f.root, &f.h.model_seen.lock().unwrap());
+        assert_eq!(phases.get("budget-consumption"), Some(&2));
+        assert_eq!(phases.get("http-budget-consumption"), Some(&1));
+        assert!(!phases.contains_key("new-evidence"));
+        let snapshot = db.unchecked_transaction().unwrap();
+        let assessments: Vec<(String, String, i64)> = snapshot.prepare(
+            "SELECT q.call_id,q.fact_json,json_extract(p.fact_json,'$.eventSequence') FROM agent_root_tick_receipts q JOIN agent_root_tick_receipts p ON p.root_run_id=q.root_run_id AND p.call_id=q.call_id AND p.phase='publication' WHERE q.root_run_id=?1 AND q.phase='request' AND json_extract(q.fact_json,'$.request.basis.phase') IN ('budget-consumption','http-budget-consumption') ORDER BY q.round"
+        ).unwrap().query_map([&f.root], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?))).unwrap()
+            .collect::<rusqlite::Result<_>>().unwrap();
+        assert_eq!(assessments.len(), 3);
+        for (call, raw, event) in assessments {
+            let request: JsonValue = serde_json::from_str(&raw).unwrap();
+            let basis = &request["request"]["basis"];
+            let fact = &basis["changedFact"]["semantic"];
+            assert_eq!(fact["rootRunId"], f.root);
+            assert_eq!(fact["advisoryOnly"], true);
+            assert_eq!(fact["executionGrant"], false);
+            assert_eq!(fact["additionalScopeGranted"], false);
+            assert_eq!(fact["targetRequestsGranted"], 0);
+            let fee: (i64, i64) = snapshot.query_row(
+                "SELECT count(*),coalesce(sum(amount),0) FROM agent_budget_entries WHERE root_run_id=?1 AND assignment_id='' AND source_id=?2 AND dimension='model_requests' AND kind='consume'",
+                params![f.root, call], |row| Ok((row.get(0)?, row.get(1)?)),
+            ).unwrap();
+            assert_eq!(fee, (1, 1));
+            let publication = crate::agent_runtime::multi_agent::budget::root::model::tick::Tick::project_publication(&snapshot, &f.root, event).unwrap();
+            let step = if basis["phase"] == "budget-consumption" {
+                "assess:budget_consumption"
+            } else { "assess:http_budget_consumption" };
+            assert_eq!(publication.record["summary"]["suggestions"], json!([step]));
+            assert!(publication.record.get("localTools").is_none());
+        }
+        snapshot.rollback().unwrap();
+    }
     complete_target_child_delivery(
         &db,
         &session.lease,
@@ -73,7 +122,7 @@ fn new_evidence_actual_first_sdk_concurrent_owner_blocks_duplicate_and_later_rep
 #[test]
 fn new_evidence_actual_local_snapshot_round_then_final_replays_all_original_fees() {
     let _real = RealSpecialistTransport::enter();
-    let mut f = new_evidence_closed_original_fixture("ne-local-react");
+    let mut f = new_evidence_closed_original_fixture_with_financial_drain("ne-local-react", true);
     let db = db::open(&f.h.db_path).unwrap();
     let (id, _) = f.record(&db);
     let calls = f.calls();
