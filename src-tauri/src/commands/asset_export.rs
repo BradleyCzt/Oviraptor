@@ -1,5 +1,5 @@
 //! CSV export is owned by assets and uses the same scoped inventory query.
-use super::assets::{asset_filter, asset_from_row, ASSET_SELECT};
+use super::assets::{asset_filter, asset_from_row, validate_asset_query, ASSET_SELECT};
 use crate::{db, models::{Asset, ExportRequest, ExportResult}, AppState};
 use rusqlite::params_from_iter;
 use std::{collections::HashMap, fs, io::Write, path::PathBuf};
@@ -154,6 +154,7 @@ pub fn export_assets(
     {
         return Err(format!("不支持的导出字段：{field}"));
     }
+    validate_asset_query(&request.query)?;
     let connection = db::open(&state.db_path)?;
     let (filter, values) = asset_filter(&request.query, true);
     let sql = format!("{ASSET_SELECT} WHERE {filter} ORDER BY a.last_seen DESC,a.id DESC");

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue';
+import { computed, onMounted, onUnmounted, ref } from 'vue';
 import { RefreshCw, ShieldBan, Search } from '@lucide/vue';
 import { assetApi } from '../api';
 import { useI18n } from '../../../i18n';
@@ -14,16 +14,22 @@ const catalog=ref<AssetRuleCatalog>({projectRules:[],legacyRules:[]});
 const project=ref<number|undefined>();
 const text=ref('');const busy=ref(false);const error=ref('');
 const manageProject=ref<number>();
+let generation=0,disposed=false;
 const projectName=(id:number)=>props.projects.find(p=>p.id===id)?.name||`#${id}`;
 const matches=(...values:string[])=>values.join(' ').toLowerCase().includes(text.value.trim().toLowerCase());
 const projectRules=computed(()=>catalog.value.projectRules.filter(r=>(!project.value||r.projectId===project.value)&&matches(r.value,r.exampleTitle,projectName(r.projectId))));
 const legacyRules=computed(()=>catalog.value.legacyRules.filter(r=>matches(r.keyword,r.exampleTitle,r.exampleUrl)));
 async function refresh() {
-  if(busy.value)return;busy.value=true;error.value='';
-  try {catalog.value=await assetApi.getAssetRuleCatalog();}catch(e){error.value=String(e);}finally{busy.value=false;}
+  if(disposed)return;
+  const request=++generation;
+  busy.value=true;error.value='';
+  try {const value=await assetApi.getAssetRuleCatalog();if(!disposed&&request===generation)catalog.value=value;}
+  catch(e){if(!disposed&&request===generation)error.value=String(e);}
+  finally{if(!disposed&&request===generation)busy.value=false;}
 }
-async function changed(){await refresh();emit('changed');}
+async function changed(){await refresh();if(!disposed)emit('changed');}
 onMounted(refresh);
+onUnmounted(()=>{disposed=true;generation++;});
 </script>
 
 <template>

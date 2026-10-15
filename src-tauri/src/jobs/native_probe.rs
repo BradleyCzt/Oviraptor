@@ -94,7 +94,10 @@ fn non_public_literal(url: &str) -> bool {
     {
         return true;
     }
-    host.parse::<IpAddr>()
+    // URL host_str retains IPv6 brackets, unlike IpAddr::from_str. Treat
+    // mapped IPv4 with the same private-address policy as its IPv4 endpoint.
+    host.trim_matches(['[', ']'])
+        .parse::<IpAddr>()
         .map(|ip| match ip {
             IpAddr::V4(ip) => {
                 ip.is_private()
@@ -108,6 +111,13 @@ fn non_public_literal(url: &str) -> bool {
                     || ip.is_unspecified()
                     || ip.is_unique_local()
                     || ip.is_unicast_link_local()
+                    || ip.to_ipv4_mapped().is_some_and(|ip| {
+                        ip.is_private()
+                            || ip.is_loopback()
+                            || ip.is_link_local()
+                            || ip.is_unspecified()
+                            || ip.is_broadcast()
+                    })
             }
         })
         .unwrap_or(false)
@@ -1078,3 +1088,7 @@ mod portal_flag_tests {
         assert_eq!((login, register), ("1", "0"));
     }
 }
+
+#[cfg(test)]
+#[path = "native_probe_private_tests.rs"]
+mod private_address_tests;

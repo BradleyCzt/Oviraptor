@@ -213,7 +213,7 @@ function navigateFromTray(destination:string) {
   const item=route.section?{key:route.section,view:route.view,label:["任务与成本","Tasks & cost"] as const,icon:"tasks" as const,section:route.section}:undefined;
   applyRoute(route.module,route.view,item);
 }
-function switchModule(module:ModuleKey) { if(module===activeModule.value)return; if (applyRoute(module,moduleDefinition(module).defaultView)&&isMobile.value) closeSidebar(); }
+function switchModule(module:ModuleKey) { if(module===activeModule.value&&!["projects","settings","skills"].includes(activeView.value))return; if (applyRoute(module,moduleDefinition(module).defaultView)&&isMobile.value) closeSidebar(); }
 function openWorkspaceSection(item:WorkspaceNavItem) { if (applyRoute(activeModule.value,item.view,item)&&isMobile.value) closeSidebar(); }
 function selectProject(id?:number) {
   const candidate=parseProjectId(id);

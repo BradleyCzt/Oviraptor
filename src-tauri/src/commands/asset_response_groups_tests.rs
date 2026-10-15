@@ -82,6 +82,7 @@ fn asset_response_display_defaults_raw_and_never_changes_persisted_members() {
     let mut query: AssetQuery = serde_json::from_str("{}").unwrap();
     assert!(!query.collapse_identical_responses);
     assert!(query.response_fingerprint.is_empty());
+    assert_eq!(query.response_representative_asset_id, None);
     query.project_id = Some(9001);
     let raw = fixture.list(&query);
     assert_eq!((raw.total, raw.member_total, raw.items.len()), (3, 3, 3));
@@ -376,4 +377,150 @@ fn asset_response_display_never_folds_different_response_fields_with_reused_fing
         .items
         .iter()
         .all(|asset| asset.extra["response_display_group_count"] == 1));
+}
+
+#[test]
+fn asset_response_member_anchor_matches_exact_response_tuple() {
+    let fixture = Fixture::new();
+    let extra = proof("same");
+    fixture.add(1, 9001, &extra);
+    fixture.add(2, 9001, &extra);
+    for (id, key, value) in [
+        (3, "body_sha256", "ab".repeat(32)),
+        (4, "probe_body_bytes", "5".into()),
+        (5, "probe_content_type", "text/plain".into()),
+        (6, "probe_status_code", "201".into()),
+    ] {
+        let mut changed = extra.clone();
+        changed[key] = JsonValue::String(value);
+        fixture.add(id, 9001, &changed);
+    }
+    fixture.connection.execute("UPDATE assets SET status_code='201' WHERE id=6", []).unwrap();
+    let mut query = folded_query();
+    let displayed = fixture.list(&query);
+    assert_eq!((displayed.total, displayed.member_total), (5, 6));
+    assert_eq!(displayed.items.iter().find(|asset| asset.id == 1).unwrap().extra["response_display_group_count"], 2);
+    query.response_fingerprint = extra["probe_response_fingerprint"].as_str().unwrap().into();
+    query.collapse_identical_responses = false;
+    // Existing fingerprint-only callers retain their original wider query.
+    assert_eq!(fixture.list(&query).total, 6);
+    query.response_representative_asset_id = Some(1);
+    let members = fixture.list(&query);
+    assert_eq!((members.total, members.member_total, members.summary.all), (2, 2, 2));
+    assert_eq!(members.items.iter().map(|asset| asset.id).collect::<HashSet<_>>(), HashSet::from([1, 2]));
+    query.collapse_identical_responses = true;
+    let folded = fixture.list(&query);
+    assert_eq!((folded.total, folded.member_total), (1, 2));
+    assert_eq!(folded.items[0].extra["response_display_group_count"], 2);
+}
+
+#[test]
+fn asset_response_member_anchor_preserves_each_manual_state_partition() {
+    let fixture = Fixture::new();
+    let extra = proof("same");
+    for id in 1..=10 {
+        fixture.add(id, 9001, &extra);
+    }
+    fixture.connection.execute("UPDATE project_assets SET decision='confirmed' WHERE asset_id=3", []).unwrap();
+    fixture.connection.execute("UPDATE project_assets SET note='Human note' WHERE asset_id=4", []).unwrap();
+    fixture.connection.execute("UPDATE project_assets SET is_deleted=1,deleted_at='archived' WHERE asset_id=5", []).unwrap();
+    fixture.connection.execute("UPDATE project_assets SET entry_opened_at='seen' WHERE asset_id=6", []).unwrap();
+    fixture.connection.execute("INSERT INTO sentinel_scans(id,project_id,status) VALUES('anchored-complete',9001,'completed')", []).unwrap();
+    fixture.connection.execute("INSERT INTO sentinel_targets(project_id,scan_id,asset_id,url) VALUES(9001,'anchored-complete',7,'https://example.test/entry-7')", []).unwrap();
+    fixture.connection.execute("INSERT INTO asset_ownership_decisions(project_id,asset_id,status,authorization_status,exposure_eligible) VALUES(9001,8,'confirmed','allowed',1),(9001,9,'confirmed','revoked',0)", []).unwrap();
+    fixture.connection.execute("UPDATE assets SET has_login=1,has_register=1 WHERE id=10", []).unwrap();
+    let mut query = folded_query();
+    query.deleted_view = "all".into();
+    query.collapse_identical_responses = false;
+    query.response_fingerprint = extra["probe_response_fingerprint"].as_str().unwrap().into();
+    query.response_representative_asset_id = Some(1);
+    let members = fixture.list(&query);
+    assert_eq!(members.items.iter().map(|asset| asset.id).collect::<HashSet<_>>(), HashSet::from([1, 2]));
+    for id in 3..=10 {
+        query.response_representative_asset_id = Some(id);
+        let members = fixture.list(&query);
+        assert_eq!((members.total, members.member_total), (1, 1));
+        assert_eq!(members.items[0].id, id);
+    }
+    query.response_representative_asset_id = Some(5);
+    query.deleted_view = "active".into();
+    let stale = fixture.list(&query);
+    assert_eq!((stale.total, stale.member_total, stale.summary.all), (0, 0, 0));
+}
+
+#[test]
+fn asset_response_member_anchor_never_crosses_projects_or_filtered_anchors() {
+    let fixture = Fixture::new();
+    let extra = proof("same");
+    fixture.add(1, 9001, &extra);
+    fixture.add(2, 9001, &extra);
+    fixture.add(3, 9002, &extra);
+    fixture.connection.execute("INSERT INTO project_assets(project_id,asset_id) VALUES(9002,1)", []).unwrap();
+    let mut query = folded_query();
+    query.collapse_identical_responses = false;
+    query.response_fingerprint = extra["probe_response_fingerprint"].as_str().unwrap().into();
+    query.response_representative_asset_id = Some(1);
+    assert_eq!(fixture.list(&query).items.iter().map(|asset| asset.id).collect::<HashSet<_>>(), HashSet::from([1, 2]));
+    query.project_id = Some(9002);
+    let other = fixture.list(&query);
+    assert!(other.items.iter().all(|asset| asset.project_id == 9002));
+    assert_eq!(other.items.iter().map(|asset| asset.id).collect::<HashSet<_>>(), HashSet::from([1, 3]));
+    query.response_representative_asset_id = Some(2);
+    assert_eq!(fixture.list(&query).total, 0);
+    query.project_id = Some(9001);
+    query.response_representative_asset_id = Some(1);
+    query.search = "entry-2".into();
+    assert_eq!(fixture.list(&query).total, 0);
+    query.search = "example.test".into();
+    query.conditions = vec![FilterCondition {
+        field: "host".into(), operator: "startsWith".into(),
+        value: "https://example.test/entry-".into(), join: "and".into(),
+    }];
+    assert_eq!(fixture.list(&query).total, 2);
+    query.response_representative_asset_id = Some(9999);
+    assert_eq!(fixture.list(&query).total, 0);
+    query.response_representative_asset_id = Some(1);
+    query.response_fingerprint = "ab".repeat(32);
+    assert_eq!(fixture.list(&query).total, 0);
+}
+
+#[test]
+fn asset_response_member_anchor_paginates_only_its_exact_members() {
+    let fixture = Fixture::new();
+    let extra = proof("same");
+    for id in 1..=24 {
+        fixture.add(id, 9001, &extra);
+    }
+    fixture.connection.execute("UPDATE project_assets SET note='Other display group' WHERE asset_id>12", []).unwrap();
+    let mut query = folded_query();
+    query.collapse_identical_responses = false;
+    query.response_fingerprint = extra["probe_response_fingerprint"].as_str().unwrap().into();
+    query.response_representative_asset_id = Some(1);
+    let first = fixture.list(&query);
+    assert_eq!((first.total, first.member_total, first.items.len()), (12, 12, 10));
+    query.page = 2;
+    let second = fixture.list(&query);
+    assert_eq!((second.total, second.member_total, second.items.len()), (12, 12, 2));
+    let ids = first.items.iter().chain(second.items.iter()).map(|asset| asset.id).collect::<HashSet<_>>();
+    assert_eq!(ids, (1..=12).collect::<HashSet<_>>());
+    query.page = 3;
+    let empty = fixture.list(&query);
+    assert_eq!((empty.total, empty.member_total, empty.items.len()), (12, 12, 0));
+}
+
+#[test]
+fn asset_response_member_anchor_requires_project_fingerprint_and_positive_id() {
+    let fixture = Fixture::new();
+    let mut query: AssetQuery = serde_json::from_str(r#"{"responseRepresentativeAssetId":1}"#).unwrap();
+    assert!(list_assets_on(&fixture.connection, &query).unwrap_err().contains("指定项目和完整响应指纹"));
+    query.project_id = Some(9001);
+    assert!(list_assets_on(&fixture.connection, &query).unwrap_err().contains("完整响应指纹"));
+    query.response_fingerprint = "ab".repeat(32);
+    query.project_id = None;
+    assert!(list_assets_on(&fixture.connection, &query).unwrap_err().contains("指定项目"));
+    query.project_id = Some(9001);
+    for invalid in [0, -1] {
+        query.response_representative_asset_id = Some(invalid);
+        assert!(list_assets_on(&fixture.connection, &query).unwrap_err().contains("必须为正数"));
+    }
 }

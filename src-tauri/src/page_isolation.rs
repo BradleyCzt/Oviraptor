@@ -351,6 +351,9 @@ pub(crate) fn apply_import_on(
     if rules.is_empty() {
         return Ok(());
     }
+    if c.is_autocommit() {
+        return Err("页面规则入库必须在原资产事务中执行".into());
+    }
     let row = candidates_on(c, project, Some(asset))?
         .into_iter()
         .next()
@@ -452,7 +455,21 @@ pub(crate) fn owned_isolation_sql() -> &'static str {
 /// An explicit human restore overrides an enabled rule for this asset. Restore
 /// the pre-rule decision/note only while our exact applied state still owns it.
 pub(crate) fn restore_manual_on(c: &Connection, project: i64, asset: i64) -> Result<(), String> {
-    let original:Option<(String,String)>=c.query_row("SELECT e.original_decision,e.original_note FROM asset_page_rule_effects e JOIN project_assets pa ON pa.project_id=e.project_id AND pa.asset_id=e.asset_id WHERE e.project_id=?1 AND e.asset_id=?2 AND e.active=1 AND pa.is_deleted=1 AND pa.decision='rejected' AND pa.note=e.applied_note",params![project,asset],|r|Ok((r.get(0)?,r.get(1)?))).optional().map_err(|e|e.to_string())?;
+    if c.is_autocommit() {
+        return Err("人工恢复必须在原资产事务中执行".into());
+    }
+    // A later explicit decision/authorization still owns the row when its text
+    // happens to equal the automatic note. Match the same protection as disable.
+    let managed = candidates_on(c, project, Some(asset))?
+        .first()
+        .is_some_and(|row| row.managed);
+    let original: Option<(String, String)> = if managed {
+        None
+    } else {
+        c.query_row("SELECT e.original_decision,e.original_note FROM asset_page_rule_effects e JOIN project_assets pa ON pa.project_id=e.project_id AND pa.asset_id=e.asset_id WHERE e.project_id=?1 AND e.asset_id=?2 AND e.active=1 AND pa.is_deleted=1 AND pa.decision='rejected' AND pa.note=e.applied_note", params![project, asset], |r| Ok((r.get(0)?, r.get(1)?)))
+            .optional()
+            .map_err(|e| e.to_string())?
+    };
     if let Some((decision, note)) = original {
         c.execute(
             "UPDATE project_assets SET decision=?1,note=?2 WHERE project_id=?3 AND asset_id=?4",
@@ -471,3 +488,7 @@ pub(crate) fn restore_manual_on(c: &Connection, project: i64, asset: i64) -> Res
 #[cfg(test)]
 #[path = "page_isolation_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "page_isolation_migration_tests.rs"]
+mod migration_tests;

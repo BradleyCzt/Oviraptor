@@ -209,6 +209,7 @@ function defaultQuery(projectId = props.selectedProjectId): AssetQuery { return 
   sortDirection: "desc",
   collapseIdenticalResponses: !props.quarantineOnly,
   responseFingerprint: "",
+  responseRepresentativeAssetId: undefined,
 }; }
 const stateKey = (projectId?: number) => `asset-query-v2:${props.quarantineOnly ? 'quarantine' : 'assets'}:${projectId ?? 'all'}`;
 function restoredQuery(projectId?: number): AssetQuery {
@@ -216,11 +217,14 @@ function restoredQuery(projectId?: number): AssetQuery {
   try {
     const saved = JSON.parse(sessionStorage.getItem(stateKey(projectId)) || 'null');
     if (!saved || !Array.isArray(saved.conditions) || !Number.isInteger(saved.page) || saved.page < 1 || ![50,100,200].includes(saved.pageSize)) return defaults;
-    return { ...defaults, ...saved, search: props.initialSearch || saved.search || '', ...(props.quarantineOnly ? {probeView:'blocked'} : {}) };
+    const restored = { ...defaults, ...saved, search: props.initialSearch || saved.search || '', ...(props.quarantineOnly ? {probeView:'blocked'} : {}) };
+    if (!restored.projectId || !restored.responseFingerprint || !Number.isSafeInteger(restored.responseRepresentativeAssetId) || restored.responseRepresentativeAssetId <= 0) restored.responseRepresentativeAssetId = undefined;
+    return restored;
   } catch { return defaults; }
 }
 const query = ref<AssetQuery>(restoredQuery(props.selectedProjectId));
-watch(query, value => { try { sessionStorage.setItem(stateKey(props.selectedProjectId), JSON.stringify(value)); } catch { /* A storage quota failure must not interrupt review. */ } }, { deep:true });
+let queryContextProject = props.selectedProjectId;
+watch(query, value => { try { sessionStorage.setItem(stateKey(queryContextProject), JSON.stringify(value)); } catch { /* A storage quota failure must not interrupt review. */ } }, { deep:true, flush:"sync" });
 
 const selectionKey = (asset: Asset) => `${asset.projectId}:${asset.id}`;
 const selectedRows = computed(() => [...selected.value.values()]);
@@ -242,14 +246,17 @@ const selectedAll = computed({
 });
 
 watch(() => props.selectedProjectId, (projectId) => {
+  queryContextProject = projectId;
+  pageRuleOpen.value = false; pageRuleAsset.value = undefined; pageRuleKeyword.value = undefined; titleRuleSelection.value = undefined;
   query.value = restoredQuery(projectId);
   clearSelection();
   void refresh();
-});
+}, { flush:"sync" });
 watch(visibleColumns, (value) => localStorage.setItem("asset-columns", JSON.stringify(value)), { deep: true });
 
-let queryGeneration = 0;
+let queryGeneration = 0, disposed = false;
 async function refresh() {
+  if (disposed) return;
   cancelRowDrag();
   const generation = ++queryGeneration;
   const requested = JSON.parse(JSON.stringify(query.value)) as AssetQuery;
@@ -291,9 +298,15 @@ function showResponseMembers(asset: Asset) {
   if (typeof fingerprint !== "string" || !/^[a-f0-9]{64}$/.test(fingerprint)) return;
   query.value.projectId = asset.projectId;
   query.value.responseFingerprint = fingerprint;
+  query.value.responseRepresentativeAssetId = asset.id;
   query.value.collapseIdenticalResponses = false;
   search();
 }
+function clearResponseGroup() {
+  query.value.responseFingerprint = "";
+  query.value.responseRepresentativeAssetId = undefined;
+}
+function changeQueryProject() { clearResponseGroup(); search(); }
 function toggleAsset(asset: Asset, checked: boolean) {
   const next = new Map(selected.value);
   if (checked) next.set(selectionKey(asset), asset);
@@ -357,7 +370,7 @@ function changeProbeOutcome() {
   search();
 }
 function resetQueryFilters() {
-  query.value.responseFingerprint = "";
+  clearResponseGroup();
   query.value.collapseIdenticalResponses = !props.quarantineOnly;
   query.value.search = "";
   query.value.conditions = [];
@@ -556,17 +569,23 @@ async function openLink(asset: Asset) {
 async function openAsset(asset: Asset) {
   const url = entryUrl(asset);
   if (!url) return;
+  const generation = queryGeneration;
+  const current = () => !disposed && generation === queryGeneration;
   try {
     await openUrl(url);
   } catch (error) {
-    emit("notify", "error", String(error));
+    if (current()) emit("notify", "error", String(error));
     return;
   }
   try {
     const openedAt = await assetApi.markAssetEntryOpened(asset.projectId, asset.id);
-    stampEntryOpened(asset, openedAt);
+    if (!current()) return;
+    // Seen state participates in response grouping. Re-read representatives and
+    // totals together after it changes instead of retaining the old group count.
+    if (query.value.collapseIdenticalResponses || query.value.responseRepresentativeAssetId) await refresh();
+    else stampEntryOpened(asset, openedAt);
   } catch (error) {
-    emit("notify", "error", String(error));
+    if (current()) emit("notify", "error", String(error));
   }
 }
 function captureTitleSelection(event: MouseEvent, asset: Asset) {
@@ -587,7 +606,7 @@ async function applyTitleRule(keyword: string) {
   titleRuleSelection.value = undefined;
 }
 onMounted(refresh);
-onUnmounted(() => { ++queryGeneration; cancelRowDrag(); });
+onUnmounted(() => { disposed = true; ++queryGeneration; cancelRowDrag(); });
 </script>
 
 <template>
@@ -613,7 +632,7 @@ onUnmounted(() => { ++queryGeneration; cancelRowDrag(); });
     <div class="asset-toolbar panel">
       <div class="asset-toolbar-primary">
         <div class="search-box"><Search :size="17" /><input v-model="query.search" :placeholder="tr('搜索项目、公司、域名、IP、标题或资产键','Search project, company, domain, IP, title or asset key')" @keyup.enter="search" /><button v-if="query.search" @click="query.search='';search()"><X :size="14" /></button></div>
-        <select v-model="query.projectId" class="toolbar-select" @change="search"><option :value="undefined">{{tr('全部项目','All projects')}}</option><option v-for="p in projects" :key="p.id" :value="p.id">{{ p.name }}{{p.status==='archived'?tr('（已归档）',' (archived)'):''}}</option></select>
+        <select v-model="query.projectId" class="toolbar-select" @change="changeQueryProject"><option :value="undefined">{{tr('全部项目','All projects')}}</option><option v-for="p in projects" :key="p.id" :value="p.id">{{ p.name }}{{p.status==='archived'?tr('（已归档）',' (archived)'):''}}</option></select>
       </div>
       <div class="asset-toolbar-filters">
         <label><span>{{tr('探测队列','Probe queue')}}</span><select v-if="!quarantineOnly" v-model="query.probeView" class="toolbar-select" @change="search"><option value="browser_review">{{tr('Web 人工队列','Web review queue')}}</option><option value="browser_accessible">{{tr('浏览器可访问','Browser accessible')}}</option><option value="restricted">{{tr('受限 / 需渲染 / 需域名','Restricted / render / vhost')}}</option><option value="service">{{tr('TCP 非 Web 服务','TCP non-Web services')}}</option><option value="abnormal">{{tr('异常 / 无法连接','Abnormal / unreachable')}}</option><option value="blocked">{{tr('内容隔离','Blocked content')}}</option><option value="all">{{tr('全部分类','All classes')}}</option></select><strong v-else>{{tr('内容隔离','Blocked content')}}</strong></label>
@@ -630,7 +649,7 @@ onUnmounted(() => { ++queryGeneration; cancelRowDrag(); });
       <div class="asset-toolbar-actions">
         <label class="check-field"><input v-model="query.collapseIdenticalResponses" type="checkbox" @change="search()" />{{tr('完全相同响应仅显示一条','Show one identical response')}}</label>
         <button class="button ghost compact" @click="openPageRules()"><ShieldBan :size="15" /> {{tr('页面隔离规则','Page rules')}}</button>
-        <button v-if="query.responseFingerprint" class="button ghost compact" @click="query.responseFingerprint='';search()">{{tr('清除响应组筛选','Clear response group')}}</button>
+        <button v-if="query.responseFingerprint" class="button ghost compact" @click="clearResponseGroup();search()">{{tr('清除响应组筛选','Clear response group')}}</button>
         <button class="button ghost compact" :class="{ active: showFilters }" @click="showFilters=!showFilters"><Filter :size="15" /> {{tr('高级查询','Advanced')}} <span v-if="query.conditions.length" class="mini-count">{{query.conditions.length}}</span></button>
         <button class="button ghost compact" :title="tr('清除搜索、探测结果和组合条件','Clear search, probe result and combined conditions')" @click="resetQueryFilters"><RotateCcw :size="14" /> {{tr('重置查询','Reset query')}}</button>
         <div class="dropdown-wrap"><button class="button ghost compact" @click="showColumns=!showColumns"><Columns3 :size="15" /> {{tr('字段','Columns')}}</button>

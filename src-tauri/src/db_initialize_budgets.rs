@@ -51,11 +51,21 @@ fn repair_asset_duplicates_and_probe_labels(connection: &mut Connection) -> Resu
           ELSE probe_outcome END
         WHERE probe_outcome='alive_clean';
         UPDATE project_assets SET decision='not_applicable',note='系统自动Web分类：当前不进入浏览器人工队列'
-        WHERE decision IN ('pending','uncertain','') AND asset_id IN (
+        WHERE decision IN ('pending','uncertain','') AND is_deleted=0
+          AND (note='' OR note LIKE '系统自动%')
+          AND NOT EXISTS(SELECT 1 FROM asset_events e WHERE e.project_id=project_assets.project_id AND e.asset_id=project_assets.asset_id AND e.event_type IN ('decision','archived','restored'))
+          AND NOT EXISTS(SELECT 1 FROM asset_ownership_decisions o WHERE o.project_id=project_assets.project_id AND o.asset_id=project_assets.asset_id AND (o.source<>'auto' OR o.exposure_eligible=1))
+          AND NOT EXISTS(SELECT 1 FROM sentinel_targets st JOIN assets a ON a.id=project_assets.asset_id WHERE st.project_id=project_assets.project_id AND (st.asset_id=a.id OR (st.asset_id IS NULL AND st.url=COALESCE(NULLIF(a.link,''),a.host))))
+          AND asset_id IN (
           SELECT id FROM assets WHERE probe_outcome IN ('tcp_alive_non_http','web_abnormal','unreachable','skipped')
         );
         UPDATE project_assets SET decision='rejected',note='系统自动Web分类：违规内容隔离'
-        WHERE decision IN ('pending','uncertain','') AND asset_id IN (
+        WHERE decision IN ('pending','uncertain','') AND is_deleted=0
+          AND (note='' OR note LIKE '系统自动%')
+          AND NOT EXISTS(SELECT 1 FROM asset_events e WHERE e.project_id=project_assets.project_id AND e.asset_id=project_assets.asset_id AND e.event_type IN ('decision','archived','restored'))
+          AND NOT EXISTS(SELECT 1 FROM asset_ownership_decisions o WHERE o.project_id=project_assets.project_id AND o.asset_id=project_assets.asset_id AND (o.source<>'auto' OR o.exposure_eligible=1))
+          AND NOT EXISTS(SELECT 1 FROM sentinel_targets st JOIN assets a ON a.id=project_assets.asset_id WHERE st.project_id=project_assets.project_id AND (st.asset_id=a.id OR (st.asset_id IS NULL AND st.url=COALESCE(NULLIF(a.link,''),a.host))))
+          AND asset_id IN (
           SELECT id FROM assets WHERE probe_outcome='blocked_content'
         );
         INSERT INTO app_settings(key,value) VALUES('probe_classification_version','3')

@@ -216,6 +216,9 @@ pub struct AssetQuery {
     pub collapse_identical_responses: bool,
     #[serde(default)]
     pub response_fingerprint: String,
+    /// Restrict member expansion to the representative's current display group.
+    #[serde(default)]
+    pub response_representative_asset_id: Option<i64>,
 }
 
 fn default_page() -> i64 {

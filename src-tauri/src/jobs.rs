@@ -1,7 +1,6 @@
 use crate::{
     asset_models::{ImportResult, JobProgressEvent, StartJobInput},
-    db,
-    AppState,
+    db, AppState,
 };
 use rusqlite::{params, OptionalExtension};
 use serde_json::{Map, Value};
@@ -9,7 +8,6 @@ use std::{
     collections::{hash_map::DefaultHasher, HashMap, HashSet},
     fs::{self, File},
     hash::{Hash, Hasher},
-    io::{BufRead, BufReader},
     path::{Path, PathBuf},
     sync::{
         atomic::{AtomicBool, AtomicUsize, Ordering},
@@ -22,6 +20,7 @@ use tauri::{image::Image, AppHandle, Emitter, State};
 use uuid::Uuid;
 
 mod asset_identity;
+mod job_lifecycle;
 mod job_resume;
 mod native_config;
 #[path = "jobs/native_workers.rs"]
@@ -224,7 +223,32 @@ fn begin_tray_activity(
 }
 
 fn write_seeds(path: &Path, targets: &[(String, String)]) -> Result<(), String> {
-    let mut file = File::create(path).map_err(|error| error.to_string())?;
+    let parent = path.parent().ok_or("种子文件路径没有父目录")?;
+    let staged = parent.join(format!(".seeds-{}.tmp", Uuid::new_v4()));
+    let result = (|| {
+        write_seeds_unpublished(&staged, targets)?;
+        fs::rename(&staged, path).map_err(|error| error.to_string())?;
+        #[cfg(unix)]
+        File::open(parent)
+            .and_then(|directory| directory.sync_all())
+            .map_err(|error| error.to_string())?;
+        Ok(())
+    })();
+    if result.is_err() {
+        let _ = fs::remove_file(staged);
+    }
+    result
+}
+
+fn write_seeds_unpublished(path: &Path, targets: &[(String, String)]) -> Result<(), String> {
+    let mut options = fs::OpenOptions::new();
+    options.create_new(true).write(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.mode(0o600);
+    }
+    let mut file = options.open(path).map_err(|error| error.to_string())?;
     use std::io::Write;
     file.write_all(&[0xEF, 0xBB, 0xBF])
         .map_err(|error| error.to_string())?;
@@ -268,7 +292,11 @@ fn write_seeds(path: &Path, targets: &[(String, String)]) -> Result<(), String> 
             .write_record(record)
             .map_err(|error| error.to_string())?;
     }
-    writer.flush().map_err(|error| error.to_string())
+    writer.flush().map_err(|error| error.to_string())?;
+    writer
+        .get_ref()
+        .sync_all()
+        .map_err(|error| error.to_string())
 }
 
 fn field<'a>(
@@ -319,7 +347,12 @@ fn import_csv(
             },
         );
     })
-    .map_err(|error| format!("资产入库失败（任务 {run_id}，文件 {}）：{error}", csv_path.display()))
+    .map_err(|error| {
+        format!(
+            "资产入库失败（任务 {run_id}，文件 {}）：{error}",
+            csv_path.display()
+        )
+    })
 }
 
 fn import_csv_with_progress(
@@ -717,6 +750,92 @@ fn mark_missing(
     Ok(true)
 }
 
+// Publish a complete CSV with rename; an interrupted writer never leaves a
+// partial primary file that the next resume could mistake for a frozen input.
+fn write_reprobe_csv(
+    path: &Path,
+    headers: &[String],
+    rows: impl IntoIterator<Item = Result<Vec<String>, String>>,
+) -> Result<i64, String> {
+    let parent = path.parent().ok_or("复测输入路径没有父目录")?;
+    let staged = parent.join(format!(".reprobe-{}.tmp", Uuid::new_v4()));
+    let result = (|| {
+        let mut options = fs::OpenOptions::new();
+        options.create_new(true).write(true);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::OpenOptionsExt;
+            options.mode(0o600);
+        }
+        let file = options.open(&staged).map_err(|error| error.to_string())?;
+        let mut writer = csv::Writer::from_writer(file);
+        writer
+            .write_record(headers)
+            .map_err(|error| error.to_string())?;
+        let mut count = 0i64;
+        for row in rows {
+            writer
+                .write_record(row?)
+                .map_err(|error| error.to_string())?;
+            count += 1;
+        }
+        writer.flush().map_err(|error| error.to_string())?;
+        writer
+            .get_ref()
+            .sync_all()
+            .map_err(|error| error.to_string())?;
+        drop(writer);
+        fs::rename(&staged, path).map_err(|error| error.to_string())?;
+        #[cfg(unix)]
+        File::open(parent)
+            .and_then(|directory| directory.sync_all())
+            .map_err(|error| error.to_string())?;
+        Ok(count)
+    })();
+    if result.is_err() {
+        let _ = fs::remove_file(staged);
+    }
+    result
+}
+
+fn validate_reprobe_source(path: &Path) -> Result<(Vec<String>, i64), String> {
+    let mut reader = csv::Reader::from_path(path)
+        .map_err(|error| format!("原复测输入无法读取，未覆盖原文件：{error}"))?;
+    let headers = reader
+        .headers()
+        .map_err(|error| format!("原复测输入表头损坏，未覆盖原文件：{error}"))?
+        .iter()
+        .map(str::to_string)
+        .collect::<Vec<_>>();
+    if !["asset_key", "host", "link"]
+        .iter()
+        .all(|key| headers.iter().any(|field| field == key))
+    {
+        return Err("原复测输入缺少资产标识表头，未覆盖原文件".into());
+    }
+    let mut count = 0i64;
+    for record in reader.records() {
+        record.map_err(|error| format!("原复测输入记录损坏，未覆盖原文件：{error}"))?;
+        count += 1;
+    }
+    Ok((headers, count))
+}
+
+fn ensure_reprobe_secondary(refined_dir: &Path, headers: &[String]) -> Result<i64, String> {
+    let mut count = 0;
+    for name in ["P2_strong_needs_validation.csv", "P3_name_candidates.csv"] {
+        let path = refined_dir.join(name);
+        if path.exists() {
+            // Existing historical secondary stages can contain real assets.
+            // Validate and retain them; never replace them with empty headers.
+            count += validate_reprobe_source(&path)?.1;
+        } else {
+            write_reprobe_csv(&path, headers, std::iter::empty())?;
+        }
+    }
+    Ok(count)
+}
+
 fn write_reprobe_sources(
     db_path: &Path,
     project_id: i64,
@@ -724,15 +843,12 @@ fn write_reprobe_sources(
 ) -> Result<i64, String> {
     fs::create_dir_all(refined_dir).map_err(|error| error.to_string())?;
     let primary = refined_dir.join("P1_active_strong.csv");
-    // 中断后必须保留原始文件的大小和 mtime，探测脚本才能沿用 checkpoint。
+    // Keep valid frozen input bytes and mtime across resume. CSV records, not
+    // physical lines, are the unit of work (titles may contain newlines).
     if primary.exists() {
-        let count = BufReader::new(File::open(&primary).map_err(|error| error.to_string())?)
-            .lines()
-            .count()
-            .saturating_sub(1) as i64;
-        return Ok(count);
+        let (headers, count) = validate_reprobe_source(&primary)?;
+        return Ok(count + ensure_reprobe_secondary(refined_dir, &headers)?);
     }
-
     let headers = [
         "review_tier",
         "company",
@@ -749,18 +865,21 @@ fn write_reprobe_sources(
         "discovery_seed_kind",
         "discovery_sources_json",
         "discovery_source_count",
-    ];
+    ]
+    .into_iter()
+    .map(str::to_string)
+    .collect::<Vec<_>>();
     let connection = db::open(db_path)?;
     let mut statement = connection
         .prepare(
             r#"SELECT a.review_tier,a.company,a.asset_key,a.host,a.link,a.ip,a.port,
-                      a.protocol,a.domain,a.title,a.status_code,a.score,
-                      CAST(COALESCE(json_extract(a.extra_json,'$.discovery_seed_kind'),'') AS TEXT),
-                      CAST(COALESCE(json_extract(a.extra_json,'$.discovery_sources_json'),'') AS TEXT),
-                      CAST(COALESCE(json_extract(a.extra_json,'$.discovery_source_count'),'') AS TEXT)
-               FROM project_assets pa JOIN assets a ON a.id=pa.asset_id
-               WHERE pa.project_id=?1 AND pa.is_deleted=0
-               ORDER BY pa.asset_id"#,
+                  a.protocol,a.domain,a.title,a.status_code,a.score,
+                  CAST(COALESCE(json_extract(a.extra_json,'$.discovery_seed_kind'),'') AS TEXT),
+                  CAST(COALESCE(json_extract(a.extra_json,'$.discovery_sources_json'),'') AS TEXT),
+                  CAST(COALESCE(json_extract(a.extra_json,'$.discovery_source_count'),'') AS TEXT)
+           FROM project_assets pa JOIN assets a ON a.id=pa.asset_id
+           WHERE pa.project_id=?1 AND pa.is_deleted=0
+           ORDER BY pa.asset_id"#,
         )
         .map_err(|error| error.to_string())?;
     let rows = statement
@@ -770,27 +889,15 @@ fn write_reprobe_sources(
                 .collect::<Vec<_>>())
         })
         .map_err(|error| error.to_string())?;
-    let mut writer = csv::Writer::from_path(&primary).map_err(|error| error.to_string())?;
-    writer
-        .write_record(headers)
-        .map_err(|error| error.to_string())?;
-    let mut count = 0i64;
-    for row in rows {
-        writer
-            .write_record(row.map_err(|error| error.to_string())?)
-            .map_err(|error| error.to_string())?;
-        count += 1;
-    }
-    writer.flush().map_err(|error| error.to_string())?;
-    for name in ["P2_strong_needs_validation.csv", "P3_name_candidates.csv"] {
-        let mut empty =
-            csv::Writer::from_path(refined_dir.join(name)).map_err(|error| error.to_string())?;
-        empty
-            .write_record(headers)
-            .map_err(|error| error.to_string())?;
-        empty.flush().map_err(|error| error.to_string())?;
-    }
-    Ok(count)
+    // The primary is the last commit marker. A failed secondary publication
+    // leaves no primary, so retry can still capture every project asset.
+    let secondary_count = ensure_reprobe_secondary(refined_dir, &headers)?;
+    let count = write_reprobe_csv(
+        &primary,
+        &headers,
+        rows.map(|row| row.map_err(|error| error.to_string())),
+    )?;
+    Ok(count + secondary_count)
 }
 
 fn execute_reprobe_job(
@@ -942,17 +1049,19 @@ fn execute_job(
             3.0,
             "正在预检 FOFA 网络、代理与 Key",
         );
-        crate::asset_fofa::request_fofa_account(fofa_key.trim(), fofa_proxy.trim()).map_err(|error| {
-            log_line(
-                &app,
-                &db_path,
-                run_id,
-                "error",
-                "collect",
-                &format!("FOFA 预检失败：{error}"),
-            );
-            format!("FOFA 预检失败：{error}。采集尚未开始，请修正配置后重试")
-        })?;
+        crate::asset_fofa::request_fofa_account(fofa_key.trim(), fofa_proxy.trim()).map_err(
+            |error| {
+                log_line(
+                    &app,
+                    &db_path,
+                    run_id,
+                    "error",
+                    "collect",
+                    &format!("FOFA 预检失败：{error}"),
+                );
+                format!("FOFA 预检失败：{error}。采集尚未开始，请修正配置后重试")
+            },
+        )?;
         log_line(
             &app,
             &db_path,
@@ -1215,89 +1324,75 @@ fn launch_run(
     let activity = begin_tray_activity(app.clone(), active_jobs, cancellations, run_id);
     let failure_app = app.clone();
     let failure_db_path = db_path.clone();
-    let spawned = thread::Builder::new().name(format!("asset-job-{run_id}")).spawn(move || {
-        let _activity = activity;
-        let _power_request = JobPowerRequestGuard::begin();
-        let result = tray_activity::catch_job_panic(|| execute_job(
-            app.clone(),
-            db_path.clone(),
-            run_id,
-            project_id,
-            pipeline,
-            settings,
-            targets,
-            run_dir,
-            cancel,
-        ));
-        let connection = db::open(&db_path);
-        match result {
-            Ok(()) => {
-                if let Ok(connection) = connection {
-                    let _ = connection.execute("UPDATE runs SET status='completed',stage='completed',progress=100,finished_at=datetime('now','localtime'),error='' WHERE id=?1",[run_id]);
-                }
-                let _ = app.emit(
-                    "job-progress",
-                    JobProgressEvent {
-                        run_id,
-                        status: "completed".into(),
-                        stage: "completed".into(),
-                        progress: 100.0,
-                        message: "任务完成".into(),
-                    },
-                );
-            }
-            Err(error) if error == "__CANCELLED__" => {
-                if let Ok(connection) = connection {
-                    let _ = connection.execute("UPDATE runs SET status='cancelled',stage='cancelled',finished_at=datetime('now','localtime') WHERE id=?1",[run_id]);
-                }
-                let _ = app.emit(
-                    "job-progress",
-                    JobProgressEvent {
-                        run_id,
-                        status: "cancelled".into(),
-                        stage: "cancelled".into(),
-                        progress: 0.0,
-                        message: "任务已取消；资产任务可从原目录断点继续".into(),
-                    },
-                );
-            }
-            Err(error) => {
-                let error = crate::log_display::text(&error, 8000);
-                log_line(&app, &db_path, run_id, "error", "failed", &error);
-                if let Ok(connection) = connection {
-                    let _ = connection.execute("UPDATE runs SET status='failed',stage='failed',error=?1,finished_at=datetime('now','localtime') WHERE id=?2",params![error,run_id]);
-                }
-                let _ = app.emit(
-                    "job-progress",
+    let spawned = thread::Builder::new()
+        .name(format!("asset-job-{run_id}"))
+        .spawn(move || {
+            let _activity = activity;
+            let _power_request = JobPowerRequestGuard::begin();
+            let result = tray_activity::catch_job_panic(|| {
+                execute_job(
+                    app.clone(),
+                    db_path.clone(),
+                    run_id,
+                    project_id,
+                    pipeline,
+                    settings,
+                    targets,
+                    run_dir,
+                    cancel.clone(),
+                )
+            });
+            // A cancellation can arrive during the final import. Resolve it in the
+            // same transaction that persists the terminal state, before notifying UI.
+            let event = db::open(&db_path).and_then(|mut connection| {
+                job_lifecycle::finish_with_fallback(
+                    &mut connection,
+                    run_id,
+                    result,
+                    cancel.load(Ordering::Relaxed),
+                )
+            });
+            let event = match event {
+                Ok(event) => event,
+                Err(error) => {
+                    let message = format!("任务终态未能持久化，保留未完成状态供恢复：{error}");
+                    log_line(&app, &db_path, run_id, "error", "persistence", &message);
                     JobProgressEvent {
                         run_id,
                         status: "failed".into(),
-                        stage: "failed".into(),
+                        stage: "persistence".into(),
+                        progress: 0.0,
+                        message: crate::log_display::line(&message),
+                    }
+                }
+            };
+            if event.status == "failed" {
+                log_line(&app, &db_path, run_id, "error", "failed", &event.message);
+            }
+            let _ = app.emit("job-progress", event);
+        });
+    if let Err(error) = spawned {
+        let error = format!("无法启动资产任务线程：{error}");
+        let persisted = db::open(&failure_db_path).and_then(|mut connection| {
+            job_lifecycle::finish_with_fallback(&mut connection, run_id, Err(error.clone()), false)
+        });
+        let (event, error) = match persisted {
+            Ok(event) => (event, error),
+            Err(persistence) => {
+                let error = format!("{error}；终态未能持久化，保留未完成状态供恢复：{persistence}");
+                (
+                    JobProgressEvent {
+                        run_id,
+                        status: "failed".into(),
+                        stage: "persistence".into(),
                         progress: 0.0,
                         message: crate::log_display::line(&error),
                     },
-                );
+                    error,
+                )
             }
-        }
-    });
-    if let Err(error) = spawned {
-        let error = format!("无法启动资产任务线程：{error}");
-        if let Ok(connection) = db::open(&failure_db_path) {
-            let _ = connection.execute(
-                "UPDATE runs SET status='failed',stage='failed',error=?1,finished_at=datetime('now','localtime') WHERE id=?2",
-                params![error,run_id],
-            );
-        }
-        let _ = failure_app.emit(
-            "job-progress",
-            JobProgressEvent {
-                run_id,
-                status: "failed".into(),
-                stage: "failed".into(),
-                progress: 0.0,
-                message: crate::log_display::line(&error),
-            },
-        );
+        };
+        let _ = failure_app.emit("job-progress", event);
         return Err(error);
     }
     Ok(())
@@ -1465,12 +1560,7 @@ pub fn cancel_job(state: State<AppState>, run_id: i64) -> Result<(), String> {
     {
         flag.store(true, Ordering::Relaxed);
         let connection = db::open(&state.db_path)?;
-        connection
-            .execute(
-                "UPDATE runs SET status='cancel_requested' WHERE id=?1",
-                [run_id],
-            )
-            .map_err(|error| error.to_string())?;
+        job_lifecycle::request_cancel_on(&connection, run_id)?;
         Ok(())
     } else {
         Err("任务不在运行中".into())
@@ -1480,6 +1570,9 @@ pub fn cancel_job(state: State<AppState>, run_id: i64) -> Result<(), String> {
 #[cfg(test)]
 #[path = "jobs/asset_import_tests.rs"]
 mod asset_import_tests;
+
+#[cfg(test)]
+mod reprobe_source_tests;
 
 #[cfg(test)]
 mod tests {

@@ -98,6 +98,7 @@ export interface AssetQuery {
   sortDirection?: "asc" | "desc" | string;
   collapseIdenticalResponses?: boolean;
   responseFingerprint?: string;
+  responseRepresentativeAssetId?: number;
 }
 
 export interface AssetSummary {

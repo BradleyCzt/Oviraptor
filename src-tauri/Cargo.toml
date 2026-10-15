@@ -71,3 +71,8 @@ version = "1.17.3"
 [dependencies.icu_normalizer]
 version = "2.2.0"
 features = ["compiled_data"]
+
+[dev-dependencies]
+# Exercise the registered commands and managed AppState against disposable
+# databases, without launching a platform webview or the production startup.
+tauri = { version = "2", features = ["test"] }

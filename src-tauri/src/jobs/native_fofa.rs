@@ -517,7 +517,9 @@ fn write_collection_csv(path: &Path, fields: &[String], rows: &[Record]) -> Resu
     let staged = parent.join(format!(".collection-csv-{}.tmp", uuid::Uuid::new_v4()));
     let result = (|| {
         write_csv(&staged, fields, rows)?;
-        fs::File::open(&staged)
+        fs::OpenOptions::new()
+            .write(true)
+            .open(&staged)
             .and_then(|file| file.sync_all())
             .map_err(|error| error.to_string())?;
         fs::rename(&staged, path).map_err(|error| error.to_string())?;

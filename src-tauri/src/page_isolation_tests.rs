@@ -338,7 +338,9 @@ fn page_rule_manual_override_and_owned_restore_are_not_overwritten() {
     .unwrap();
     tx.commit().unwrap();
     let rules = enabled_on(&f.c, 9001).unwrap();
-    apply_import_on(&f.c, 9001, 2, &rules).unwrap();
+    let tx = f.c.transaction().unwrap();
+    apply_import_on(&tx, 9001, 2, &rules).unwrap();
+    tx.commit().unwrap();
     assert_eq!(f.deleted(9001), 1);
     let undo = disable_on(&mut f.c, &f.path, 9001, result.rule_id).unwrap();
     assert_eq!((undo.restored, undo.retained), (0, 1));
@@ -351,4 +353,69 @@ fn page_rule_manual_override_and_owned_restore_are_not_overwritten() {
         .unwrap(),
         "人工接管"
     );
+}
+
+#[test]
+fn page_rule_same_applied_note_human_reconfirmation_survives_explicit_restore() {
+    let mut f = Fixture::new();
+    f.apply("body_sha256");
+    // Reaffirm the current rejected state and identical automatic text. The
+    // explicit human event, rather than a text difference, transfers ownership.
+    f.c.execute(
+        "INSERT INTO asset_events(project_id,asset_id,event_type,summary) VALUES(9001,1,'decision','same note explicitly confirmed')",
+        [],
+    ).unwrap();
+    let expected: (String, String) = f.c.query_row(
+        "SELECT decision,note FROM project_assets WHERE project_id=9001 AND asset_id=1",
+        [], |r| Ok((r.get(0)?,r.get(1)?)),
+    ).unwrap();
+    let tx = f.c.transaction_with_behavior(TransactionBehavior::Immediate).unwrap();
+    restore_manual_on(&tx, 9001, 1).unwrap();
+    tx.execute("UPDATE project_assets SET is_deleted=0,deleted_at=NULL WHERE project_id=9001 AND asset_id=1", []).unwrap();
+    tx.commit().unwrap();
+    assert_eq!(f.c.query_row("SELECT decision,note FROM project_assets WHERE project_id=9001 AND asset_id=1", [], |r|Ok((r.get::<_,String>(0)?,r.get::<_,String>(1)?))).unwrap(),expected);
+    assert_eq!(f.c.query_row("SELECT active FROM asset_page_rule_effects WHERE project_id=9001 AND asset_id=1", [], |r|r.get::<_,i64>(0)).unwrap(),0);
+}
+
+#[test]
+fn page_rule_multi_statement_import_and_restore_require_the_original_transaction() {
+    let mut f = Fixture::new();
+    f.apply("body_sha256");
+    let rules = enabled_on(&f.c, 9001).unwrap();
+    let before = f.c.total_changes();
+    assert!(apply_import_on(&f.c,9001,1,&rules).unwrap_err().contains("原资产事务"));
+    assert!(restore_manual_on(&f.c,9001,1).unwrap_err().contains("原资产事务"));
+    assert_eq!(f.c.total_changes(),before);
+    assert_eq!(f.deleted(9001),2);
+    assert_eq!(f.c.query_row("SELECT COUNT(*) FROM asset_page_rule_effects WHERE active=1", [], |r|r.get::<_,i64>(0)).unwrap(),2);
+}
+
+#[test]
+fn page_rule_other_connection_reclassification_invalidates_preview_without_writes_or_backup() {
+    let mut f = Fixture::new();
+    let preview = preview_on(&f.c,f.input("title_contains")).unwrap();
+    let other = db::open(&f.path).unwrap();
+    other.execute("UPDATE project_assets SET decision='confirmed',note='人工接管' WHERE project_id=9001 AND asset_id=2", []).unwrap();
+    let before = f.c.total_changes();
+    assert!(apply_on(&mut f.c,&f.path,ApplyInput{rule:preview.rule,preview_token:preview.preview_token}).unwrap_err().contains("重新预览"));
+    assert_eq!(f.c.total_changes(),before);
+    assert!(list_on(&f.c,9001).unwrap().is_empty());
+    assert_eq!(f.deleted(9001),0);
+    assert!(!f.root.join("page-rule-backups").exists());
+    assert_eq!(f.c.query_row("SELECT note FROM project_assets WHERE project_id=9001 AND asset_id=2", [], |r|r.get::<_,String>(0)).unwrap(),"人工接管");
+}
+
+#[test]
+fn page_rule_preview_token_cannot_be_reused_for_another_shared_asset_project() {
+    let mut f = Fixture::new();
+    let preview = preview_on(&f.c,f.input("title_contains")).unwrap();
+    let mut foreign = preview.rule;
+    foreign.project_id = 9002; // The same physical source belongs to both projects.
+    let before = f.c.total_changes();
+    assert!(apply_on(&mut f.c,&f.path,ApplyInput{rule:foreign,preview_token:preview.preview_token}).unwrap_err().contains("重新预览"));
+    assert_eq!(f.c.total_changes(),before);
+    assert!(list_on(&f.c,9001).unwrap().is_empty());
+    assert!(list_on(&f.c,9002).unwrap().is_empty());
+    assert_eq!((f.deleted(9001),f.deleted(9002)),(0,0));
+    assert!(!f.root.join("page-rule-backups").exists());
 }

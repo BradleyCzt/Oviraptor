@@ -14,7 +14,7 @@ use tauri::State;
 mod response_groups;
 use response_groups::{
     asset_response_fingerprint_sql, asset_response_group_cte, asset_response_list_sql,
-    validate_asset_response_query,
+    asset_response_member_filter_sql, validate_asset_response_query,
 };
 
 pub(super) fn detect_target(value: &str) -> &'static str {
@@ -368,7 +368,17 @@ pub(super) fn asset_filter(query: &AssetQuery, apply_decision_view: bool) -> (St
     if let Some(combined) = combined {
         where_parts.push(format!("({combined})"));
     }
-    (where_parts.join(" AND "), values)
+    let filter = where_parts.join(" AND ");
+    if let Some(representative) = query.response_representative_asset_id {
+        // The inner CTE repeats the complete base filter before the anchor ID.
+        // Preserve anonymous parameter order without recursively calling asset_filter.
+        let member_filter = asset_response_member_filter_sql(&filter);
+        values.extend(values.clone());
+        values.push(SqlValue::Integer(representative));
+        (format!("({filter}) AND {member_filter}"), values)
+    } else {
+        (filter, values)
+    }
 }
 
 fn asset_order(query: &AssetQuery) -> String {
@@ -496,11 +506,15 @@ pub async fn list_assets(
     .map_err(|error| format!("资产列表查询线程异常：{error}"))?
 }
 
+pub(super) fn validate_asset_query(query: &AssetQuery) -> Result<(), String> {
+    validate_asset_response_query(query)
+}
+
 fn list_assets_on(
     connection: &rusqlite::Connection,
     query: &AssetQuery,
 ) -> Result<AssetPage, String> {
-    validate_asset_response_query(query)?;
+    validate_asset_query(query)?;
     if !connection.is_autocommit() {
         return list_assets_on_read_snapshot(connection, query);
     }

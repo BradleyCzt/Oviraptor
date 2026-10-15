@@ -255,6 +255,31 @@ test('disabled stored module restores to Chat without touching profile or legacy
 test('disabled tray and workspace entry reject atomically without silently re-enabling',()=>{
  const m=mount();try{m.b.switchModule('chat');m.b.togglePlugin('sentinel',false);m.b.navigateFromTray('agent-tasks');assert.equal(m.b.activeModule.value,'chat');assert.equal(m.b.activeView.value,'chat');assert.equal(m.b.pluginEnabled.value.sentinel,false);assert.ok(m.b.navigationError.value);m.b.openProjectWorkspace(project(),'sentinel');assert.equal(m.b.activeModule.value,'chat');assert.equal(m.b.selectedProjectId.value,undefined);}finally{m.unmount();}
 });
+for (const view of ['projects', 'settings', 'skills']) test(`clicking current Chat returns from shared ${view} to Chat`, () => {
+  const m = mount();
+  try {
+    m.b.navigate(view);
+    assert.equal(m.b.activeModule.value, 'chat');
+    assert.equal(m.b.activeView.value, view);
+    m.b.switchModule('chat');
+    assert.equal(m.b.activeModule.value, 'chat');
+    assert.equal(m.b.activeView.value, 'chat');
+    assert.equal(m.calls.length, 0);
+  } finally { m.unmount(); }
+});
+test('clicking current Asset preserves its already-open business view and project', () => {
+  const m = mount();
+  try {
+    m.b.selectProject(91);
+    m.b.switchModule('asset');
+    m.b.navigate('assets');
+    m.b.switchModule('asset');
+    assert.equal(m.b.activeModule.value, 'asset');
+    assert.equal(m.b.activeView.value, 'assets');
+    assert.equal(m.b.selectedProjectId.value, 91);
+    assert.equal(m.calls.length, 0);
+  } finally { m.unmount(); }
+});
 test('disabling mounted plugin returns to Chat and discards unconsumed intents without cancelling work',()=>{
  const m=mount();try{m.b.quickStartProject(91);assert.ok(m.b.pendingWorkspaceIntent.value);m.b.togglePlugin('asset',false);assert.equal(m.b.activeModule.value,'chat');assert.equal(m.b.activeView.value,'chat');assert.equal(m.b.pendingWorkspaceIntent.value,undefined);m.b.togglePlugin('asset',true);assert.equal(m.b.pendingWorkspaceIntent.value,undefined);assert.equal(m.calls.filter(([name])=>/cancel|delete|archive|startJob/.test(name)).length,0);}finally{m.unmount();}
 });
@@ -273,16 +298,109 @@ test('failed plugin persistence restores native checkbox to authoritative availa
  const m=mount({}, {'oviraptor-builtin-plugins-v1':'{broken'});try{const target={checked:false};m.b.onPluginToggle('asset',{target});assert.equal(target.checked,true);assert.equal(m.b.pluginEnabled.value.asset,true);assert.equal(m.storage.getItem('oviraptor-builtin-plugins-v1'),'{broken');}finally{m.unmount();}
 });
 test('host resume receipt survives plugin unmount, blocks duplicates and reconciles original reminder',async()=>{
- const {mountWorkspace,deferred}=require('./plugin_workspace_harness.cjs');const ack=deferred();const job={runId:17,projectId:91,projectName:'Project 91',name:'Old run',pipeline:'full',profileId:1};
+ // Synthetic empty-pipeline UI fallback normalizes the replacement to supported
+ // "full". This does not assert that a real historical database was migrated.
+ const {mountWorkspace,deferred}=require('./plugin_workspace_harness.cjs');const ack=deferred();const job={runId:17,projectId:91,projectName:'Project 91',name:'Old run',pipeline:'',profileId:1};
  const m=mount();let plugin;
  try{
   m.b.startup.value={reminderDays:7,interruptedJobs:[job],staleProjects:[]};m.b.resumeInterrupted(job);const intent=m.b.pendingWorkspaceIntent.value;
   plugin=mountWorkspace(null,'asset',{acknowledgeInterruptedRun:()=>ack.promise},{view:'tasks',intent,resumeWorkflow:m.b.resumeWorkflow});
-  m.b.consumeWorkspaceIntent(intent.id);await flushShell();assert.equal(m.b.resumeReceipts.value.get(17).state,'admitted');plugin.unmount();m.b.switchModule('chat');
+  m.b.consumeWorkspaceIntent(intent.id);await flushShell();assert.equal(m.b.resumeReceipts.value.get(17).state,'admitted');assert.deepEqual(plugin.calls.filter(([name])=>name==='acknowledgeInterruptedRun'),[['acknowledgeInterruptedRun',17]]);assert.equal(plugin.calls.filter(([name])=>name==='resumeJob').length,0);plugin.unmount();m.b.switchModule('chat');
   m.b.resumeInterrupted(job);assert.equal(m.b.pendingWorkspaceIntent.value,undefined);assert.equal(plugin.calls.filter(([name])=>name==='startJob').length,0);
   ack.resolve();await flushShell();assert.deepEqual(plugin.calls.filter(([name])=>name==='startJob'),[['startJob',91,1,'Old run · Resume','full']]);assert.equal(m.b.startup.value.interruptedJobs.length,0);assert.equal(m.b.resumeReceipts.value.has(17),false);assert.equal(m.b.activeView.value,'chat');assert.equal(plugin.events.filter(([name])=>name==='navigate').length,0);m.b.resumeInterrupted(job);assert.equal(m.b.pendingWorkspaceIntent.value,undefined);
  }finally{ack.resolve();plugin?.unmount();m.unmount();}
 });
+for (const [index, pipeline] of ['full', 'collect', 'reprobe'].entries()) {
+  test(`host ${pipeline} checkpoint receipt survives unmount and settles original run without replacement`, async () => {
+    const { mountWorkspace, deferred } = require('./plugin_workspace_harness.cjs');
+    const operation = deferred(), status = deferred();
+    const job = { runId: 40 + index, projectId: 91, projectName: 'Project 91', name: 'Checkpoint', pipeline, profileId: 1 };
+    const m = mount({ startupStatus: () => status.promise });
+    let plugin, unmounted = false;
+    try {
+      m.b.startup.value = { reminderDays: 7, interruptedJobs: [job], staleProjects: [] };
+      m.b.resumeInterrupted(job);
+      const intent = m.b.pendingWorkspaceIntent.value;
+      plugin = mountWorkspace(null, 'asset', { resumeJob: () => operation.promise },
+        { view: 'tasks', intent, resumeWorkflow: m.b.resumeWorkflow });
+      m.b.consumeWorkspaceIntent(intent.id);
+      await flushShell();
+      assert.deepEqual(m.b.resumeReceipts.value.get(job.runId), { state: 'admitted' });
+      assert.deepEqual(plugin.calls.filter(([name]) => ['resumeJob', 'acknowledgeInterruptedRun', 'startJob'].includes(name)), [['resumeJob', job.runId]]);
+      plugin.unmount(); unmounted = true;
+      m.b.switchModule('chat');
+      m.b.resumeInterrupted(job);
+      assert.equal(m.b.pendingWorkspaceIntent.value, undefined);
+      operation.resolve(job.runId);
+      await flushShell();
+      assert.deepEqual(m.b.resumeReceipts.value.get(job.runId), { state: 'settling', result: { started: true, acknowledged: false } });
+      assert.equal(m.b.startup.value.interruptedJobs[0].runId, job.runId);
+      m.b.resumeInterrupted(job);
+      assert.equal(m.b.pendingWorkspaceIntent.value, undefined);
+      status.resolve({ reminderDays: 7, interruptedJobs: [], staleProjects: [] });
+      await flushShell();
+      assert.equal(m.b.resumeReceipts.value.has(job.runId), false);
+      assert.equal(m.b.startup.value.interruptedJobs.length, 0);
+      assert.equal(m.b.activeView.value, 'chat');
+      assert.equal(plugin.events.filter(([name]) => ['navigate', 'interruptedResumed', 'projectsChanged'].includes(name)).length, 0);
+      assert.deepEqual(plugin.calls.filter(([name]) => ['resumeJob', 'acknowledgeInterruptedRun', 'startJob'].includes(name)), [['resumeJob', job.runId]]);
+      m.b.resumeInterrupted(job);
+      assert.equal(m.b.pendingWorkspaceIntent.value, undefined);
+    } finally {
+      operation.resolve(job.runId); status.resolve({ reminderDays: 7, interruptedJobs: [], staleProjects: [] });
+      if (!unmounted) plugin?.unmount();
+      m.unmount();
+    }
+  });
+  test(`host ${pipeline} checkpoint failure retains its receipt until explicit authoritative status retry`, async () => {
+    const { mountWorkspace, deferred } = require('./plugin_workspace_harness.cjs');
+    const operation = deferred();
+    const job = { runId: 50 + index, projectId: 91, projectName: 'Project 91', name: 'Checkpoint', pipeline };
+    let unavailable = true;
+    const m = mount({ startupStatus: async () => {
+      if (unavailable) throw Error('status unavailable');
+      return { reminderDays: 7, interruptedJobs: [job], staleProjects: [] };
+    } });
+    let plugin, unmounted = false;
+    try {
+      m.b.startup.value = { reminderDays: 7, interruptedJobs: [job], staleProjects: [] };
+      m.b.resumeInterrupted(job);
+      const intent = m.b.pendingWorkspaceIntent.value;
+      plugin = mountWorkspace(null, 'asset', { resumeJob: () => operation.promise },
+        { view: 'tasks', intent, resumeWorkflow: m.b.resumeWorkflow });
+      m.b.consumeWorkspaceIntent(intent.id);
+      await flushShell();
+      assert.equal(m.b.resumeReceipts.value.get(job.runId).state, 'admitted');
+      plugin.unmount(); unmounted = true;
+      m.b.switchModule('chat');
+      m.b.resumeInterrupted(job);
+      assert.equal(m.b.pendingWorkspaceIntent.value, undefined);
+      operation.reject(Error('checkpoint unavailable'));
+      await flushShell();
+      const receipt = m.b.resumeReceipts.value.get(job.runId);
+      assert.equal(receipt.state, 'settling');
+      assert.deepEqual(receipt.result, { started: false, acknowledged: false, error: 'Error: checkpoint unavailable' });
+      assert.match(m.b.startupReadError.value, /unverified|核实/);
+      assert.ok(m.b.startupActionError.value.includes(`#${job.runId}`));
+      assert.match(m.b.startupActionError.value, /checkpoint unavailable/);
+      m.b.resumeInterrupted(job);
+      assert.equal(m.b.pendingWorkspaceIntent.value, undefined);
+      assert.deepEqual(plugin.calls.filter(([name]) => ['resumeJob', 'acknowledgeInterruptedRun', 'startJob'].includes(name)), [['resumeJob', job.runId]]);
+      unavailable = false;
+      await m.b.refreshStartupStatus();
+      assert.equal(m.b.resumeReceipts.value.has(job.runId), false);
+      assert.equal(m.b.startup.value.interruptedJobs[0].runId, job.runId);
+      assert.equal(m.b.startupReadError.value, '');
+      assert.equal(m.b.activeView.value, 'chat');
+      assert.equal(plugin.events.filter(([name]) => ['navigate', 'interruptedResumed', 'projectsChanged'].includes(name)).length, 0);
+      assert.deepEqual(plugin.calls.filter(([name]) => ['resumeJob', 'acknowledgeInterruptedRun', 'startJob'].includes(name)), [['resumeJob', job.runId]]);
+    } finally {
+      operation.resolve(job.runId);
+      if (!unmounted) plugin?.unmount();
+      m.unmount();
+    }
+  });
+}
 test('failed resume reconciliation remains blocked until explicit read-only status retry',async()=>{
  let unavailable=true;const job={runId:18,projectId:91,projectName:'Project 91',name:'Old run',pipeline:'full'};
  const m=mount({startupStatus:async()=>{if(unavailable)throw Error('status unavailable');return{reminderDays:7,interruptedJobs:[job],staleProjects:[]};}});

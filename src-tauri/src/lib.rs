@@ -20,6 +20,8 @@ mod log_display;
 mod log_framing;
 mod models;
 mod page_isolation;
+#[cfg(test)]
+mod local_incremental_ipc_tests;
 #[path = "assets/model.rs"]
 mod asset_models;
 #[path = "assets/fofa.rs"]

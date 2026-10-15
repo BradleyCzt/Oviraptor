@@ -73,6 +73,12 @@ async function resumeInterrupted(job:InterruptedJob, fromIntent=false) {
   let acknowledged=false;
   const project=projects.value.find(item=>item.id===admitted.projectId);
   const workflow=props.resumeWorkflow;
+  if(admitted.pipeline&&!["full","collect","reprobe"].includes(admitted.pipeline)){
+    actionError.value=tr("旧任务的恢复流程不受支持，任务已保留，请核对运行配置。","The saved pipeline is unsupported. The interrupted task is retained; check its configuration.");
+    notify("error",actionError.value);
+    if(fromIntent)workflow?.settle(admitted,{started:false,acknowledged:false,error:actionError.value});
+    return;
+  }
   if(!project||project.status!=="active"||starting.value){
     actionError.value=tr("未接受恢复操作，请核对工作空间和当前任务状态。","Resume was not admitted. Check the workspace and current task status.");
     if(fromIntent)workflow?.settle(admitted,{started:false,acknowledged:false,error:actionError.value});

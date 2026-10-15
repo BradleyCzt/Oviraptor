@@ -5,6 +5,11 @@ use crate::asset_models::AssetQuery;
 // Only the complete-response proof lives in global technical metadata; project
 // membership and representatives are derived after every query's full filter.
 
+const RESPONSE_GROUP_PARTITION: &str = "project_id,response_key,response_status,response_hash,response_bytes,response_content_type,
+    decision_state,note_state,trash_state,entry_seen_state,sentinel_state,sentinel_count,
+    ownership_state,ownership_confidence,authorization_state,exposure_state,ownership_source,ownership_reason,
+    login_state,register_state";
+
 fn asset_response_json_sql(field: &str) -> String {
     format!("json_extract(CASE WHEN json_valid(a.extra_json) THEN a.extra_json ELSE '{{}}' END,'$.{field}')")
 }
@@ -40,6 +45,14 @@ pub(super) fn asset_response_fingerprint_sql() -> String {
 
 pub(super) fn validate_asset_response_query(query: &AssetQuery) -> Result<(), String> {
     let fingerprint = query.response_fingerprint.trim();
+    if let Some(representative) = query.response_representative_asset_id {
+        if representative <= 0 {
+            return Err("响应组代表资产 ID 必须为正数".into());
+        }
+        if query.project_id.is_none() || fingerprint.is_empty() {
+            return Err("查看精确响应组时必须指定项目和完整响应指纹".into());
+        }
+    }
     if !fingerprint.is_empty() {
         if query.project_id.is_none() {
             return Err("查看同响应成员时必须指定项目".into());
@@ -60,10 +73,7 @@ pub(super) fn asset_response_group_cte(filter: &str) -> String {
     let sentinel_count = field_sql("sentinelScanCount").expect("known asset field");
     // Include the exact response tuple as well as its fingerprint. A mismatched
     // or reused fingerprint cannot fold different hashes/lengths/MIME types.
-    let partition = "project_id,response_key,response_status,response_hash,response_bytes,response_content_type,
-        decision_state,note_state,trash_state,entry_seen_state,sentinel_state,sentinel_count,
-        ownership_state,ownership_confidence,authorization_state,exposure_state,ownership_source,ownership_reason,
-        login_state,register_state";
+    let partition = RESPONSE_GROUP_PARTITION;
     format!(
         r#"WITH response_matched AS (
         SELECT a.id AS asset_id,pa.project_id,
@@ -86,6 +96,21 @@ pub(super) fn asset_response_group_cte(filter: &str) -> String {
           COUNT(*) OVER(PARTITION BY {partition}) AS response_display_group_count
         FROM response_matched
       )"#
+    )
+}
+
+pub(super) fn asset_response_member_filter_sql(filter: &str) -> String {
+    // Derive both the anchor and members from the same fully filtered snapshot.
+    // IS is null-safe, matching the window partition's treatment of NULL values.
+    let matching_partition = RESPONSE_GROUP_PARTITION
+        .split(',')
+        .map(str::trim)
+        .map(|field| format!("member.{field} IS anchor.{field}"))
+        .collect::<Vec<_>>()
+        .join(" AND ");
+    format!(
+        "a.id IN ({} SELECT member.asset_id FROM response_ranked member JOIN response_ranked anchor ON {matching_partition} WHERE anchor.asset_id=?)",
+        asset_response_group_cte(filter)
     )
 }
 

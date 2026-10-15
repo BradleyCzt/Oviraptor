@@ -29,7 +29,7 @@ test('switching project during quick-start cannot navigate or emit stale mutatio
 });
 for(const change of ['project','unmount'])test(`already-admitted legacy restart completes exactly once after ${change} change without stale UI`,async t=>{
  const ack=deferred();const m=mountWorkspace(t,'asset',{acknowledgeInterruptedRun:()=>ack.promise});await flush();const pending=m.b.resumeInterrupted({runId:1,projectId:91,name:'Old run',pipeline:''});if(change==='project'){m.props.projectId=92;await flush();}else m.unmount();ack.resolve();await pending;
- assert.deepEqual(m.calls.filter(([name])=>name==='startJob'),[['startJob',91,1,'Old run · Resume','full']]);assert.equal(m.events.filter(([name])=>name==='interruptedResumed'||name==='navigate'||name==='projectsChanged').length,0);
+ assert.deepEqual(m.calls.filter(([name])=>['acknowledgeInterruptedRun','startJob','resumeJob'].includes(name)),[['acknowledgeInterruptedRun',1],['startJob',91,1,'Old run · Resume','full']]);assert.equal(m.events.filter(([name])=>name==='interruptedResumed'||name==='navigate'||name==='projectsChanged').length,0);
 });
 test('asset operation errors stay visible beside its workspace and reset on project change',async t=>{
  const m=mountWorkspace(t,'asset',{startJob:async()=>{throw Error('execution refused');}});await flush();await m.b.quickStartProject(91);assert.match(m.b.actionError.value,/execution refused/);assert.match(await m.render(),/execution refused/);m.props.projectId=92;await flush();assert.equal(m.b.actionError.value,'');
@@ -93,6 +93,27 @@ test('a refused checkpoint keeps the existing run unacknowledged and exposes the
  await m.b.resumeInterrupted({runId:23,projectId:91,name:'Checkpoint',pipeline:'collect'});
  assert.deepEqual(m.calls.filter(([name])=>['resumeJob','acknowledgeInterruptedRun','startJob'].includes(name)),[['resumeJob',23]]);assert.match(m.b.actionError.value,/checkpoint unavailable/);
  assert.deepEqual(settled[0][1],{started:false,acknowledged:false,error:'Error: checkpoint unavailable'});
+});
+for (const fromIntent of [false, true]) test(`unsupported saved pipeline is refused before admission or writes (${fromIntent ? 'queued intent' : 'direct action'})`, async t => {
+ const job = { runId: 24, projectId: 91, name: 'Unsupported old run', pipeline: 'legacy-unsupported' };
+ let admissions = 0;
+ const settled = [];
+ const resumeWorkflow = { begin() { admissions++; return true; }, settle: (...args) => settled.push(args) };
+ const props = { view: 'tasks', resumeWorkflow, ...(fromIntent ? { intent: { id: 3, kind: 'resume', projectId: 91, job } } : {}) };
+ const m = mountWorkspace(t, 'asset', {}, props);
+ await flush();
+ if (!fromIntent) await m.b.resumeInterrupted(job);
+ assert.equal(admissions, 0);
+ assert.equal(m.b.starting.value, false);
+ assert.match(m.b.actionError.value, /saved pipeline is unsupported/);
+ assert.equal(m.calls.filter(([name]) => ['resumeJob', 'acknowledgeInterruptedRun', 'startJob'].includes(name)).length, 0);
+ assert.equal(m.events.filter(([name]) => ['navigate', 'interruptedResumed', 'projectsChanged'].includes(name)).length, 0);
+ assert.ok(m.events.some(([name, type, message]) => name === 'notify' && type === 'error' && message === m.b.actionError.value));
+ assert.equal(settled.length, fromIntent ? 1 : 0);
+ if (fromIntent) {
+  assert.deepEqual(settled[0], [job, { started: false, acknowledged: false, error: m.b.actionError.value }]);
+  assert.ok(m.events.some(([name, id]) => name === 'intentConsumed' && id === 3));
+ }
 });
 test('asset changes refresh the owned statistics and notify the shared project host',async t=>{
  let reads=0;const m=mountWorkspace(t,'asset',{dashboardStats:async()=>({assetCount:++reads,runningJobs:0,blockedCount:reads})},{view:'assets'});await flush();m.b.assetDataChanged();await flush();
