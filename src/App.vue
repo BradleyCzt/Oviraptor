@@ -41,6 +41,7 @@ const initialRoute = restoreRoute(localStorage);
 const activeView = ref<ViewKey>(initialRoute.view);
 const activeModule = ref<ModuleKey>(initialRoute.module);
 const projects = ref<Project[]>([]); const profiles = ref<ConfigProfile[]>([]);
+const configurationRevision = ref(0);
 const pluginRefreshToken=ref(0);
 const pluginNavigation=ref<WorkspaceNavItem>();
 const workspaceMetadata=ref<WorkspaceMetadata>({});
@@ -267,7 +268,7 @@ async function refresh(_waitForSecondary:boolean|Event=false){
   finally{if(request===workspaceRefreshGeneration)loading.value=false;}
 }
 async function projectSaved(id:number){ projectDialog.value=false;editProject.value=undefined;await refresh();selectProject(id); }
-async function profileSaved(){ configDialog.value=false;editProfile.value=undefined;await refresh(); }
+async function profileSaved(){ configDialog.value=false;editProfile.value=undefined;configurationRevision.value++;await refresh(); }
 function openProject(project?:Project){ editProject.value=project;projectDialog.value=true; }
 function openProjectWorkspace(project:Project,module:ModuleKey){
   if(!pluginAvailable(module)){applyRoute(module,moduleDefinition(module).defaultView);return;}
@@ -489,7 +490,7 @@ onUnmounted(()=>{unlisten?.();unlistenTray?.();if(workerSyncTimer)clearInterval(
         </section>
         <div v-if="loading" class="app-loading"><div class="loader-ring"></div><span>{{tr('正在初始化本地资产数据库…','Initializing local asset database…')}}</span></div>
 
-        <ConversationWorkspace v-if="!loading" v-show="activeView==='chat'" :active="activeView==='chat'" :projects="projects" :project-id="selectedProjectId" :plugin-host="pluginHost" history-target="#conversation-history" @history-selected="historySelected" @select-project="selectProject" @create-project="openProject()" />
+        <ConversationWorkspace v-if="!loading" v-show="activeView==='chat'" :active="activeView==='chat'" :configuration-revision="configurationRevision" :projects="projects" :project-id="selectedProjectId" :plugin-host="pluginHost" history-target="#conversation-history" @history-selected="historySelected" @select-project="selectProject" @create-project="openProject()" />
 
         <SkillsWorkspace v-if="!loading&&activeView==='skills'" @notify="notify"/>
 

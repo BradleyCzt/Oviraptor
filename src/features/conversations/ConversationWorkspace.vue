@@ -10,7 +10,7 @@ import ConversationMessage from "./ConversationMessage.vue";
 import { useI18n } from "../../i18n";
 import { conversationApi } from "./api";
 import { useConversationWorkspace } from "./useConversationWorkspace";
-const props = defineProps<{ projects: Project[]; projectId?: number; pluginHost?: BuiltinPluginHost; historyTarget?: string; active?: boolean }>();
+const props = defineProps<{ projects: Project[]; projectId?: number; pluginHost?: BuiltinPluginHost; historyTarget?: string; active?: boolean; configurationRevision?: number }>();
 const emit = defineEmits<{ selectProject: [id: number]; createProject: []; historySelected: [] }>();
 const { tr } = useI18n();
 const selectedProject = computed(() => props.projects.find(project => project.id === props.projectId));
@@ -181,7 +181,7 @@ function submit(event: KeyboardEvent) {
           </div>
         </div>
         <div class="conversation-compose-area">
-          <ConversationAccessPanel v-if="snapshot.toolActivity!==undefined" :key="`${selectedProject.id}:${snapshot.conversation.id}`" :project-id="selectedProject.id" :conversation-id="snapshot.conversation.id" :writable="writable&&state.viewActive.value" :reply-active="replyActive" :blocked="busy||steerSaving||!!queuedSteer||!!pendingSend||!!readError" :model="snapshot.replyAvailability.model" @busy="accessBusy=$event" @mode="agentMode=$event"/>
+          <ConversationAccessPanel v-if="snapshot.toolActivity!==undefined" :key="`${selectedProject.id}:${snapshot.conversation.id}`" :project-id="selectedProject.id" :conversation-id="snapshot.conversation.id" :active="state.viewActive.value" :configuration-revision="configurationRevision" :writable="writable&&state.viewActive.value" :reply-active="replyActive" :blocked="busy||steerSaving||!!queuedSteer||!!pendingSend||!!readError" :model="snapshot.replyAvailability.model" @busy="accessBusy=$event" @mode="agentMode=$event"/>
           <p v-if="!queuedSteer&&steerReceipt" class="conversation-reply-status" role="status">{{steerReceipt}}</p>
           <div v-if="snapshot.latestReply&&!replyActive" class="conversation-reply-status" role="status"><span>{{replyStatus}}</span><small v-if="snapshot.latestReply.message">{{snapshot.latestReply.message}}</small><small v-if="snapshot.latestReply.outcomeUnknown">{{tr('提供商可能已处理此次请求；不会自动重发。','The provider may have processed this request. It will not be retried automatically.')}}</small></div>
           <p v-if="snapshot.conversation.archived" class="conversation-notice">{{tr('该对话已归档，恢复后可以继续。','This conversation is archived. Restore it to continue.')}}</p>

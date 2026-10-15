@@ -5,11 +5,12 @@ import { ChevronDown, FolderPlus, RefreshCw, ShieldCheck, X } from "@lucide/vue"
 import { useI18n } from "../../i18n";
 import { conversationApi } from "./api";
 import { useConversationAccess } from "./useConversationAccess";
-const props = defineProps<{ projectId: number; conversationId: string; writable: boolean; replyActive: boolean; blocked: boolean; model?: string | null }>();
+const props = defineProps<{ projectId: number; conversationId: string; writable: boolean; replyActive: boolean; blocked: boolean; model?: string | null; active?: boolean; configurationRevision?: number }>();
 const emit = defineEmits<{ busy: [value: boolean]; mode: [value: boolean | undefined] }>();
 const { tr } = useI18n();
 const state = useConversationAccess({
   scope: () => ({ projectId: props.projectId, conversationId: props.conversationId }),
+  active: () => props.active !== false, refreshRevision: () => props.configurationRevision ?? 0,
   writable: () => props.writable, replyActive: () => props.replyActive, blocked: () => props.blocked, api: conversationApi,
   chooseDirectory: async () => {
     const result = await open({ directory: true, multiple: false, title: tr("选择此对话可读取的目录", "Choose a directory this conversation may read") });
@@ -19,7 +20,7 @@ const state = useConversationAccess({
 const { access, skills, loading, saving, choosing, busy, error, skillsError, disclosureAccepted, stagedDirectory, canExpand, canRevoke } = state;
 const enabledCount = computed(() => access.value ? Number(access.value.readAssets) + Number(access.value.readScans) + access.value.selectedSkillIds.length + access.value.directories.length : 0);
 watch(() => access.value?.agentEnabled, value => emit("mode", value), { immediate: true, flush: "sync" });
-watch(busy, value => emit("busy", value), { immediate: true, flush: "sync" });
+watch(() => busy.value || loading.value, value => emit("busy", value), { immediate: true, flush: "sync" });
 async function changeSkill(id: number, event: Event) {
   const input = event.target as HTMLInputElement;
   await state.setSkill(id, input.checked);

@@ -5,6 +5,8 @@ import type { ConversationAccess, ConversationAccessInput, ConversationAccessSki
 /** Grants are backend-owned. Reads, selection changes, and model text never grant access. */
 export function useConversationAccess(deps: {
   scope: () => ConversationScope | undefined;
+  active?: () => boolean;
+  refreshRevision?: () => number;
   writable: () => boolean;
   replyActive: () => boolean;
   blocked: () => boolean;
@@ -18,20 +20,22 @@ export function useConversationAccess(deps: {
   const error = ref(""), skillsError = ref("");
   const disclosureAccepted = ref(false);
   const stagedDirectory = ref("");
-  let epoch = 0, request = 0, disposed = false;
+  let epoch = 0, request = 0, skillsRequest = 0, disposed = false;
   const scope = computed(deps.scope);
+  const active = computed(() => deps.active?.() !== false);
+  const refreshRevision = computed(() => deps.refreshRevision?.() ?? 0);
   const busy = computed(() => saving.value || choosing.value);
-  const canExpand = computed(() => Boolean(scope.value && access.value && deps.writable() && !deps.replyActive() && !deps.blocked() && !loading.value && !busy.value && freshAccess.value));
-  const canRevoke = computed(() => Boolean(scope.value && access.value && deps.writable() && !loading.value && !busy.value && freshAccess.value));
+  const canExpand = computed(() => Boolean(active.value && scope.value && access.value && deps.writable() && !deps.replyActive() && !deps.blocked() && !loading.value && !busy.value && freshAccess.value));
+  const canRevoke = computed(() => Boolean(active.value && scope.value && access.value && deps.writable() && !loading.value && !busy.value && freshAccess.value));
   const current = (generation: number, input: ConversationScope) => !disposed && generation === epoch && scope.value?.projectId === input.projectId && scope.value?.conversationId === input.conversationId;
   function validate(value: ConversationAccess, input: ConversationScope) {
     if (!value || value.projectId !== input.projectId || value.conversationId !== input.conversationId || typeof value.directorySupported !== "boolean" || typeof value.agentEnabled !== "boolean" || value.version !== 1 || !Number.isSafeInteger(value.revision) || value.revision < 1 || typeof value.readAssets !== "boolean" || typeof value.readScans !== "boolean" || typeof value.providerDisclosureAccepted !== "boolean" || typeof value.skillsRequireReview !== "boolean" || typeof value.skillRevision !== "string" || !value.skillRevision || (value.providerIdentity !== null && typeof value.providerIdentity !== "string") || (value.providerLabel !== null && typeof value.providerLabel !== "string") || !Array.isArray(value.selectedSkillIds) || value.selectedSkillIds.some(id => !Number.isSafeInteger(id) || id < 1) || !Array.isArray(value.directories) || value.directories.some(item => !item || typeof item.id !== "string" || !item.id || typeof item.path !== "string" || typeof item.label !== "string")) throw Error("Invalid conversation access response; permissions have not been assumed");
   }
   async function refresh() {
     const input = scope.value;
-    if (!input) return;
+    if (!input || !active.value) return;
     const generation = epoch, read = ++request;
-    loading.value = true;
+    loading.value = true; freshAccess.value = false;
     try {
       const value = await deps.api.getConversationAccess({ ...input });
       if (!current(generation, input) || read !== request) return;
@@ -44,14 +48,14 @@ export function useConversationAccess(deps: {
   }
   async function loadSkills() {
     const input = scope.value;
-    if (!input) return;
-    const generation = epoch;
+    if (!input || !active.value) return;
+    const generation = epoch, read = ++skillsRequest;
     try {
       const value = await deps.api.listConversationAccessSkills({ ...input });
-      if (!current(generation, input)) return;
+      if (!current(generation, input) || read !== skillsRequest) return;
       if (!Array.isArray(value) || value.some(skill => !Number.isSafeInteger(skill.id) || typeof skill.name !== "string" || typeof skill.description !== "string" || typeof skill.enabled !== "boolean")) throw Error("Invalid skills catalog");
       skills.value = value; skillsError.value = "";
-    } catch (failure) { if (current(generation, input)) skillsError.value = String(failure); }
+    } catch (failure) { if (current(generation, input) && read === skillsRequest) skillsError.value = String(failure); }
   }
   async function mutate(action: (input: ConversationScope, value: ConversationAccess) => Promise<ConversationAccess>): Promise<boolean> {
     const input = scope.value, previous = access.value;
@@ -114,10 +118,17 @@ export function useConversationAccess(deps: {
   }
   function clearStagedDirectory() { if (!busy.value) stagedDirectory.value = ""; }
   watch(() => `${scope.value?.projectId ?? ""}:${scope.value?.conversationId ?? ""}`, () => {
-    epoch++; request++; freshAccess.value = false; access.value = undefined; skills.value = []; loading.value = false; saving.value = false; choosing.value = false;
+    epoch++; request++; skillsRequest++; freshAccess.value = false; access.value = undefined; skills.value = []; loading.value = false; saving.value = false; choosing.value = false;
     error.value = ""; skillsError.value = ""; stagedDirectory.value = ""; disclosureAccepted.value = false;
     void refresh(); void loadSkills();
   }, { immediate: true, flush: "sync" });
-  onUnmounted(() => { disposed = true; epoch++; request++; });
+  // Chat stays mounted behind Settings and Skills. A return or saved profile
+  // invalidates the old lease before controls can be used, then reads current
+  // recipient/content consent. Reads never renew a grant or replay a request.
+  watch([active, refreshRevision], ([isActive]) => {
+    request++; skillsRequest++; freshAccess.value = false; loading.value = false;
+    if (isActive) { void refresh(); void loadSkills(); }
+  }, { flush: "sync" });
+  onUnmounted(() => { disposed = true; epoch++; request++; skillsRequest++; });
   return { access, skills, loading, saving, choosing, busy, error, skillsError, disclosureAccepted, stagedDirectory, canExpand, canRevoke, refresh, loadSkills, setTools, setSkill, chooseDirectory, grantDirectory, revokeDirectory, clearStagedDirectory };
 }
