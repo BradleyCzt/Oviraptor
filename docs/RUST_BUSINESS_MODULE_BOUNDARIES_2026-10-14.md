@@ -53,8 +53,10 @@ owns its DTO extraction; later Rust DTO extraction must preserve serialization.
   source section: 1/1 passed, covering exact frame sizes, invalid magic, empty
   sections, truncation, trailing bytes and upper bounds. This isolated std-only
   check does not compile the surrounding Tauri commands.
-- Native Rust compile/tests must additionally pass on the integrated tree.
-  Architectural source checks are not a replacement for compilation.
+- Final integrated source `496b98f` passed default-feature all-targets
+  compilation and the complete library suite (3593 passed, 7 ignored).
+  See the integration report for exact source/binary manifests, failed attempts,
+  platform exclusions and commands. Source guards alone were not treated as compilation.
 - Existing project/configuration/asset Rust tests retain narrow test-only
   imports of their moved helpers; the production command registration uses the
   actual owning modules.

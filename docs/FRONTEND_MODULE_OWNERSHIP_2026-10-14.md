@@ -27,3 +27,5 @@
 `tools/test_module_boundaries.cjs` 解析真实 Vue/TypeScript import、export 与动态 import，执行以下依赖守卫：全部相对导入存在；shared 不依赖领域或平台执行；Skills 不依赖 Scanning 或聚合 API；owner 类型不反向引用旧 types facade；App 的同步导入闭包不能包含资产、扫描、HackerOne 或 Skills 的业务 Vue 页面。原应用测试继续验证启动、项目切换、权限、扫描恢复和数据操作的实际行为。
 
 依赖守卫和 DOM/IPC 回归不证明真实模型、目标网络扫描或桌面安装包可用；编译、具体测试结果与失败记录由集成验证报告列出。
+
+本轮保留明确的过渡适配边界：Worker 设置组合节点配置、环境报告和远程扫描控制，Runtime 仍以 type-only 方式消费 Scanning 的 SentinelScan 契约；Environment 的安装 API/日志 DTO 仍通过 Runtime 提供。这些不是纯机制层已经完全隔离的证据。下一批先把环境接口归回 Environment，再收窄 Scanning 远程控制适配与 API facade；不要把业务 DTO 搬到 shared。useCommittedRefresh 是 Assets 与 Scanning 共用的 Tauri 事件协调机制；i18n 和全局 CSS 仍混合业务词条/选择器，应保留层叠与主题行为分批迁移。实际导入边及完整验证见集成报告。
