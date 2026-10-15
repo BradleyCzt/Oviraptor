@@ -9,6 +9,9 @@ pub(super) fn fofa_key(settings: &Value) -> Result<String, String> {
         .and_then(Value::as_str)
         .unwrap_or("")
         .trim();
+    if explicit == "__CONFIGURED__" {
+        return Err("FOFA Key 是快照标记；请读取当前配置的真实凭据".into());
+    }
     if !explicit.is_empty() {
         return Ok(explicit.into());
     }

@@ -19,6 +19,7 @@ mod llm_hook;
 mod log_display;
 mod log_framing;
 mod models;
+mod page_isolation;
 #[path = "assets/model.rs"]
 mod asset_models;
 #[path = "assets/fofa.rs"]
@@ -408,6 +409,11 @@ pub fn run() {
             commands::assets::list_assets,
             commands::assets::mark_asset_entry_opened,
             commands::assets::add_content_rule,
+            commands::page_isolation::preview_page_rule,
+            commands::page_isolation::apply_page_rule,
+            commands::page_isolation::list_page_rules,
+            commands::asset_rule_catalog::get_asset_rule_catalog,
+            commands::page_isolation::disable_page_rule,
             commands::assets::update_decision,
             commands::assets::update_asset_decisions,
             commands::ownership::get_asset_ownership_profile,

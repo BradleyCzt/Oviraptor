@@ -1,12 +1,12 @@
 use crate::{
+    asset_models::{ImportResult, JobProgressEvent, StartJobInput},
     db,
-    models::{ImportResult, JobProgressEvent, StartJobInput},
     AppState,
 };
 use rusqlite::{params, OptionalExtension};
 use serde_json::{Map, Value};
 use std::{
-    collections::{hash_map::DefaultHasher, HashMap},
+    collections::{hash_map::DefaultHasher, HashMap, HashSet},
     fs::{self, File},
     hash::{Hash, Hasher},
     io::{BufRead, BufReader},
@@ -21,9 +21,12 @@ use std::{
 use tauri::{image::Image, AppHandle, Emitter, State};
 use uuid::Uuid;
 
+mod asset_identity;
+mod job_resume;
 mod native_config;
 #[path = "jobs/native_workers.rs"]
 mod native_workers;
+mod tray_activity;
 
 #[cfg(windows)]
 fn set_job_power_request(active: bool) {
@@ -47,6 +50,21 @@ fn set_job_power_request(active: bool) {
 
 #[cfg(not(windows))]
 fn set_job_power_request(_active: bool) {}
+
+struct JobPowerRequestGuard;
+
+impl JobPowerRequestGuard {
+    fn begin() -> Self {
+        set_job_power_request(true);
+        Self
+    }
+}
+
+impl Drop for JobPowerRequestGuard {
+    fn drop(&mut self) {
+        set_job_power_request(false);
+    }
+}
 
 fn setting_str(settings: &Value, key: &str, default: &str) -> String {
     settings
@@ -82,21 +100,6 @@ fn setting_strings(settings: &Value, key: &str) -> Vec<String> {
         .filter(|value| !value.is_empty())
         .map(str::to_string)
         .collect()
-}
-
-fn dynamic_content_keywords(db_path: &Path) -> Vec<String> {
-    let Ok(connection) = db::open(db_path) else {
-        return Vec::new();
-    };
-    let Ok(mut statement) =
-        connection.prepare("SELECT keyword FROM content_rules WHERE enabled=1 ORDER BY id")
-    else {
-        return Vec::new();
-    };
-    statement
-        .query_map([], |row| row.get::<_, String>(0))
-        .map(|rows| rows.filter_map(Result::ok).collect())
-        .unwrap_or_default()
 }
 
 fn log_line(app: &AppHandle, db_path: &Path, run_id: i64, level: &str, stage: &str, message: &str) {
@@ -167,27 +170,57 @@ fn restore_tray_icon(app: &AppHandle) {
     }
 }
 
-fn begin_tray_activity(app: AppHandle, active_jobs: Arc<AtomicUsize>) {
-    if active_jobs.fetch_add(1, Ordering::SeqCst) != 0 {
-        return;
-    }
-    thread::spawn(move || {
-        let mut index = 0usize;
-        while active_jobs.load(Ordering::SeqCst) > 0 {
-            if let Some(tray) = app.tray_by_id("main") {
-                let _ = tray.set_icon(Some(spinner_icon(index)));
-                let _ = tray.set_title(Some("资产更新中"));
-                let _ = tray.set_tooltip(Some("Oviraptor · 正在更新资产"));
+fn render_tray_activity(app: &AppHandle, active_jobs: Arc<AtomicUsize>, frame: usize) {
+    let callback_app = app.clone();
+    let _ = app.run_on_main_thread(move || {
+        let activity = tray_activity::TrayActivity::current(&active_jobs);
+        if let Some(tray) = callback_app.tray_by_id("main") {
+            let _ = tray.set_title(Some(activity.title()));
+            let _ = tray.set_tooltip(Some(activity.tooltip()));
+            match activity {
+                tray_activity::TrayActivity::Updating => {
+                    let _ = tray.set_icon(Some(spinner_icon(frame)));
+                }
+                tray_activity::TrayActivity::Idle => restore_tray_icon(&callback_app),
             }
-            index += 1;
-            thread::sleep(Duration::from_millis(420));
         }
-        if let Some(tray) = app.tray_by_id("main") {
-            let _ = tray.set_title(None::<&str>);
-            let _ = tray.set_tooltip(Some("Oviraptor · 后台运行"));
-        }
-        restore_tray_icon(&app);
     });
+}
+
+fn begin_tray_activity(
+    app: AppHandle,
+    active_jobs: Arc<AtomicUsize>,
+    cancellations: Arc<std::sync::Mutex<HashMap<i64, Arc<AtomicBool>>>>,
+    run_id: i64,
+) -> tray_activity::JobActivityGuard {
+    let completion_app = app.clone();
+    let completion_count = active_jobs.clone();
+    let (guard, first_job) =
+        tray_activity::JobActivityGuard::begin(active_jobs.clone(), move |last| {
+            cancellations
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .remove(&run_id);
+            if last {
+                render_tray_activity(&completion_app, completion_count, 0);
+            }
+        });
+    if first_job {
+        render_tray_activity(&app, active_jobs.clone(), 0);
+    }
+    if let Some(animator) = tray_activity::AnimatorLease::acquire(active_jobs.clone()) {
+        let _ = thread::Builder::new()
+            .name("asset-tray-animation".into())
+            .spawn(move || {
+                let mut index = 0usize;
+                while animator.should_run() {
+                    render_tray_activity(&app, active_jobs.clone(), index);
+                    index = index.wrapping_add(1);
+                    thread::sleep(Duration::from_millis(420));
+                }
+            });
+    }
+    guard
 }
 
 fn write_seeds(path: &Path, targets: &[(String, String)]) -> Result<(), String> {
@@ -262,21 +295,7 @@ fn canonical_identity(
     port: &str,
     fallback: &str,
 ) -> String {
-    let endpoint = if !link.trim().is_empty() {
-        link
-    } else if !host.trim().is_empty() {
-        host
-    } else if !ip.trim().is_empty() || !port.trim().is_empty() {
-        return format!(
-            "{}|{}|{}",
-            protocol.trim().to_lowercase(),
-            ip.trim().to_lowercase(),
-            port.trim()
-        );
-    } else {
-        fallback
-    };
-    endpoint.trim().trim_end_matches('/').to_lowercase()
+    asset_identity::canonical_identity(link, host, protocol, ip, port, fallback)
 }
 
 fn import_csv(
@@ -286,6 +305,29 @@ fn import_csv(
     project_id: i64,
     csv_path: &Path,
     stage_progress: f64,
+) -> Result<ImportResult, String> {
+    let mut connection = db::open(db_path)?;
+    import_csv_with_progress(&mut connection, run_id, project_id, csv_path, |offset| {
+        let _ = app.emit(
+            "job-progress",
+            JobProgressEvent {
+                run_id,
+                status: "running".into(),
+                stage: "import".into(),
+                progress: stage_progress,
+                message: format!("已导入 {} 条", offset),
+            },
+        );
+    })
+    .map_err(|error| format!("资产入库失败（任务 {run_id}，文件 {}）：{error}", csv_path.display()))
+}
+
+fn import_csv_with_progress(
+    connection: &mut rusqlite::Connection,
+    run_id: i64,
+    project_id: i64,
+    csv_path: &Path,
+    mut progress: impl FnMut(usize),
 ) -> Result<ImportResult, String> {
     if !csv_path.exists() {
         return Err(format!("结果文件不存在：{}", csv_path.display()));
@@ -300,23 +342,57 @@ fn import_csv(
         .enumerate()
         .map(|(position, name)| (name.to_string(), position))
         .collect::<HashMap<_, _>>();
-    let mut connection = db::open(db_path)?;
+    // Reserve the writer before reading rules/history. In WAL mode a deferred
+    // read snapshot cannot upgrade after another connection commits; SQLite
+    // returns BUSY_SNAPSHOT immediately, bypassing the busy timeout.
     let transaction = connection
-        .transaction()
+        .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
         .map_err(|error| error.to_string())?;
-    let content_rules = {
-        let mut statement = transaction
-            .prepare("SELECT normalized_keyword FROM content_rules WHERE enabled=1 ORDER BY id")
-            .map_err(|error| error.to_string())?;
-        let rows = statement
-            .query_map([], |row| row.get::<_, String>(0))
-            .map_err(|error| error.to_string())?;
-        rows.collect::<Result<Vec<_>, _>>()
-            .map_err(|error| error.to_string())?
-    };
+    let content_rules = job_resume::import_title_rules(&transaction, run_id)?;
+    let page_rules = crate::page_isolation::enabled_on(&transaction, project_id)?;
     let mut inserted = 0i64;
     let mut updated = 0i64;
     let mut invalid = 0i64;
+    let manually_managed_assets = {
+        let mut statement = transaction.prepare(
+            "SELECT DISTINCT asset_id FROM asset_events WHERE project_id=?1 AND event_type IN ('decision','archived','restored')"
+        ).map_err(|error| error.to_string())?;
+        let rows = statement
+            .query_map([project_id], |row| row.get::<_, i64>(0))
+            .map_err(|error| error.to_string())?;
+        rows.collect::<Result<HashSet<_>, _>>()
+            .map_err(|error| error.to_string())?
+    };
+
+    // Normalize existing rows in memory, including legacy canonical keys. No
+    // bulk migration/deletion: re-discovery updates the original row and keeps
+    // the project's manual state, even if it was moved to the recycle bin.
+    let mut known_assets = HashMap::<String, String>::new();
+    {
+        let mut statement = transaction.prepare(
+            "SELECT a.asset_key,a.link,a.host,a.protocol,a.ip,a.port FROM project_assets pa JOIN assets a ON a.id=pa.asset_id WHERE pa.project_id=?1 ORDER BY pa.is_deleted,a.id"
+        ).map_err(|error| error.to_string())?;
+        let rows = statement
+            .query_map([project_id], |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, String>(2)?,
+                    row.get::<_, String>(3)?,
+                    row.get::<_, String>(4)?,
+                    row.get::<_, String>(5)?,
+                ))
+            })
+            .map_err(|error| error.to_string())?;
+        for row in rows {
+            let (key, link, host, protocol, ip, port) = row.map_err(|error| error.to_string())?;
+            known_assets
+                .entry(canonical_identity(
+                    &link, &host, &protocol, &ip, &port, &key,
+                ))
+                .or_insert(key);
+        }
+    }
 
     for (offset, row) in reader.records().enumerate() {
         let record = match row {
@@ -344,16 +420,11 @@ fn import_csv(
             continue;
         }
         let canonical_key = canonical_identity(link, host, protocol, ip, port, raw_key);
-        let existing_asset_key: Option<String> = transaction
-            .query_row(
-                "SELECT a.asset_key FROM project_assets pa JOIN assets a ON a.id=pa.asset_id WHERE pa.project_id=?1 AND a.canonical_key=?2 AND pa.is_deleted=0 ORDER BY pa.asset_id LIMIT 1",
-                params![project_id, canonical_key],
-                |row| row.get(0),
-            )
-            .optional()
-            .map_err(|error| error.to_string())?;
-        let asset_key =
-            existing_asset_key.unwrap_or_else(|| format!("{}\u{1f}{}", company, raw_key));
+        let asset_key = known_assets
+            .get(&canonical_key)
+            .cloned()
+            .unwrap_or_else(|| format!("{}\u{1f}{}", company, raw_key));
+        known_assets.insert(canonical_key.clone(), asset_key.clone());
         let domain = field(&record, &index, &["domain"]);
         let title = field(&record, &index, &["probe_title", "title"]);
         let status_code = field(&record, &index, &["probe_status_code", "status_code"]);
@@ -375,15 +446,75 @@ fn import_csv(
         let has_register = field(&record, &index, &["has_register"]);
         let portal_known = matches!(has_login, "0" | "1") && matches!(has_register, "0" | "1");
 
+        let is_probe = index.contains_key("probe_outcome");
         let mut extra = Map::new();
         for (position, name) in headers.iter().enumerate() {
+            if name.starts_with("response_group_") || name == "response_duplicate_of" {
+                continue;
+            }
             let value = record.get(position).unwrap_or("");
             if !value.is_empty() {
                 extra.insert(name.to_string(), Value::String(value.to_string()));
             }
         }
+        if is_probe {
+            for name in [
+                "body_sha256",
+                "probe_body_bytes",
+                "probe_body_complete",
+                "probe_response_fingerprint",
+                "probe_body_truncated",
+                "probe_error",
+                "probe_content_encoding",
+                "probe_content_range",
+                "probe_content_type",
+                "probe_body_limit",
+            ] {
+                extra.insert(
+                    name.into(),
+                    Value::String(field(&record, &index, &[name]).to_string()),
+                );
+            }
+            // Project-specific group trace belongs to this run's CSV, never to
+            // the globally shared assets table. The API groups after filtering.
+            for name in [
+                "response_group_key",
+                "response_group_representative_url",
+                "response_group_representative_asset_key",
+                "response_group_member_count",
+                "response_group_members_json",
+                "response_duplicate_of",
+            ] {
+                extra.insert(name.into(), Value::Null);
+            }
+        }
+        if let Some(incoming) = extra.get("discovery_sources_json").and_then(Value::as_str) {
+            let previous_extra: Option<String> = transaction
+                .query_row(
+                    "SELECT extra_json FROM assets WHERE asset_key=?1",
+                    [&asset_key],
+                    |row| row.get(0),
+                )
+                .optional()
+                .map_err(|error| error.to_string())?;
+            if let Some(previous) =
+                previous_extra.and_then(|raw| serde_json::from_str::<Value>(&raw).ok())
+            {
+                if let Some(stored) = previous
+                    .get("discovery_sources_json")
+                    .and_then(Value::as_str)
+                {
+                    let (merged, count) =
+                        native_workers::merge_persisted_discovery(stored, incoming);
+                    extra.insert("discovery_sources_json".into(), Value::String(merged));
+                    extra.insert(
+                        "discovery_source_count".into(),
+                        Value::String(count.to_string()),
+                    );
+                }
+            }
+        }
         let extra_json = Value::Object(extra).to_string();
-        let is_probe = index.contains_key("probe_outcome");
         let mut hasher = DefaultHasher::new();
         let hash_values: Vec<&str> = if is_probe {
             let mut values = vec![
@@ -392,6 +523,7 @@ fn import_csv(
                 status_code,
                 title,
                 effective_content_category,
+                field(&record, &index, &["probe_response_fingerprint"]),
             ];
             if portal_known {
                 values.push(has_login);
@@ -440,7 +572,7 @@ fn import_csv(
         transaction.execute(r#"
             INSERT INTO assets(asset_key,company,host,link,ip,port,protocol,domain,title,status_code,probe_outcome,probe_entry_state,review_tier,content_category,score,state_hash,probe_hash,canonical_key,extra_json,last_alive)
             VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19,CASE WHEN ?11 IN ('web_alive','web_restricted','browser_render_required','virtual_host_required','alive_clean') THEN datetime('now','localtime') ELSE NULL END)
-            ON CONFLICT(asset_key) DO UPDATE SET company=CASE WHEN assets.company='' THEN excluded.company ELSE assets.company END,host=excluded.host,link=excluded.link,ip=excluded.ip,port=excluded.port,
+            ON CONFLICT(asset_key) DO UPDATE SET company=CASE WHEN assets.company='' OR (json_extract(assets.extra_json,'$.discovery_seed_kind')='domain' AND json_extract(excluded.extra_json,'$.discovery_seed_kind')='company') THEN excluded.company ELSE assets.company END,host=excluded.host,link=excluded.link,ip=excluded.ip,port=excluded.port,
               protocol=excluded.protocol,domain=excluded.domain,
               title=CASE WHEN excluded.probe_hash<>'' OR assets.probe_outcome='' THEN excluded.title ELSE assets.title END,
               status_code=CASE WHEN excluded.probe_hash<>'' OR assets.probe_outcome='' THEN excluded.status_code ELSE assets.status_code END,
@@ -483,14 +615,20 @@ fn import_csv(
 
         let auto_excluded = field(&record, &index, &["auto_excluded"]) == "1";
         let exclude_reason = field(&record, &index, &["exclude_reason"]);
-        if auto_excluded {
+        // The UI intentionally leaves the old note when a user archives or
+        // confirms an asset. Its event, not that note prefix, proves manual
+        // control; automated re-import must not undo it.
+        if manually_managed_assets.contains(&asset_id) {
+            // Technical observations above still update; manual project state
+            // and opened-entry timestamps stay independent of this probe.
+        } else if auto_excluded {
             transaction.execute(
-                "UPDATE project_assets SET decision='rejected',note=?1,is_deleted=1,deleted_at=datetime('now','localtime') WHERE project_id=?2 AND asset_id=?3",
+                "UPDATE project_assets SET decision='rejected',note=?1,is_deleted=1,deleted_at=datetime('now','localtime') WHERE project_id=?2 AND asset_id=?3 AND (decision IN ('pending','','uncertain','not_applicable') OR (decision='rejected' AND note LIKE '系统自动%')) AND (note='' OR note LIKE '系统自动%') AND (is_deleted=0 OR note LIKE '系统自动%')",
                 params![format!("系统自动SRC清洗：{}", exclude_reason),project_id,asset_id],
             ).map_err(|error| error.to_string())?;
         } else if let Some(keyword) = matched_content_rule {
             transaction.execute(
-                "UPDATE project_assets SET decision=CASE WHEN decision IN ('pending','uncertain','','not_applicable') THEN 'rejected' ELSE decision END,note=CASE WHEN decision IN ('pending','uncertain','','not_applicable','rejected') THEN ?1 ELSE note END,is_deleted=0,deleted_at=NULL WHERE project_id=?2 AND asset_id=?3",
+                "UPDATE project_assets SET decision='rejected',note=?1 WHERE project_id=?2 AND asset_id=?3 AND decision IN ('pending','uncertain','','not_applicable','rejected') AND (note='' OR note LIKE '系统自动%') AND is_deleted=0",
                 params![format!("系统自动内容规则：标题包含「{}」", keyword),project_id,asset_id],
             ).map_err(|error| error.to_string())?;
         } else if is_probe {
@@ -505,12 +643,12 @@ fn import_csv(
                     _ => "目标格式或网络范围不适合Web探测",
                 };
                 transaction.execute(
-                    "UPDATE project_assets SET decision='not_applicable',note=?1,is_deleted=0,deleted_at=NULL WHERE project_id=?2 AND asset_id=?3 AND decision IN ('pending','uncertain','','not_applicable')",
+                    "UPDATE project_assets SET decision='not_applicable',note=?1 WHERE project_id=?2 AND asset_id=?3 AND decision IN ('pending','uncertain','','not_applicable') AND (note='' OR note LIKE '系统自动%') AND is_deleted=0",
                     params![format!("系统自动Web分类：{}",classification),project_id,asset_id],
                 ).map_err(|error| error.to_string())?;
             } else if probe_outcome == "blocked_content" {
                 transaction.execute(
-                    "UPDATE project_assets SET decision='rejected',note='系统自动Web分类：违规内容隔离',is_deleted=0,deleted_at=NULL WHERE project_id=?1 AND asset_id=?2 AND decision IN ('pending','uncertain','','rejected')",
+                    "UPDATE project_assets SET decision='rejected',note='系统自动Web分类：违规内容隔离' WHERE project_id=?1 AND asset_id=?2 AND decision IN ('pending','uncertain','','rejected') AND (note='' OR note LIKE '系统自动%') AND is_deleted=0",
                     params![project_id,asset_id],
                 ).map_err(|error| error.to_string())?;
             } else if matches!(
@@ -521,11 +659,13 @@ fn import_csv(
                     | "virtual_host_required"
             ) {
                 transaction.execute(
-                    "UPDATE project_assets SET decision='pending',note='',is_deleted=0,deleted_at=NULL WHERE project_id=?1 AND asset_id=?2 AND (note LIKE '系统自动SRC清洗：%' OR note LIKE '系统自动Web分类：%')",
+                    "UPDATE project_assets SET decision='pending',note='',is_deleted=0,deleted_at=NULL WHERE project_id=?1 AND asset_id=?2 AND decision<>'confirmed' AND (note LIKE '系统自动SRC清洗：%' OR note LIKE '系统自动Web分类：%')",
                     params![project_id,asset_id],
                 ).map_err(|error| error.to_string())?;
             }
         }
+
+        crate::page_isolation::apply_import_on(&transaction, project_id, asset_id, &page_rules)?;
 
         if !was_associated {
             transaction.execute(
@@ -544,16 +684,7 @@ fn import_csv(
             updated += 1;
         }
         if offset > 0 && offset % 2000 == 0 {
-            let _ = app.emit(
-                "job-progress",
-                JobProgressEvent {
-                    run_id,
-                    status: "running".into(),
-                    stage: "import".into(),
-                    progress: stage_progress,
-                    message: format!("已导入 {} 条", offset),
-                },
-            );
+            progress(offset);
         }
     }
     transaction.commit().map_err(|error| error.to_string())?;
@@ -564,7 +695,17 @@ fn import_csv(
     })
 }
 
-fn mark_missing(db_path: &Path, project_id: i64, run_id: i64) -> Result<(), String> {
+fn mark_missing(
+    db_path: &Path,
+    project_id: i64,
+    run_id: i64,
+    collection: &Value,
+) -> Result<bool, String> {
+    if collection.get("complete").and_then(Value::as_bool) != Some(true)
+        || collection.get("coverage_complete").and_then(Value::as_bool) != Some(true)
+    {
+        return Ok(false);
+    }
     let connection = db::open(db_path)?;
     connection.execute(r#"
         INSERT INTO asset_events(project_id,asset_id,run_id,event_type,summary)
@@ -573,7 +714,7 @@ fn mark_missing(db_path: &Path, project_id: i64, run_id: i64) -> Result<(), Stri
         WHERE pa.project_id=?1 AND pa.is_deleted=0 AND COALESCE(pa.last_run_id,0)<>?2
           AND NOT EXISTS(SELECT 1 FROM asset_events e WHERE e.run_id=?2 AND e.asset_id=pa.asset_id AND e.event_type='missing')
     "#, params![project_id,run_id]).map_err(|error| error.to_string())?;
-    Ok(())
+    Ok(true)
 }
 
 fn write_reprobe_sources(
@@ -605,12 +746,18 @@ fn write_reprobe_sources(
         "title",
         "status_code",
         "score",
+        "discovery_seed_kind",
+        "discovery_sources_json",
+        "discovery_source_count",
     ];
     let connection = db::open(db_path)?;
     let mut statement = connection
         .prepare(
             r#"SELECT a.review_tier,a.company,a.asset_key,a.host,a.link,a.ip,a.port,
-                      a.protocol,a.domain,a.title,a.status_code,a.score
+                      a.protocol,a.domain,a.title,a.status_code,a.score,
+                      CAST(COALESCE(json_extract(a.extra_json,'$.discovery_seed_kind'),'') AS TEXT),
+                      CAST(COALESCE(json_extract(a.extra_json,'$.discovery_sources_json'),'') AS TEXT),
+                      CAST(COALESCE(json_extract(a.extra_json,'$.discovery_source_count'),'') AS TEXT)
                FROM project_assets pa JOIN assets a ON a.id=pa.asset_id
                WHERE pa.project_id=?1 AND pa.is_deleted=0
                ORDER BY pa.asset_id"#,
@@ -678,10 +825,14 @@ fn execute_reprobe_job(
         &format!("开始复测现有资产，共 {} 条；支持断点续跑", total),
     );
     let options = native_workers::ProbeOptions {
-        workers: setting_i64(settings, "workers", 64).clamp(1, 256) as usize,
+        workers: setting_i64(settings, "workers", 96).clamp(1, 256) as usize,
         timeout: Duration::from_secs(setting_i64(settings, "probeTimeout", 6).max(1) as u64),
+        total_timeout: Duration::from_secs(
+            setting_i64(settings, "probeTotalTimeout", 8).clamp(1, 60) as u64,
+        ),
         retries: setting_i64(settings, "probeRetries", 0).max(0) as usize,
-        max_body_bytes: setting_i64(settings, "maxBodyBytes", 524_288).max(4096) as usize,
+        max_body_bytes: setting_i64(settings, "maxBodyBytes", 524_288).clamp(4096, 1_048_576)
+            as usize,
         include_other: false,
         include_weak: false,
         allow_private: setting_bool(settings, "allowPrivate", false),
@@ -692,7 +843,7 @@ fn execute_reprobe_job(
         gambling_keywords: setting_strings(settings, "gamblingKeywords"),
         porn_keywords: setting_strings(settings, "pornKeywords"),
         negative_keywords: setting_strings(settings, "negativeKeywords"),
-        custom_keywords: dynamic_content_keywords(db_path),
+        custom_keywords: setting_strings(settings, "_assetContentKeywords"),
         priority_rate: setting_f64(settings, "priorityRate", 20.0),
         other_rate: setting_f64(settings, "otherRate", 10.0),
         per_host_interval: Duration::from_secs_f64(
@@ -727,24 +878,25 @@ fn execute_reprobe_job(
         92.0,
         "正在回写最新存活状态",
     );
-    let mut processed = 0i64;
-    for outcome in [
-        "web_alive",
-        "web_restricted",
-        "browser_render_required",
-        "virtual_host_required",
-        "web_abnormal",
-        "tcp_alive_non_http",
-        "blocked_content",
-        "unreachable",
-        "skipped",
-    ] {
-        let path = probe_dir.join(format!("P1_{}.csv", outcome));
-        if path.exists() {
-            let result = import_csv(app, db_path, run_id, project_id, &path, 95.0)?;
-            processed += result.inserted + result.updated;
-        }
-    }
+    let optimized_dir = run_dir.join("optimized");
+    let summary = native_workers::optimize_src_assets(&probe_dir, &optimized_dir)?;
+    log_line(
+        app,
+        db_path,
+        run_id,
+        "info",
+        "optimize",
+        &format!("完整响应归并完成：{summary}"),
+    );
+    let result = import_csv(
+        app,
+        db_path,
+        run_id,
+        project_id,
+        &optimized_dir.join("all_probe_results.csv"),
+        95.0,
+    )?;
+    let processed = result.inserted + result.updated;
     if let Ok(connection) = db::open(db_path) {
         let _ = connection.execute(
             "UPDATE runs SET processed=?1 WHERE id=?2",
@@ -773,7 +925,11 @@ fn execute_job(
         );
     }
     let seeds_path = run_dir.join("seeds.csv");
-    write_seeds(&seeds_path, &targets)?;
+    if seeds_path.exists() {
+        job_resume::validate_seeds(&seeds_path)?;
+    } else {
+        write_seeds(&seeds_path, &targets)?;
+    }
     let fofa_key = native_config::fofa_key(&settings)?;
     if !fofa_key.trim().is_empty() {
         let fofa_proxy = setting_str(&settings, "proxyUrl", "");
@@ -846,6 +1002,10 @@ fn execute_job(
                 progress,
                 &format!("FOFA {done}/{total}：{label}"),
             );
+            if label.starts_with("FOFA 查询失败：") || label.starts_with("FOFA 自动重试：")
+            {
+                log_line(&app, &db_path, run_id, "warn", "collect", label);
+            }
         },
     )?;
     log_line(
@@ -948,10 +1108,14 @@ fn execute_job(
             "正在执行存活和内容探测",
         );
         let options = native_workers::ProbeOptions {
-            workers: setting_i64(&settings, "workers", 64).clamp(1, 256) as usize,
+            workers: setting_i64(&settings, "workers", 96).clamp(1, 256) as usize,
             timeout: Duration::from_secs(setting_i64(&settings, "probeTimeout", 6).max(1) as u64),
+            total_timeout: Duration::from_secs(
+                setting_i64(&settings, "probeTotalTimeout", 8).clamp(1, 60) as u64,
+            ),
             retries: setting_i64(&settings, "probeRetries", 0).max(0) as usize,
-            max_body_bytes: setting_i64(&settings, "maxBodyBytes", 524_288).max(4096) as usize,
+            max_body_bytes: setting_i64(&settings, "maxBodyBytes", 524_288).clamp(4096, 1_048_576)
+                as usize,
             include_other: setting_bool(&settings, "includeOther", true),
             include_weak: setting_bool(&settings, "includeWeak", false),
             allow_private: setting_bool(&settings, "allowPrivate", false),
@@ -966,7 +1130,7 @@ fn execute_job(
             gambling_keywords: setting_strings(&settings, "gamblingKeywords"),
             porn_keywords: setting_strings(&settings, "pornKeywords"),
             negative_keywords: setting_strings(&settings, "negativeKeywords"),
-            custom_keywords: dynamic_content_keywords(&db_path),
+            custom_keywords: setting_strings(&settings, "_assetContentKeywords"),
             priority_rate: setting_f64(&settings, "priorityRate", 20.0),
             other_rate: setting_f64(&settings, "otherRate", 10.0),
             per_host_interval: Duration::from_secs_f64(
@@ -1011,15 +1175,26 @@ fn execute_job(
             "optimize",
             &format!("Rust 原生 SRC 清洗完成：{}", summary),
         );
-        for name in ["optimized_assets.csv", "auto_excluded.csv"] {
-            let path = optimized_dir.join(name);
-            if path.exists() {
-                let _ = import_csv(&app, &db_path, run_id, project_id, &path, 96.0)?;
-            }
-        }
+        let _ = import_csv(
+            &app,
+            &db_path,
+            run_id,
+            project_id,
+            &optimized_dir.join("all_probe_results.csv"),
+            96.0,
+        )?;
     }
 
-    mark_missing(&db_path, project_id, run_id)?;
+    if !mark_missing(&db_path, project_id, run_id, &collect_summary)? {
+        log_line(
+            &app,
+            &db_path,
+            run_id,
+            "warn",
+            "collect",
+            "采集受分页上限限制，覆盖不完整；本轮不判断历史资产失踪",
+        );
+    }
     Ok(())
 }
 
@@ -1036,11 +1211,14 @@ fn launch_run(
     targets: Vec<(String, String)>,
     run_dir: PathBuf,
     cancel: Arc<AtomicBool>,
-) {
-    begin_tray_activity(app.clone(), active_jobs.clone());
-    thread::spawn(move || {
-        set_job_power_request(true);
-        let result = execute_job(
+) -> Result<(), String> {
+    let activity = begin_tray_activity(app.clone(), active_jobs, cancellations, run_id);
+    let failure_app = app.clone();
+    let failure_db_path = db_path.clone();
+    let spawned = thread::Builder::new().name(format!("asset-job-{run_id}")).spawn(move || {
+        let _activity = activity;
+        let _power_request = JobPowerRequestGuard::begin();
+        let result = tray_activity::catch_job_panic(|| execute_job(
             app.clone(),
             db_path.clone(),
             run_id,
@@ -1050,7 +1228,7 @@ fn launch_run(
             targets,
             run_dir,
             cancel,
-        );
+        ));
         let connection = db::open(&db_path);
         match result {
             Ok(()) => {
@@ -1079,7 +1257,7 @@ fn launch_run(
                         status: "cancelled".into(),
                         stage: "cancelled".into(),
                         progress: 0.0,
-                        message: "任务已取消；复测任务可从断点继续".into(),
+                        message: "任务已取消；资产任务可从原目录断点继续".into(),
                     },
                 );
             }
@@ -1101,12 +1279,28 @@ fn launch_run(
                 );
             }
         }
-        if let Ok(mut flags) = cancellations.lock() {
-            flags.remove(&run_id);
-        }
-        set_job_power_request(false);
-        active_jobs.fetch_sub(1, Ordering::SeqCst);
     });
+    if let Err(error) = spawned {
+        let error = format!("无法启动资产任务线程：{error}");
+        if let Ok(connection) = db::open(&failure_db_path) {
+            let _ = connection.execute(
+                "UPDATE runs SET status='failed',stage='failed',error=?1,finished_at=datetime('now','localtime') WHERE id=?2",
+                params![error,run_id],
+            );
+        }
+        let _ = failure_app.emit(
+            "job-progress",
+            JobProgressEvent {
+                run_id,
+                status: "failed".into(),
+                stage: "failed".into(),
+                progress: 0.0,
+                message: crate::log_display::line(&error),
+            },
+        );
+        return Err(error);
+    }
+    Ok(())
 }
 
 #[tauri::command]
@@ -1115,7 +1309,16 @@ pub fn start_job(
     state: State<AppState>,
     input: StartJobInput,
 ) -> Result<i64, String> {
-    let connection = db::open(&state.db_path)?;
+    if !matches!(input.pipeline.as_str(), "full" | "collect" | "reprobe") {
+        return Err("不支持的资产任务类型".into());
+    }
+    let mut cancellations = state.cancellations.lock().map_err(|_| "任务锁异常")?;
+    let mut connection = db::open(&state.db_path)?;
+    let transaction = connection
+        .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
+        .map_err(|error| error.to_string())?;
+    let connection = &transaction;
+    job_resume::require_idle_project(connection, input.project_id, None)?;
     let _project_name: String = connection
         .query_row(
             "SELECT name FROM projects WHERE id=?1 AND status='active'",
@@ -1130,8 +1333,9 @@ pub fn start_job(
             |row| row.get(0),
         )
         .map_err(|_| "配置方案不存在".to_string())?;
-    let settings: Value =
+    let mut settings: Value =
         serde_json::from_str(&settings_text).map_err(|error| error.to_string())?;
+    job_resume::freeze_content_rules(connection, &mut settings, true)?;
     let mut snapshot = settings.clone();
     if let Some(object) = snapshot.as_object_mut() {
         let configured = object
@@ -1189,12 +1393,10 @@ pub fn start_job(
         params![input.project_id,input.profile_id,input.name,input.pipeline,total,snapshot_text,run_dir.to_string_lossy()],
     ).map_err(|error| error.to_string())?;
     let run_id = connection.last_insert_rowid();
+    transaction.commit().map_err(|error| error.to_string())?;
     let cancel = Arc::new(AtomicBool::new(false));
-    state
-        .cancellations
-        .lock()
-        .map_err(|_| "任务锁异常")?
-        .insert(run_id, cancel.clone());
+    cancellations.insert(run_id, cancel.clone());
+    drop(cancellations);
     launch_run(
         app,
         state.db_path.clone(),
@@ -1207,59 +1409,49 @@ pub fn start_job(
         targets,
         run_dir,
         cancel,
-    );
+    )?;
     Ok(run_id)
 }
 
 #[tauri::command]
 pub fn resume_job(app: AppHandle, state: State<AppState>, run_id: i64) -> Result<i64, String> {
-    let connection = db::open(&state.db_path)?;
-    let (project_id, profile_id, pipeline, output_dir, status): (i64, i64, String, String, String) = connection
-        .query_row(
-            "SELECT r.project_id,COALESCE(r.profile_id,0),r.pipeline,r.output_dir,r.status FROM runs r JOIN projects p ON p.id=r.project_id WHERE r.id=?1",
-            [run_id],
-            |row| Ok((row.get(0)?,row.get(1)?,row.get(2)?,row.get(3)?,row.get(4)?)),
-        ).map_err(|_| "任务不存在".to_string())?;
-    if pipeline != "reprobe" {
-        return Err("只有现有资产复测任务支持原地断点续跑".into());
+    let mut cancellations = state.cancellations.lock().map_err(|_| "任务锁异常")?;
+    if cancellations.contains_key(&run_id) {
+        return Err("该任务线程尚未退出，请稍后再继续".into());
     }
-    if !matches!(status.as_str(), "interrupted" | "cancelled" | "failed") {
-        return Err("该任务当前不能继续".into());
-    }
-    let settings_text: String = connection
-        .query_row(
-            "SELECT settings_json FROM config_profiles WHERE id=?1",
-            [profile_id],
-            |row| row.get(0),
-        )
-        .map_err(|_| "原配置方案不存在".to_string())?;
-    let settings: Value =
-        serde_json::from_str(&settings_text).map_err(|error| error.to_string())?;
-    connection
-        .execute(
-            "UPDATE runs SET status='queued',stage='reprobe',error='',finished_at=NULL WHERE id=?1",
-            [run_id],
-        )
-        .map_err(|error| error.to_string())?;
+    let mut connection = db::open(&state.db_path)?;
+    let prepared = job_resume::prepare_resume(&mut connection, run_id, &state.app_data_dir)?;
     let cancel = Arc::new(AtomicBool::new(false));
-    state
-        .cancellations
-        .lock()
-        .map_err(|_| "任务锁异常")?
-        .insert(run_id, cancel.clone());
+    cancellations.insert(run_id, cancel.clone());
+    drop(cancellations);
+    if prepared
+        .settings
+        .get("_assetLegacyRulesAdopted")
+        .and_then(Value::as_bool)
+        == Some(true)
+    {
+        log_line(
+            &app,
+            &state.db_path,
+            run_id,
+            "warn",
+            "recovery",
+            "旧任务没有记录动态内容规则，已在首次恢复时固定规则；不兼容的旧探测缓存将重新探测",
+        );
+    }
     launch_run(
         app,
         state.db_path.clone(),
         state.cancellations.clone(),
         state.active_jobs.clone(),
         run_id,
-        project_id,
-        pipeline,
-        settings,
+        prepared.project_id,
+        prepared.pipeline,
+        prepared.settings,
         Vec::new(),
-        PathBuf::from(output_dir),
+        prepared.run_dir,
         cancel,
-    );
+    )?;
     Ok(run_id)
 }
 
@@ -1284,6 +1476,10 @@ pub fn cancel_job(state: State<AppState>, run_id: i64) -> Result<(), String> {
         Err("任务不在运行中".into())
     }
 }
+
+#[cfg(test)]
+#[path = "jobs/asset_import_tests.rs"]
+mod asset_import_tests;
 
 #[cfg(test)]
 mod tests {

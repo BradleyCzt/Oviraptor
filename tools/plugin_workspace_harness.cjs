@@ -51,7 +51,7 @@ function mountLegacyAssets(t,overrides={}){
  const compiled=compile('src/features/assets/components/AssetWorkspace.vue'),calls=[],events=[];
  const api=new Proxy({}, {get:(_,name)=>(...args)=>{calls.push([name,...args]);if(overrides[name])return overrides[name](...args);if(name==='listAssets')return Promise.resolve({items:[],total:0});if(name==='createSentinelScan')return Promise.resolve('scan');return Promise.resolve(1);}});
  const exports={},storage={getItem:()=>null,setItem(){}};
- new Function('require','exports','localStorage',compiled.script)(name=>{
+ new Function('require','exports','localStorage','sessionStorage','window','document',compiled.script)(name=>{
   if(name==='vue')return{...vue,onMounted(){}};
   if (name === '../api') return { assetApi: api };
     if (name === '../../sentinel/api') return { sentinelApi: api };
@@ -61,7 +61,7 @@ function mountLegacyAssets(t,overrides={}){
   if(name.endsWith('.vue'))return{default:()=>null};
   if(name.endsWith('.css'))return{};
   throw Error(`Unexpected asset import ${name}`);
- },exports,storage);
+ },exports,storage,storage,{addEventListener(){},removeEventListener(){},getSelection:()=>null},{elementFromPoint:()=>null});
  const props=vue.reactive({projects:[project(91),project(92)],selectedProjectId:undefined,scanningEnabled:true});let b;
  const component={...exports.default,setup(p,ctx){b=exports.default.setup(p,ctx);return()=>null;}};
  const app=renderer.createApp({render:()=>vue.h(component,{...props,onNotify:(...args)=>events.push(args)})});app.mount({});if(t)t.after(()=>app.unmount());

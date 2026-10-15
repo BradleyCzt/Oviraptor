@@ -10,6 +10,10 @@ pub(crate) mod application_settings;
 pub(crate) mod workspace_config_profiles;
 #[path = "commands/assets.rs"]
 pub(crate) mod assets;
+#[path = "commands/asset_rule_catalog.rs"]
+pub(crate) mod asset_rule_catalog;
+#[path = "commands/page_isolation.rs"]
+pub(crate) mod page_isolation;
 #[path = "commands/asset_export.rs"]
 pub(crate) mod asset_export;
 #[path = "commands/tool_administrator.rs"]

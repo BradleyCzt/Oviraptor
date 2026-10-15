@@ -99,8 +99,9 @@ const defaults = {
   includeWeak: false,
   priorityRate: 20,
   otherRate: 10,
-  workers: 64,
+  workers: 96,
   probeTimeout: 6,
+  probeTotalTimeout: 8,
   probeRetries: 0,
   contentThreshold: 12,
   gamblingKeywords: ["在线赌博", "博彩平台", "真人视讯", "体育投注"],
@@ -1002,13 +1003,14 @@ onMounted(loadRulePacks);
         ><input v-model.number="form.settings.otherRate" type="number"
       /></label>
       <label class="field"
-        ><span>Workers</span
-        ><input v-model.number="form.settings.workers" type="number"
+        ><span>{{tr('探测并发（1–256）','Probe workers (1–256)')}}</span
+        ><input v-model.number="form.settings.workers" type="number" min="1" max="256"
       /></label>
       <label class="field"
-        ><span>Timeout</span
+        ><span>{{tr('单次请求超时（秒）','Request timeout (seconds)')}}</span
         ><input v-model.number="form.settings.probeTimeout" type="number"
       /></label>
+      <label class="field"><span>{{tr('每个 URL 总时间预算（秒）','Total network budget per URL (seconds)')}}</span><input v-model.number="form.settings.probeTotalTimeout" type="number" min="1" max="60" /><small>{{tr('连接、重定向、响应读取及重试共用；超时结束本轮并保留记录。调度排队和响应归并计算另计。','Shared by connection, redirects, body reads and retries. Timeout stops the current probe and retains its record. Scheduling and response grouping are separate.')}}</small></label>
       <label class="field"
         ><span>Retries</span
         ><input v-model.number="form.settings.probeRetries" type="number"

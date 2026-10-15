@@ -27,8 +27,8 @@ test('switching project during quick-start cannot navigate or emit stale mutatio
  const operation=deferred();const m=mountWorkspace(t,'asset',{startJob:()=>operation.promise});await flush();const pending=m.b.quickStartProject(91);m.props.projectId=92;await flush();operation.resolve(8);await pending;
  assert.equal(m.events.filter(([name])=>name==='navigate'||name==='projectsChanged').length,0);assert.equal(m.b.starting.value,false);
 });
-for(const change of ['project','unmount'])test(`already-admitted restart completes exactly once after ${change} change without stale UI`,async t=>{
- const ack=deferred();const m=mountWorkspace(t,'asset',{acknowledgeInterruptedRun:()=>ack.promise});await flush();const pending=m.b.resumeInterrupted({runId:1,projectId:91,name:'Old run',pipeline:'full'});if(change==='project'){m.props.projectId=92;await flush();}else m.unmount();ack.resolve();await pending;
+for(const change of ['project','unmount'])test(`already-admitted legacy restart completes exactly once after ${change} change without stale UI`,async t=>{
+ const ack=deferred();const m=mountWorkspace(t,'asset',{acknowledgeInterruptedRun:()=>ack.promise});await flush();const pending=m.b.resumeInterrupted({runId:1,projectId:91,name:'Old run',pipeline:''});if(change==='project'){m.props.projectId=92;await flush();}else m.unmount();ack.resolve();await pending;
  assert.deepEqual(m.calls.filter(([name])=>name==='startJob'),[['startJob',91,1,'Old run · Resume','full']]);assert.equal(m.events.filter(([name])=>name==='interruptedResumed'||name==='navigate'||name==='projectsChanged').length,0);
 });
 test('asset operation errors stay visible beside its workspace and reset on project change',async t=>{
@@ -74,4 +74,27 @@ for(const owner of ['act','archive'])test(`old disabled scan completion cannot r
  const scan=deferred(),ordinary=deferred();const m=mountLegacyAssets(t,{createSentinelScan:()=>scan.promise,[owner==='act'?'updateAssetDecisions':'softDeleteAssetSelections']:()=>ordinary.promise});const scanOperation=m.b.sendToSentinel();m.props.scanningEnabled=false;await flush();assert.equal(m.b.bulkBusy.value,false);
  const ordinaryOperation=owner==='act'?m.b.act('confirmed'):m.b.archive(true);assert.equal(m.b.bulkBusy.value,true);scan.resolve('first-draft');await scanOperation;assert.equal(m.b.bulkBusy.value,true);assert.equal(m.calls.filter(([name])=>name==='createSentinelScan').length,1);
  ordinary.resolve(1);await ordinaryOperation;assert.equal(m.b.bulkBusy.value,false);
+});
+
+for(const pipeline of ['full','collect','reprobe'])test(`${pipeline} resumes its existing checkpoint without acknowledgement or replacement`,async t=>{
+ const settled=[];const m=mountWorkspace(t,'asset',{}, {view:'tasks',resumeWorkflow:{begin:()=>true,settle:(...args)=>settled.push(args)}});await flush();
+ await m.b.resumeInterrupted({runId:21,projectId:91,name:'Checkpoint',pipeline});
+ assert.deepEqual(m.calls.filter(([name])=>['resumeJob','acknowledgeInterruptedRun','startJob'].includes(name)),[['resumeJob',21]]);
+ assert.equal(settled.length,1);assert.deepEqual(settled[0][1],{started:true,acknowledged:false});assert.ok(m.events.some(([name,id])=>name==='interruptedResumed'&&id===21));
+});
+for(const change of ['project','unmount'])test(`an admitted checkpoint resume settles once after ${change} change without stale UI`,async t=>{
+ const pending=deferred(),settled=[];const m=mountWorkspace(t,'asset',{resumeJob:()=>pending.promise},{resumeWorkflow:{begin:()=>true,settle:(...args)=>settled.push(args)}});await flush();
+ const operation=m.b.resumeInterrupted({runId:22,projectId:91,name:'Checkpoint',pipeline:'full'});if(change==='project'){m.props.projectId=92;await flush();}else m.unmount();pending.resolve(22);await operation;
+ assert.deepEqual(m.calls.filter(([name])=>['resumeJob','acknowledgeInterruptedRun','startJob'].includes(name)),[['resumeJob',22]]);
+ assert.equal(settled.length,1);assert.deepEqual(settled[0][1],{started:true,acknowledged:false});assert.equal(m.events.filter(([name])=>name==='interruptedResumed'||name==='navigate'||name==='projectsChanged').length,0);
+});
+test('a refused checkpoint keeps the existing run unacknowledged and exposes the backend error',async t=>{
+ const settled=[];const m=mountWorkspace(t,'asset',{resumeJob:async()=>{throw Error('checkpoint unavailable');}},{resumeWorkflow:{begin:()=>true,settle:(...args)=>settled.push(args)}});await flush();
+ await m.b.resumeInterrupted({runId:23,projectId:91,name:'Checkpoint',pipeline:'collect'});
+ assert.deepEqual(m.calls.filter(([name])=>['resumeJob','acknowledgeInterruptedRun','startJob'].includes(name)),[['resumeJob',23]]);assert.match(m.b.actionError.value,/checkpoint unavailable/);
+ assert.deepEqual(settled[0][1],{started:false,acknowledged:false,error:'Error: checkpoint unavailable'});
+});
+test('asset changes refresh the owned statistics and notify the shared project host',async t=>{
+ let reads=0;const m=mountWorkspace(t,'asset',{dashboardStats:async()=>({assetCount:++reads,runningJobs:0,blockedCount:reads})},{view:'assets'});await flush();m.b.assetDataChanged();await flush();
+ assert.equal(m.b.stats.value.assetCount,2);assert.equal(m.events.filter(([name])=>name==='projectsChanged').length,1);assert.equal(m.events.filter(([name])=>name==='metadata').at(-1)[1].badges.blockedCount,2);
 });

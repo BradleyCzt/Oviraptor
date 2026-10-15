@@ -1,0 +1,570 @@
+{
+  "tested_commit": "b2492bb94ce7aca1b102ffefc7b047dee819a2fe",
+  "base_snapshot": "525f1283adae79a13bcf0e07cf50772841911fb0",
+  "local_delta_paths": 51,
+  "mapping": [
+    {
+      "source": "package-lock.json",
+      "candidate_targets": [
+        "package-lock.json"
+      ],
+      "category": "tracked",
+      "target_exists": true,
+      "candidate_sha256_by_target": {
+        "package-lock.json": "5c0d6c470f43b9e2b31ebd120a4a76f19fb6cbd187fa712f455585da51c22ed5"
+      }
+    },
+    {
+      "source": "package.json",
+      "candidate_targets": [
+        "package.json"
+      ],
+      "category": "tracked",
+      "target_exists": true,
+      "candidate_sha256_by_target": {
+        "package.json": "8956e50004dbbaed7442875790f52966427e38ebf84b080d7492ed31c332363d"
+      }
+    },
+    {
+      "source": "src-tauri/Cargo.lock",
+      "candidate_targets": [
+        "src-tauri/Cargo.lock"
+      ],
+      "category": "tracked",
+      "target_exists": true,
+      "candidate_sha256_by_target": {
+        "src-tauri/Cargo.lock": "eaa60a1baec8b30a1997d4bf726ea9930d96de344098af711d3b182833e89dfc"
+      }
+    },
+    {
+      "source": "src-tauri/Cargo.toml",
+      "candidate_targets": [
+        "src-tauri/Cargo.toml"
+      ],
+      "category": "tracked",
+      "target_exists": true,
+      "candidate_sha256_by_target": {
+        "src-tauri/Cargo.toml": "96702e7ef0290c445d6332a86f1f188ee8d75c6e0b022324589083ac0442e68f"
+      }
+    },
+    {
+      "source": "src-tauri/src/commands.rs",
+      "candidate_targets": [
+        "src-tauri/src/commands.rs"
+      ],
+      "category": "tracked",
+      "target_exists": true,
+      "candidate_sha256_by_target": {
+        "src-tauri/src/commands.rs": "c9fbb5b89f16d5d3d66572a19070b2a7f85372f2256d97b99e304c2828de09a7"
+      }
+    },
+    {
+      "source": "src-tauri/src/commands/asset_query_rule_tests.rs",
+      "candidate_targets": [
+        "src-tauri/src/commands/asset_query_rule_tests.rs"
+      ],
+      "category": "untracked",
+      "target_exists": true,
+      "candidate_sha256_by_target": {
+        "src-tauri/src/commands/asset_query_rule_tests.rs": "0ace90d314c85ccab6806960cc97c623efbc467b1182f787fefc96734bb1fe0f"
+      }
+    },
+    {
+      "source": "src-tauri/src/commands/asset_response_groups.rs",
+      "candidate_targets": [
+        "src-tauri/src/commands/asset_response_groups.rs"
+      ],
+      "category": "untracked",
+      "target_exists": true,
+      "candidate_sha256_by_target": {
+        "src-tauri/src/commands/asset_response_groups.rs": "74a433ed6ed63d0feda7ac261e40eff5ea6717c3b500cc0f022f8f7be6e53e47"
+      }
+    },
+    {
+      "source": "src-tauri/src/commands/asset_response_groups_tests.rs",
+      "candidate_targets": [
+        "src-tauri/src/commands/asset_response_groups_tests.rs"
+      ],
+      "category": "untracked",
+      "target_exists": true,
+      "candidate_sha256_by_target": {
+        "src-tauri/src/commands/asset_response_groups_tests.rs": "653695b88db05b4613bc878080fafffddea066d70b0c3bd18a88b928a233ec76"
+      }
+    },
+    {
+      "source": "src-tauri/src/commands/asset_rule_catalog.rs",
+      "candidate_targets": [
+        "src-tauri/src/commands/asset_rule_catalog.rs"
+      ],
+      "category": "untracked",
+      "target_exists": true,
+      "candidate_sha256_by_target": {
+        "src-tauri/src/commands/asset_rule_catalog.rs": "85b73a70e83401c2dfcb04c4cc36fa916fd40a032a35e32cea9effac7ad20d98"
+      }
+    },
+    {
+      "source": "src-tauri/src/commands/assets.rs",
+      "candidate_targets": [
+        "src-tauri/src/commands/assets.rs"
+      ],
+      "category": "tracked",
+      "target_exists": true,
+      "candidate_sha256_by_target": {
+        "src-tauri/src/commands/assets.rs": "91a58a1ec7b25f6de24ee6f9a086d5109bb4bf563bd977757ca4c0f28ed84c69"
+      }
+    },
+    {
+      "source": "src-tauri/src/commands/page_isolation.rs",
+      "candidate_targets": [
+        "src-tauri/src/commands/page_isolation.rs"
+      ],
+      "category": "untracked",
+      "target_exists": true,
+      "candidate_sha256_by_target": {
+        "src-tauri/src/commands/page_isolation.rs": "a5f2a985597f945ea404d1828ea15e93118d34b6da1731305d0aac168bc584e1"
+      }
+    },
+    {
+      "source": "src-tauri/src/commands/workspace_projects.rs",
+      "candidate_targets": [
+        "src-tauri/src/commands/application_overview.rs"
+      ],
+      "category": "tracked",
+      "target_exists": true,
+      "candidate_sha256_by_target": {
+        "src-tauri/src/commands/application_overview.rs": "aebc15d1dd18b29c854ec792946204caefd841cdda784ddf6b2f25c18f29168c"
+      }
+    },
+    {
+      "source": "src-tauri/src/db_initialize_budgets.rs",
+      "candidate_targets": [
+        "src-tauri/src/db_initialize_budgets.rs"
+      ],
+      "category": "tracked",
+      "target_exists": true,
+      "candidate_sha256_by_target": {
+        "src-tauri/src/db_initialize_budgets.rs": "423a34b20b2bb0a5d1840817c74417d838c749635e1b41fcea7ceb72c66b511f"
+      }
+    },
+    {
+      "source": "src-tauri/src/db_schema.rs",
+      "candidate_targets": [
+        "src-tauri/src/db_schema.rs"
+      ],
+      "category": "tracked",
+      "target_exists": true,
+      "candidate_sha256_by_target": {
+        "src-tauri/src/db_schema.rs": "1a32d477c78cac8d299d7bf58eb83351b76d52ec8a8c4566a40c3ab0e7fcf692"
+      }
+    },
+    {
+      "source": "src-tauri/src/jobs.rs",
+      "candidate_targets": [
+        "src-tauri/src/jobs.rs"
+      ],
+      "category": "tracked",
+      "target_exists": true,
+      "candidate_sha256_by_target": {
+        "src-tauri/src/jobs.rs": "d8b0042d12d559f6e2e56809304e90be9c16affe899bd7f56de5080a7344345e"
+      }
+    },
+    {
+      "source": "src-tauri/src/jobs/asset_identity.rs",
+      "candidate_targets": [
+        "src-tauri/src/jobs/asset_identity.rs"
+      ],
+      "category": "untracked",
+      "target_exists": true,
+      "candidate_sha256_by_target": {
+        "src-tauri/src/jobs/asset_identity.rs": "4ac5cc2af3b3c5024b1221651dc691d5c78631d9bfba5a2e9ce1d8c765cfa52d"
+      }
+    },
+    {
+      "source": "src-tauri/src/jobs/asset_import_lock_tests.rs",
+      "candidate_targets": [
+        "src-tauri/src/jobs/asset_import_lock_tests.rs"
+      ],
+      "category": "untracked",
+      "target_exists": true,
+      "candidate_sha256_by_target": {
+        "src-tauri/src/jobs/asset_import_lock_tests.rs": "eb89b84ec6f5166fbd6fb3db7c4e43fcee84b9a1ec8c2f761a30ae3a38668cf0"
+      }
+    },
+    {
+      "source": "src-tauri/src/jobs/asset_import_tests.rs",
+      "candidate_targets": [
+        "src-tauri/src/jobs/asset_import_tests.rs"
+      ],
+      "category": "untracked",
+      "target_exists": true,
+      "candidate_sha256_by_target": {
+        "src-tauri/src/jobs/asset_import_tests.rs": "43fa0ddd5ad2bc24de2a66adab2cd923f3d233a6d0c592974edae5e3169bc029"
+      }
+    },
+    {
+      "source": "src-tauri/src/jobs/job_resume.rs",
+      "candidate_targets": [
+        "src-tauri/src/jobs/job_resume.rs"
+      ],
+      "category": "untracked",
+      "target_exists": true,
+      "candidate_sha256_by_target": {
+        "src-tauri/src/jobs/job_resume.rs": "d49f7987cf02c4fb17897df5bf2c08cc2584066fd6d8fbde6f4b934fdeaf2edc"
+      }
+    },
+    {
+      "source": "src-tauri/src/jobs/job_resume_tests.rs",
+      "candidate_targets": [
+        "src-tauri/src/jobs/job_resume_tests.rs"
+      ],
+      "category": "untracked",
+      "target_exists": true,
+      "candidate_sha256_by_target": {
+        "src-tauri/src/jobs/job_resume_tests.rs": "ad8e37a7cebf8af78f32008fca539655bf375ce76db9e2d805a213cbcbcdcf15"
+      }
+    },
+    {
+      "source": "src-tauri/src/jobs/native_collection_resume.rs",
+      "candidate_targets": [
+        "src-tauri/src/jobs/native_collection_resume.rs"
+      ],
+      "category": "untracked",
+      "target_exists": true,
+      "candidate_sha256_by_target": {
+        "src-tauri/src/jobs/native_collection_resume.rs": "8bf2f4ab122fa82e6c0fefdcef0377f4cde453e4eff73deaac27e0dfe4238117"
+      }
+    },
+    {
+      "source": "src-tauri/src/jobs/native_collection_resume_tests.rs",
+      "candidate_targets": [
+        "src-tauri/src/jobs/native_collection_resume_tests.rs"
+      ],
+      "category": "untracked",
+      "target_exists": true,
+      "candidate_sha256_by_target": {
+        "src-tauri/src/jobs/native_collection_resume_tests.rs": "71b241929a8113ee0f6ad858f199bcf9bf3d536fabe8cd05f601de70132a8e9b"
+      }
+    },
+    {
+      "source": "src-tauri/src/jobs/native_collection_resume_transport.rs",
+      "candidate_targets": [
+        "src-tauri/src/jobs/native_collection_resume_transport.rs"
+      ],
+      "category": "untracked",
+      "target_exists": true,
+      "candidate_sha256_by_target": {
+        "src-tauri/src/jobs/native_collection_resume_transport.rs": "d875db9ef3710263b89b4e96e10c8eb834f65bba98eb31dd12421ad5ebc48e22"
+      }
+    },
+    {
+      "source": "src-tauri/src/jobs/native_config.rs",
+      "candidate_targets": [
+        "src-tauri/src/jobs/native_config.rs"
+      ],
+      "category": "tracked",
+      "target_exists": true,
+      "candidate_sha256_by_target": {
+        "src-tauri/src/jobs/native_config.rs": "8cc3dcbd7ac3762a9b476c6fdaa473562adf873aa3f4b770c02c69792468fd81"
+      }
+    },
+    {
+      "source": "src-tauri/src/jobs/native_content.rs",
+      "candidate_targets": [
+        "src-tauri/src/jobs/native_content.rs"
+      ],
+      "category": "tracked",
+      "target_exists": true,
+      "candidate_sha256_by_target": {
+        "src-tauri/src/jobs/native_content.rs": "0c196059458a9a6a5823540d20df0f151e1fb7d5d1c9ad0fe01c785280fdc15a"
+      }
+    },
+    {
+      "source": "src-tauri/src/jobs/native_discovery.rs",
+      "candidate_targets": [
+        "src-tauri/src/jobs/native_discovery.rs"
+      ],
+      "category": "untracked",
+      "target_exists": true,
+      "candidate_sha256_by_target": {
+        "src-tauri/src/jobs/native_discovery.rs": "f8f37a17f562982965b45118756e1774f0f7625006983ec4be43db72582db4a3"
+      }
+    },
+    {
+      "source": "src-tauri/src/jobs/native_discovery_tests.rs",
+      "candidate_targets": [
+        "src-tauri/src/jobs/native_discovery_tests.rs"
+      ],
+      "category": "untracked",
+      "target_exists": true,
+      "candidate_sha256_by_target": {
+        "src-tauri/src/jobs/native_discovery_tests.rs": "0c450fed2362f0696e092b7fddab8983da7024ebec03ef48068614bec787065b"
+      }
+    },
+    {
+      "source": "src-tauri/src/jobs/native_fofa.rs",
+      "candidate_targets": [
+        "src-tauri/src/jobs/native_fofa.rs"
+      ],
+      "category": "tracked",
+      "target_exists": true,
+      "candidate_sha256_by_target": {
+        "src-tauri/src/jobs/native_fofa.rs": "aacb51989b0a7955e22d4a92793a4624676b8f3589ed64ddcfec8adebb8b05fb"
+      }
+    },
+    {
+      "source": "src-tauri/src/jobs/native_probe.rs",
+      "candidate_targets": [
+        "src-tauri/src/jobs/native_probe.rs"
+      ],
+      "category": "tracked",
+      "target_exists": true,
+      "candidate_sha256_by_target": {
+        "src-tauri/src/jobs/native_probe.rs": "7ad43bb1d057b883d1896b37bc5af7b3e53be38d58edc2e4befa614a5ede9658"
+      }
+    },
+    {
+      "source": "src-tauri/src/jobs/native_response_identity.rs",
+      "candidate_targets": [
+        "src-tauri/src/jobs/native_response_identity.rs"
+      ],
+      "category": "untracked",
+      "target_exists": true,
+      "candidate_sha256_by_target": {
+        "src-tauri/src/jobs/native_response_identity.rs": "757b2b9212fe69fbf13e7e1bfc5cf070724d063b74e7fbb50a857cf402bba3d1"
+      }
+    },
+    {
+      "source": "src-tauri/src/jobs/native_response_identity_tests.rs",
+      "candidate_targets": [
+        "src-tauri/src/jobs/native_response_identity_tests.rs"
+      ],
+      "category": "untracked",
+      "target_exists": true,
+      "candidate_sha256_by_target": {
+        "src-tauri/src/jobs/native_response_identity_tests.rs": "70bed09b7c8803d33ba3b5ab045d10a63e07baea9120e809c5c8cb09351fd962"
+      }
+    },
+    {
+      "source": "src-tauri/src/jobs/native_workers.rs",
+      "candidate_targets": [
+        "src-tauri/src/jobs/native_workers.rs"
+      ],
+      "category": "tracked",
+      "target_exists": true,
+      "candidate_sha256_by_target": {
+        "src-tauri/src/jobs/native_workers.rs": "221497b8f46b935cdc5e1b5b0a12cec9900357cc97794a7cd75220f06d1d3aab"
+      }
+    },
+    {
+      "source": "src-tauri/src/jobs/tray_activity.rs",
+      "candidate_targets": [
+        "src-tauri/src/jobs/tray_activity.rs"
+      ],
+      "category": "untracked",
+      "target_exists": true,
+      "candidate_sha256_by_target": {
+        "src-tauri/src/jobs/tray_activity.rs": "b790f3650f6bc15b52a41b96b6297aefb7762b89abd9a720ef083bade65c2092"
+      }
+    },
+    {
+      "source": "src-tauri/src/lib.rs",
+      "candidate_targets": [
+        "src-tauri/src/lib.rs"
+      ],
+      "category": "tracked",
+      "target_exists": true,
+      "candidate_sha256_by_target": {
+        "src-tauri/src/lib.rs": "1d9df56da3a00d06e9e0a36c454687f498a0dffc051567c7f54fe784d371abd7"
+      }
+    },
+    {
+      "source": "src-tauri/src/models_asset.rs",
+      "candidate_targets": [
+        "src-tauri/src/assets/model.rs"
+      ],
+      "category": "tracked",
+      "target_exists": true,
+      "candidate_sha256_by_target": {
+        "src-tauri/src/assets/model.rs": "b8d38c0263239b0152b5903811bac4d9d3a146bea91889fd51a0fde5fd7d17a4"
+      }
+    },
+    {
+      "source": "src-tauri/src/page_isolation.rs",
+      "candidate_targets": [
+        "src-tauri/src/page_isolation.rs"
+      ],
+      "category": "untracked",
+      "target_exists": true,
+      "candidate_sha256_by_target": {
+        "src-tauri/src/page_isolation.rs": "06af0f7d76bc2d4a5ec43c00d8c08f0f94f7b01305dcf52930ee9b013c5ad1a7"
+      }
+    },
+    {
+      "source": "src-tauri/src/page_isolation.schema.sql",
+      "candidate_targets": [
+        "src-tauri/src/page_isolation.schema.sql"
+      ],
+      "category": "untracked",
+      "target_exists": true,
+      "candidate_sha256_by_target": {
+        "src-tauri/src/page_isolation.schema.sql": "4d9e5de8f676f0b5a5f096b9f70c798a7170d86c914efd58365f85fdc5fc8fcd"
+      }
+    },
+    {
+      "source": "src-tauri/src/page_isolation_tests.rs",
+      "candidate_targets": [
+        "src-tauri/src/page_isolation_tests.rs"
+      ],
+      "category": "untracked",
+      "target_exists": true,
+      "candidate_sha256_by_target": {
+        "src-tauri/src/page_isolation_tests.rs": "aea03b641c4b1fb23aad30197c27d9cb5bd2093d197fe616daa77df24662185f"
+      }
+    },
+    {
+      "source": "src-tauri/tauri.conf.json",
+      "candidate_targets": [
+        "src-tauri/tauri.conf.json"
+      ],
+      "category": "tracked",
+      "target_exists": true,
+      "candidate_sha256_by_target": {
+        "src-tauri/tauri.conf.json": "7cc39de209d12e9eae2d2aff78fc51ccd54e5d4716ab6902ec9d41cc3adeecd4"
+      }
+    },
+    {
+      "source": "src/App.vue",
+      "candidate_targets": [
+        "src/App.vue",
+        "src/features/assets/workspace/AssetsPluginWorkspace.vue"
+      ],
+      "category": "tracked",
+      "target_exists": true,
+      "candidate_sha256_by_target": {
+        "src/App.vue": "665ea9ba9c77187e9ba3569377ab9398b955bdec0db9042b617cd3b29ae21ea8",
+        "src/features/assets/workspace/AssetsPluginWorkspace.vue": "721326ef71cfb33154e26e46b7faa8deaad20d7eade9932b99cb4cf15ece792a"
+      }
+    },
+    {
+      "source": "src/components/AssetRuleSettings.vue",
+      "candidate_targets": [
+        "src/features/assets/components/AssetRuleSettings.vue"
+      ],
+      "category": "untracked",
+      "target_exists": true,
+      "candidate_sha256_by_target": {
+        "src/features/assets/components/AssetRuleSettings.vue": "36cdd671f37bb4223456f1a3db8624f820765c330124a75b2240d849beb30e2f"
+      }
+    },
+    {
+      "source": "src/components/AssetWorkspace.vue",
+      "candidate_targets": [
+        "src/features/assets/components/AssetWorkspace.vue"
+      ],
+      "category": "tracked",
+      "target_exists": true,
+      "candidate_sha256_by_target": {
+        "src/features/assets/components/AssetWorkspace.vue": "06737146e36950d8384ae28b9d734d64b51533aae2d4eb81e7753e57da8c5a8f"
+      }
+    },
+    {
+      "source": "src/components/ConfigDialog.vue",
+      "candidate_targets": [
+        "src/features/configuration/components/ConfigDialog.vue"
+      ],
+      "category": "tracked",
+      "target_exists": true,
+      "candidate_sha256_by_target": {
+        "src/features/configuration/components/ConfigDialog.vue": "1f575d5537c44147cf3161f67e3864290884849f4cbd94f5cbbe0f82b1eac304"
+      }
+    },
+    {
+      "source": "src/components/PageIsolationDialog.vue",
+      "candidate_targets": [
+        "src/features/assets/components/PageIsolationDialog.vue"
+      ],
+      "category": "untracked",
+      "target_exists": true,
+      "candidate_sha256_by_target": {
+        "src/features/assets/components/PageIsolationDialog.vue": "290e46964269a539fd0737f8ef402015143a66a423a5d529b5343923a1106b29"
+      }
+    },
+    {
+      "source": "src/components/QueryPanel.vue",
+      "candidate_targets": [
+        "src/features/assets/components/QueryPanel.vue"
+      ],
+      "category": "tracked",
+      "target_exists": true,
+      "candidate_sha256_by_target": {
+        "src/features/assets/components/QueryPanel.vue": "247e2c7225f5674c9402ead6761f74c1f8b866d14e7f2e03d8958121b84f8c95"
+      }
+    },
+    {
+      "source": "src/components/ReleaseNotesDialog.vue",
+      "candidate_targets": [
+        "src/shell/components/ReleaseNotesDialog.vue"
+      ],
+      "category": "tracked",
+      "target_exists": true,
+      "candidate_sha256_by_target": {
+        "src/shell/components/ReleaseNotesDialog.vue": "b01c26228f8c21a8db716b3c30fdfbb78fb72b3ae0f7ce19c91261daaf22d95f"
+      }
+    },
+    {
+      "source": "src/components/TitleRulePopover.vue",
+      "candidate_targets": [
+        "src/features/assets/components/TitleRulePopover.vue"
+      ],
+      "category": "tracked",
+      "target_exists": true,
+      "candidate_sha256_by_target": {
+        "src/features/assets/components/TitleRulePopover.vue": "5ef075c9af9c2c3696554092f7f99cbf51ac4ad6d8a06887995d007930d71425"
+      }
+    },
+    {
+      "source": "src/features/assets/api.ts",
+      "candidate_targets": [
+        "src/features/assets/api.ts"
+      ],
+      "category": "tracked",
+      "target_exists": true,
+      "candidate_sha256_by_target": {
+        "src/features/assets/api.ts": "5bfe830382f582c8bce3901e6de629982cc570daa97c3932fdd3c47899c077db"
+      }
+    },
+    {
+      "source": "src/styles.css",
+      "candidate_targets": [
+        "src/features/configuration/styles/navigation.css"
+      ],
+      "category": "tracked",
+      "target_exists": true,
+      "candidate_sha256_by_target": {
+        "src/features/configuration/styles/navigation.css": "014b241ccb2d4aac248d237a81c520b7cf9dc5d047763876ef7413f3f892ef02"
+      }
+    },
+    {
+      "source": "src/types.ts",
+      "candidate_targets": [
+        "src/features/assets/types.ts"
+      ],
+      "category": "tracked",
+      "target_exists": true,
+      "candidate_sha256_by_target": {
+        "src/features/assets/types.ts": "3711c2a9e2c17992775a701f04cea2ac32c4084294566d8c2eeb9b6544089c82"
+      }
+    },
+    {
+      "source": "tools/test_asset_workspace_review.cjs",
+      "candidate_targets": [
+        "tools/test_asset_workspace_review.cjs"
+      ],
+      "category": "untracked",
+      "target_exists": true,
+      "candidate_sha256_by_target": {
+        "tools/test_asset_workspace_review.cjs": "75601c14269654f9e6f7f63d2139727ac2ded19bb39b9c216e0234797e94fd87"
+      }
+    }
+  ]
+}

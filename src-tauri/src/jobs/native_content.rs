@@ -252,6 +252,7 @@ mod tests {
         ProbeOptions {
             workers: 1,
             timeout: std::time::Duration::from_secs(1),
+            total_timeout: std::time::Duration::from_secs(8),
             retries: 0,
             max_body_bytes: 4096,
             include_other: false,

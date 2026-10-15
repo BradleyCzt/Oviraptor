@@ -9,11 +9,13 @@ import {
   Columns3,
   Download,
   Filter,
+  Layers,
   RefreshCw,
   RotateCcw,
   Search,
   Send,
   ShieldQuestion,
+  ShieldBan,
   X,
 } from "@lucide/vue";
 import { openUrl } from "@tauri-apps/plugin-opener";
@@ -23,6 +25,7 @@ import type { Asset, AssetQuery, AssetSelection, AssetSummary, FilterCondition }
 import type { Project } from "../../workspaces/types";
 import { useI18n } from "../../../i18n";
 import TitleRulePopover from "./TitleRulePopover.vue";
+import PageIsolationDialog from "./PageIsolationDialog.vue";
 import "../../../asset-workspace-enhancements.css";
 import "../../../asset-workspace-patch.css";
 
@@ -36,6 +39,7 @@ const props = defineProps<{
 const emit = defineEmits<{
   notify: [type: "success" | "error" | "info", text: string];
   reprobe: [projectId: number];
+  changed: [];
 }>();
 const { tr } = useI18n();
 
@@ -173,18 +177,26 @@ const assetScanMode = ref<"quick" | "standard" | "deep">(
 const assets = shallowRef<Asset[]>([]);
 const total = ref(0);
 const emptySummary = (): AssetSummary => ({ all: 0, pending: 0, uncertain: 0, confirmed: 0, rejected: 0, notApplicable: 0, sentToAgent: 0 });
+const memberTotal = ref(0);
 const summary = ref<AssetSummary>(emptySummary());
 const selected = ref<Map<string, Asset>>(new Map());
-const titleRuleSelection = ref<{ text: string; x: number; y: number; assetId: number }>();
+const titleRuleSelection = ref<{ text: string; x: number; y: number; asset: Asset }>();
 const ruleBusy = ref(false);
-const query = ref<AssetQuery>({
-  projectId: props.selectedProjectId,
+const pageRuleOpen = ref(false);
+const pageRuleAsset = ref<Asset>();
+const pageRuleKeyword = ref<string>();
+function openPageRules(asset?: Asset, keyword?: string) {
+  pageRuleAsset.value = asset; pageRuleKeyword.value = keyword; pageRuleOpen.value = true;
+}
+async function pageRulesChanged() { clearSelection(); await refresh(); emit('changed'); }
+function defaultQuery(projectId = props.selectedProjectId): AssetQuery { return {
+  projectId,
   search: props.initialSearch ?? "",
   conditions: [],
   page: 1,
   pageSize: 50,
   includeDeleted: false,
-  deletedView: "active",
+  deletedView: props.quarantineOnly ? "all" : "active",
   probeView: props.quarantineOnly ? "blocked" : "browser_review",
   probeOutcomeView: "all",
   sentinelView: "all",
@@ -195,7 +207,20 @@ const query = ref<AssetQuery>({
   entrySeenView: "all",
   sortBy: "priority",
   sortDirection: "desc",
-});
+  collapseIdenticalResponses: !props.quarantineOnly,
+  responseFingerprint: "",
+}; }
+const stateKey = (projectId?: number) => `asset-query-v2:${props.quarantineOnly ? 'quarantine' : 'assets'}:${projectId ?? 'all'}`;
+function restoredQuery(projectId?: number): AssetQuery {
+  const defaults = defaultQuery(projectId);
+  try {
+    const saved = JSON.parse(sessionStorage.getItem(stateKey(projectId)) || 'null');
+    if (!saved || !Array.isArray(saved.conditions) || !Number.isInteger(saved.page) || saved.page < 1 || ![50,100,200].includes(saved.pageSize)) return defaults;
+    return { ...defaults, ...saved, search: props.initialSearch || saved.search || '', ...(props.quarantineOnly ? {probeView:'blocked'} : {}) };
+  } catch { return defaults; }
+}
+const query = ref<AssetQuery>(restoredQuery(props.selectedProjectId));
+watch(query, value => { try { sessionStorage.setItem(stateKey(props.selectedProjectId), JSON.stringify(value)); } catch { /* A storage quota failure must not interrupt review. */ } }, { deep:true });
 
 const selectionKey = (asset: Asset) => `${asset.projectId}:${asset.id}`;
 const selectedRows = computed(() => [...selected.value.values()]);
@@ -217,31 +242,38 @@ const selectedAll = computed({
 });
 
 watch(() => props.selectedProjectId, (projectId) => {
-  query.value.projectId = projectId;
-  query.value.page = 1;
+  query.value = restoredQuery(projectId);
   clearSelection();
   void refresh();
 });
 watch(visibleColumns, (value) => localStorage.setItem("asset-columns", JSON.stringify(value)), { deep: true });
 
+let queryGeneration = 0;
 async function refresh() {
+  cancelRowDrag();
+  const generation = ++queryGeneration;
+  const requested = JSON.parse(JSON.stringify(query.value)) as AssetQuery;
   loading.value = true;
   try {
-    const page = await assetApi.listAssets(query.value);
+    const page = await assetApi.listAssets(requested);
+    if (generation !== queryGeneration) return;
     assets.value = page.items;
     total.value = page.total;
+    memberTotal.value = page.memberTotal ?? page.total;
     summary.value = page.summary || emptySummary();
-    if (!page.items.length && page.total > 0 && query.value.page > 1) {
+    if (!page.items.length && query.value.page > 1) {
       query.value.page = Math.max(1, Math.ceil(page.total / query.value.pageSize));
-      const corrected = await assetApi.listAssets(query.value);
+      const corrected = await assetApi.listAssets({ ...requested, page:query.value.page });
+      if (generation !== queryGeneration) return;
       assets.value = corrected.items;
       total.value = corrected.total;
+      memberTotal.value = corrected.memberTotal ?? corrected.total;
       summary.value = corrected.summary || emptySummary();
     }
   } catch (error) {
-    emit("notify", "error", String(error));
+    if (generation === queryGeneration) emit("notify", "error", String(error));
   } finally {
-    loading.value = false;
+    if (generation === queryGeneration) loading.value = false;
   }
 }
 function search(eventOrClear: Event | boolean = true) {
@@ -251,6 +283,17 @@ function search(eventOrClear: Event | boolean = true) {
   void refresh();
 }
 function clearSelection() { selected.value = new Map(); }
+function responseGroupCount(asset: Asset) {
+  return Number(asset.extra?.response_display_group_count) || 1;
+}
+function showResponseMembers(asset: Asset) {
+  const fingerprint = asset.extra?.probe_response_fingerprint;
+  if (typeof fingerprint !== "string" || !/^[a-f0-9]{64}$/.test(fingerprint)) return;
+  query.value.projectId = asset.projectId;
+  query.value.responseFingerprint = fingerprint;
+  query.value.collapseIdenticalResponses = false;
+  search();
+}
 function toggleAsset(asset: Asset, checked: boolean) {
   const next = new Map(selected.value);
   if (checked) next.set(selectionKey(asset), asset);
@@ -260,6 +303,48 @@ function toggleAsset(asset: Asset, checked: boolean) {
 function onAssetCheckbox(asset: Asset, event: Event) {
   toggleAsset(asset, (event.target as HTMLInputElement).checked);
 }
+const rowDragging = ref(false);
+let rowDrag: { pointerId:number; start:number; x:number; y:number; add:boolean; before:Map<string,Asset> } | undefined;
+function rowRange(end:number) {
+  if (!rowDrag) return;
+  const next=new Map(rowDrag.before);
+  for (const asset of assets.value.slice(Math.min(rowDrag.start,end),Math.max(rowDrag.start,end)+1)) {
+    if (rowDrag.add) next.set(selectionKey(asset),asset);
+    else next.delete(selectionKey(asset));
+  }
+  selected.value=next;
+}
+function startRowDrag(event:PointerEvent, index:number) {
+  if(event.button!==0 || event.pointerType==='touch' || loading.value || bulkBusy.value) return;
+  // Title text remains selectable for rules; links, inputs and actions retain their gestures.
+  if((event.target as Element).closest('button,a,input,select,textarea,.title-rule-source')) return;
+  rowDrag={pointerId:event.pointerId,start:index,x:event.clientX,y:event.clientY,add:!selected.value.has(selectionKey(assets.value[index])),before:new Map(selected.value)};
+  window.addEventListener('pointermove',moveRowDrag);
+  window.addEventListener('pointerup',finishRowDrag);
+  window.addEventListener('pointercancel',cancelRowDrag);
+  window.addEventListener('keydown',escapeRowDrag);
+}
+function moveRowDrag(event:PointerEvent) {
+  if(!rowDrag || event.pointerId!==rowDrag.pointerId)return;
+  if(!rowDragging.value && Math.hypot(event.clientX-rowDrag.x,event.clientY-rowDrag.y)<6)return;
+  rowDragging.value=true; window.getSelection()?.removeAllRanges(); event.preventDefault();
+  const row=document.elementFromPoint(event.clientX,event.clientY)?.closest('tr[data-asset-row]');
+  if(row && row.closest('.asset-workspace')===workspace.value) rowRange(Number(row.getAttribute('data-asset-row')));
+}
+function clearDragListeners() {
+  window.removeEventListener('pointermove',moveRowDrag);window.removeEventListener('pointerup',finishRowDrag);
+  window.removeEventListener('pointercancel',cancelRowDrag);window.removeEventListener('keydown',escapeRowDrag);
+}
+function finishRowDrag(event:PointerEvent) {
+  if(!rowDrag || event.pointerId!==rowDrag.pointerId)return;
+  rowDrag=undefined; rowDragging.value=false; clearDragListeners();
+}
+function cancelRowDrag() {
+  if(rowDrag) selected.value=new Map(rowDrag.before);
+  rowDrag=undefined;rowDragging.value=false;clearDragListeners();
+}
+function escapeRowDrag(event:KeyboardEvent) { if(event.key==='Escape')cancelRowDrag(); }
+const workspace=ref<HTMLElement>();
 function setDecisionView(value: string) { query.value.decisionView = value; search(); }
 function changeProbeOutcome() {
   const outcome = query.value.probeOutcomeView || "all";
@@ -272,6 +357,8 @@ function changeProbeOutcome() {
   search();
 }
 function resetQueryFilters() {
+  query.value.responseFingerprint = "";
+  query.value.collapseIdenticalResponses = !props.quarantineOnly;
   query.value.search = "";
   query.value.conditions = [];
   query.value.probeView = props.quarantineOnly ? "blocked" : "browser_review";
@@ -282,7 +369,7 @@ function resetQueryFilters() {
   query.value.hasLoginView = "all";
   query.value.hasRegisterView = "all";
   query.value.entrySeenView = "all";
-  query.value.deletedView = "active";
+  query.value.deletedView = props.quarantineOnly ? "all" : "active";
   query.value.sortBy = "priority";
   query.value.sortDirection = "desc";
   search();
@@ -402,6 +489,7 @@ async function act(decision: "confirmed" | "uncertain") {
     const changed = await assetApi.updateAssetDecisions(selectionPayload(), decision, note);
     clearSelection();
     await refresh();
+    emit("changed");
     emit("notify", "success", decision === "confirmed"
       ? tr(`已确认 ${changed} 条有效资产，并移出待审核队列`, `${changed} assets confirmed and removed from review queue`)
       : tr(`已将 ${changed} 条标记为待补证据，继续保留在复核队列`, `${changed} assets kept in review for more evidence`));
@@ -446,6 +534,7 @@ async function archive(deleted: boolean) {
     clearSelection();
     await refresh();
     emit("notify", "success", deleted ? tr(`已将 ${changed} 条移入回收站`, `Moved ${changed} assets to trash`) : tr(`已恢复 ${changed} 条资产`, `Restored ${changed} assets`));
+    emit("changed");
   } catch (error) { emit("notify", "error", String(error)); }
   finally { bulkBusy.value = false; }
 }
@@ -490,25 +579,19 @@ function captureTitleSelection(event: MouseEvent, asset: Asset) {
   if (text.length < 2) return;
   const rect = range.getBoundingClientRect();
   const width = 360;
-  titleRuleSelection.value = { text: text.slice(0, 200), assetId: asset.id, x: Math.max(12, Math.min(window.innerWidth - width - 12, rect.left)), y: Math.max(12, Math.min(window.innerHeight - 190, rect.bottom + 7)) };
+  titleRuleSelection.value = { text: text.slice(0, 200), asset, x: Math.max(12, Math.min(window.innerWidth - width - 12, rect.left)), y: Math.max(12, Math.min(window.innerHeight - 190, rect.bottom + 7)) };
 }
 async function applyTitleRule(keyword: string) {
   if (!titleRuleSelection.value) return;
-  ruleBusy.value = true;
-  try {
-    const result = await assetApi.addContentRule(keyword, titleRuleSelection.value.assetId);
-    titleRuleSelection.value = undefined;
-    query.value.page = 1;
-    await refresh();
-    emit("notify", "success", tr(`规则已保存并重分类 ${result.matchedAssets.toLocaleString()} 个资产；当前页已刷新`, `Rule saved; ${result.matchedAssets.toLocaleString()} assets reclassified and this page refreshed`));
-  } catch (error) { emit("notify", "error", String(error)); }
-  finally { ruleBusy.value = false; }
+  openPageRules(titleRuleSelection.value.asset, keyword);
+  titleRuleSelection.value = undefined;
 }
 onMounted(refresh);
+onUnmounted(() => { ++queryGeneration; cancelRowDrag(); });
 </script>
 
 <template>
-  <section class="asset-workspace">
+  <section ref="workspace" class="asset-workspace" :class="{'row-selecting':rowDragging,'has-selection':selectedRows.length}">
     <div class="asset-summary-strip" :aria-label="tr('资产队列概览','Asset queue summary')">
       <button class="asset-summary-card summary-all" :class="{ active: query.decisionView === 'all' }" @click="setDecisionView('all')">
         <span>{{tr('当前范围','Current scope')}}</span><strong>{{summary.all.toLocaleString()}}</strong><small>{{tr('不含回收站筛选之外的数据','Matches current filters')}}</small>
@@ -545,6 +628,9 @@ onMounted(refresh);
       </div>
       <div class="asset-filter-hint"><span>{{tr('探测队列确定一级范围。登录口、注册口和是否看过可以在这里筛选，高级查询里也能按同样的值过滤。点「访问入口」打开浏览器后，这条资产会记为已看。','Probe queue sets the primary scope. Login portal, register portal and seen state can be filtered here or in advanced query. Opening a browser from Access entry marks that asset as seen.')}}</span><b v-if="query.probeOutcomeView && query.probeOutcomeView !== 'all'">{{tr('当前二次筛选：','Secondary filter: ')}}{{probeLabel(query.probeOutcomeView)}}</b></div>
       <div class="asset-toolbar-actions">
+        <label class="check-field"><input v-model="query.collapseIdenticalResponses" type="checkbox" @change="search()" />{{tr('完全相同响应仅显示一条','Show one identical response')}}</label>
+        <button class="button ghost compact" @click="openPageRules()"><ShieldBan :size="15" /> {{tr('页面隔离规则','Page rules')}}</button>
+        <button v-if="query.responseFingerprint" class="button ghost compact" @click="query.responseFingerprint='';search()">{{tr('清除响应组筛选','Clear response group')}}</button>
         <button class="button ghost compact" :class="{ active: showFilters }" @click="showFilters=!showFilters"><Filter :size="15" /> {{tr('高级查询','Advanced')}} <span v-if="query.conditions.length" class="mini-count">{{query.conditions.length}}</span></button>
         <button class="button ghost compact" :title="tr('清除搜索、探测结果和组合条件','Clear search, probe result and combined conditions')" @click="resetQueryFilters"><RotateCcw :size="14" /> {{tr('重置查询','Reset query')}}</button>
         <div class="dropdown-wrap"><button class="button ghost compact" @click="showColumns=!showColumns"><Columns3 :size="15" /> {{tr('字段','Columns')}}</button>
@@ -557,7 +643,7 @@ onMounted(refresh);
         <button class="button ghost compact" :title="tr('刷新当前结果','Refresh results')" @click="refresh"><RefreshCw :size="15" :class="{ spinning: loading }" /> {{tr('刷新','Refresh')}}</button>
         <button v-if="query.projectId&&!queryProjectArchived" class="button secondary compact" @click="emit('reprobe',query.projectId)"><RefreshCw :size="15" /> {{tr('复测现有存活','Re-probe existing')}}</button>
         <span v-else-if="queryProjectArchived" class="archived-workspace-note">{{tr('已归档 · 仅查看','Archived · view only')}}</span>
-        <button class="button secondary compact" @click="exportCurrent"><Download :size="15" /> {{tr('导出当前字段','Export columns')}}</button>
+        <button class="button secondary compact" :title="tr('导出全部匹配URL及当前字段，保留折叠组的各条来源','Export all matching URLs and selected columns, including collapsed members')" @click="exportCurrent"><Download :size="15" /> {{tr('导出全部URL · 当前字段','Export all URLs · columns')}}</button>
       </div>
     </div>
 
@@ -575,30 +661,40 @@ onMounted(refresh);
         <button class="icon-button subtle" @click="removeCondition(index)"><X :size="15" /></button>
       </div>
       <div v-if="!query.conditions.length" class="advanced-empty">{{tr('尚未添加条件','No conditions')}}</div>
-      <div class="advanced-actions"><button class="button ghost compact" @click="query.conditions=[]">{{tr('清空','Clear')}}</button><button class="button primary compact" @click="search">{{tr('应用查询','Apply')}}</button></div>
+      <p class="query-scope-note">{{tr('组合条件按从左到右计算；始终叠加上方项目、探测队列、人工结论及回收范围。查询所有等级记录时，将探测队列和人工结论切换为“全部”。','Conditions combine from left to right within the project, probe queue, decision and trash filters. Choose all probe classes and all decisions to search every tier record.')}}</p>
+      <div class="advanced-actions"><button class="button ghost compact" @click="query.conditions=[];search()">{{tr('清空','Clear')}}</button><button class="button primary compact" @click="search">{{tr('应用查询','Apply')}}</button></div>
     </div>
 
     <div v-if="selectedRows.length" class="bulk-bar">
+      <button v-if="selectedRows.length===1" :disabled="bulkBusy" @click="openPageRules(selectedRows[0])"><ShieldBan :size="15" /> {{tr('隔离此类页面','Isolate this page type')}}</button>
       <div class="bulk-context"><strong>{{tr(`已选择 ${selectedRows.length} 条`,`${selectedRows.length} selected`)}}</strong><span v-if="selectedProjectCount > 1">{{tr(`来自 ${selectedProjectCount} 个项目`,`Across ${selectedProjectCount} projects`)}}</span><span v-else>{{tr('选择会跨页保留','Selection persists across pages')}}</span></div><span class="bulk-divider"></span>
       <button class="bulk-confirm" :disabled="bulkBusy" :title="tr('确认属于有效资产；保存后从待复核队列移出','Mark valid and remove from the review queue')" @click="act('confirmed')"><Check :size="15" /><span><strong>{{tr('确认有效','Confirm valid')}}</strong><small>{{tr('移出待审核','Leave review')}}</small></span></button>
       <button class="bulk-uncertain" :disabled="bulkBusy" :title="tr('已经人工看过，但还需要补充证据；继续保留在复核队列','Reviewed but needs more evidence; keep in review')" @click="act('uncertain')"><ShieldQuestion :size="15" /><span><strong>{{tr('保留待核','Keep for review')}}</strong><small>{{tr('等待补证据','Needs evidence')}}</small></span></button>
       <label class="bulk-scan-mode" :title="tr('任务模式会固化到调查任务，确认后仍按该上限执行','The selected mode is stored with the investigation task and remains effective after confirmation')"><span>{{tr('扫描模式','Scan mode')}}</span><select v-model="assetScanMode"><option value="quick">{{tr('快速扫描','Quick')}}</option><option value="standard">{{tr('标准扫描','Standard')}}</option><option value="deep">{{tr('深度扫描','Deep')}}</option></select></label>
       <span v-if="scanningActionError" role="alert">{{scanningActionError}}</span><span v-if="props.scanningEnabled===false">{{tr('扫描插件已停用','Scanning is disabled')}}</span>
       <button class="bulk-send" :disabled="bulkBusy||props.scanningEnabled===false" @click="sendToSentinel"><Send :size="15" /> {{tr(`发起自动调查 · ${assetScanModeLabel}`,`Start investigation · ${assetScanModeLabel}`)}}</button>
-      <button v-if="query.deletedView !== 'trash'" :disabled="bulkBusy" @click="archive(true)"><Archive :size="15" /> {{tr('移入回收站','Move to trash')}}</button><button v-else :disabled="bulkBusy" @click="archive(false)"><RotateCcw :size="15" /> {{tr('恢复','Restore')}}</button>
+      <button v-if="query.deletedView !== 'trash' && !quarantineOnly" :disabled="bulkBusy" @click="archive(true)"><Archive :size="15" /> {{tr('移入回收站','Move to trash')}}</button><button v-else :disabled="bulkBusy" @click="archive(false)"><RotateCcw :size="15" /> {{tr('恢复','Restore')}}</button>
       <button class="bulk-close" :title="tr('清除选择','Clear selection')" @click="clearSelection"><X :size="15" /></button>
     </div>
 
+    <p class="row-selection-hint">{{tr('在选框旁或行内空白处按住鼠标拖过多行，再点击“确认有效”或“移入回收站”。标题文字仍可划词；拖选已选中的行可取消选择。折叠组仅操作当前展示条目，需要整组操作请先展开。','Drag from beside a checkbox or a noninteractive cell across rows, then confirm or move to trash. Title text remains selectable. Drag from a selected row to deselect. Expand response groups to select their individual URLs.')}}</p>
     <div class="table-card panel">
       <div class="table-scroll">
         <table class="asset-table">
           <colgroup><col style="width:40px" /><col v-for="column in visibleColumns" :key="column" :style="{width:`${columnWidth(column)}px`}" /></colgroup>
           <thead><tr><th class="check-cell"><input v-model="selectedAll" type="checkbox" /></th><th v-for="column in visibleColumns" :key="column" :style="{width:`${columnWidth(column)}px`}"><button class="asset-sort-heading" :class="{ sortable: sortableFields.has(column), active: query.sortBy === column }" :disabled="!sortableFields.has(column)" @click="sortColumn(column)"><span>{{columnLabel(column)}}</span><ArrowUpDown v-if="sortableFields.has(column)" :size="12" /><b v-if="query.sortBy === column">{{query.sortDirection === 'desc' ? '↓' : '↑'}}</b></button><i class="column-resizer" :title="tr('拖动调整列宽，双击恢复','Drag to resize; double-click to reset')" @pointerdown="startColumnResize($event,column)" @dblclick.stop="resetColumnWidth(column)"></i></th></tr></thead>
           <tbody>
-            <tr v-for="asset in assets" :key="`${asset.projectId}-${asset.id}`" :class="{ selected: selected.has(selectionKey(asset)), deleted: asset.isDeleted, 'entry-seen': !!asset.entryOpenedAt }">
+            <tr v-for="(asset,index) in assets" :key="`${asset.projectId}-${asset.id}`" :data-asset-row="index" @pointerdown="startRowDrag($event,index)" :class="{ selected: selected.has(selectionKey(asset)), deleted: asset.isDeleted, 'entry-seen': !!asset.entryOpenedAt }">
               <td class="check-cell"><input type="checkbox" :checked="selected.has(selectionKey(asset))" @change="onAssetCheckbox(asset,$event)" /></td>
               <td v-for="column in visibleColumns" :key="column" :class="[`col-${column}`]">
-                <button v-if="column === 'host' && entryUrl(asset)" class="asset-link" :title="entryUrl(asset)" @click="openAsset(asset)">{{ displayValue(asset,column) }}</button>
+                <span v-if="column === 'host' && entryUrl(asset)" class="asset-entry">
+                  <button class="asset-link" :title="entryUrl(asset)" @click="openAsset(asset)">{{ displayValue(asset,column) }}</button>
+                  <button v-if="responseGroupCount(asset)>1" type="button" class="asset-response-group" :title="tr('查看当前筛选内的相同响应URL，操作各成员独立生效','View identical-response URLs in the current filter; actions affect individual members')" @click="showResponseMembers(asset)">
+                    <Layers :size="11" aria-hidden="true" />
+                    <span>{{tr(`同响应 ${responseGroupCount(asset)} URL`,`${responseGroupCount(asset)} identical URLs`)}}</span>
+                    <ChevronRight :size="11" aria-hidden="true" />
+                  </button>
+                </span>
                 <button v-else-if="column === 'link' && String(value(asset,column)).startsWith('http')" class="asset-link" :title="String(value(asset,column))" @click="openLink(asset)">{{ displayValue(asset,column) }}</button>
                 <span v-else-if="['probeOutcome','reviewTier','decision','ownershipStatus','exposureEligible','contentCategory','isDeleted','hasLogin','hasRegister','entrySeen'].includes(column)" class="data-badge" :class="badgeClass(column,String(value(asset,column)))" :title="column === 'entrySeen' ? (asset.entryOpenedAt || '') : ''">{{displayValue(asset,column)}}</span>
                 <span v-else-if="column==='sentinelStatus'" class="data-badge" :class="badgeClass(column,asset.sentinelStatus)" :title="asset.sentinelSentAt||''">{{sentinelLabel(asset)}}</span>
@@ -611,8 +707,26 @@ onMounted(refresh);
         <div v-if="!loading && !assets.length" class="empty-state">{{tr('没有符合条件的资产','No matching assets')}}</div>
         <div v-if="loading" class="table-loading"><span></span><span></span><span></span></div>
       </div>
-      <footer class="pagination"><span>{{tr(`共 ${total.toLocaleString()} 条`,`${total.toLocaleString()} total`)}}</span><span v-if="selectedRows.length" class="pagination-selected">{{tr(`已跨页选择 ${selectedRows.length} 条`,`${selectedRows.length} selected across pages`)}}</span><select v-model="query.pageSize" @change="query.page=1;refresh()"><option :value="50">50 {{tr('/页','/page')}}</option><option :value="100">100 {{tr('/页','/page')}}</option><option :value="200">200 {{tr('/页','/page')}}</option></select><button :disabled="query.page<=1" @click="query.page--;refresh()"><ChevronLeft :size="16" /></button><span>{{query.page}} / {{pages}}</span><button :disabled="query.page>=pages" @click="query.page++;refresh()"><ChevronRight :size="16" /></button></footer>
+      <footer class="pagination"><span>{{tr(`共 ${total.toLocaleString()} 条`,`${total.toLocaleString()} total`)}}<small v-if="query.collapseIdenticalResponses && memberTotal>total">{{tr(`（${memberTotal.toLocaleString()} 个 URL，完全相同响应已折叠）`,` (${memberTotal.toLocaleString()} URLs, identical responses collapsed)`)}}</small></span><span v-if="selectedRows.length" class="pagination-selected">{{tr(`已跨页选择 ${selectedRows.length} 条`,`${selectedRows.length} selected across pages`)}}</span><select v-model="query.pageSize" @change="query.page=1;refresh()"><option :value="50">50 {{tr('/页','/page')}}</option><option :value="100">100 {{tr('/页','/page')}}</option><option :value="200">200 {{tr('/页','/page')}}</option></select><button :disabled="query.page<=1" @click="query.page--;refresh()"><ChevronLeft :size="16" /></button><span>{{query.page}} / {{pages}}</span><button :disabled="query.page>=pages" @click="query.page++;refresh()"><ChevronRight :size="16" /></button></footer>
     </div>
     <TitleRulePopover v-if="titleRuleSelection" :text="titleRuleSelection.text" :x="titleRuleSelection.x" :y="titleRuleSelection.y" :busy="ruleBusy" @apply="applyTitleRule" @close="titleRuleSelection=undefined" />
+    <PageIsolationDialog v-if="pageRuleOpen" :projects="projects" :asset="pageRuleAsset" :project-id="query.projectId" :keyword="pageRuleKeyword" @close="pageRuleOpen=false" @changed="pageRulesChanged" @notify="(type,text)=>emit('notify',type,text)" />
   </section>
 </template>
+
+<style scoped>
+.row-selection-hint,.query-scope-note {color:var(--muted);font-size:11px;line-height:1.7;margin:10px 0;}
+.row-selecting :deep(.asset-table) {user-select:none;cursor:crosshair;}
+.check-cell {cursor:crosshair;}
+.asset-workspace.has-selection {padding-bottom:110px;}
+.asset-workspace .bulk-bar {position:fixed;top:auto;bottom:18px;left:268px;right:24px;z-index:25;}
+:global(.sidebar-collapsed) .asset-workspace .bulk-bar {left:92px;}
+@media(max-width:1200px){.asset-workspace .bulk-bar {left:234px;}}
+@media(max-width:820px){.asset-workspace .bulk-bar {left:20px;right:20px;}}
+.asset-entry { display:flex; align-items:center; gap:6px; min-width:0; }
+.asset-entry .asset-link { flex:1 1 auto; min-width:0; text-align:left; }
+.asset-response-group { display:inline-flex; flex:0 0 auto; align-items:center; gap:3px; padding:1px 5px; border:1px solid color-mix(in srgb,var(--blue) 18%,var(--line)); border-radius:5px; background:color-mix(in srgb,var(--blue) 6%,var(--app-surface)); color:var(--blue); font-size:9px; font-weight:600; line-height:16px; white-space:nowrap; transition:background .15s,border-color .15s; }
+.asset-response-group:hover { background:color-mix(in srgb,var(--blue) 12%,var(--app-surface)); border-color:color-mix(in srgb,var(--blue) 38%,var(--line)); }
+.asset-response-group:focus-visible { outline:2px solid var(--blue); outline-offset:2px; }
+.asset-response-group svg { flex-shrink:0; }
+</style>
