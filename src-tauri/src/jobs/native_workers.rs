@@ -706,6 +706,39 @@ mod tests {
             .map(|entry| entry.path())
             .find(|path| path.extension().is_some_and(|v| v == "jsonl"))
             .unwrap();
+        // Workers may finish either one or two requests before observing the
+        // cancellation. Count the actual durable P1 records independently of
+        // the cache loader before injecting corruption; resume must reuse all
+        // and only those completed URL identities.
+        let expected_urls = [
+            format!("http://{address}/one"),
+            format!("http://{address}/two"),
+        ]
+        .into_iter()
+        .collect::<HashSet<_>>();
+        let mut persisted_urls = HashSet::new();
+        for line in fs::read_to_string(&journal).unwrap().lines() {
+            if line.trim().is_empty() {
+                continue;
+            }
+            let entry: serde_json::Value = serde_json::from_str(line)
+                .expect("every complete pre-corruption journal line must be valid JSON");
+            assert_eq!(entry["stage"], "P1");
+            assert_eq!(entry["row"]["probe_outcome"], "web_alive");
+            let url = entry["row"]["probe_input_url"]
+                .as_str()
+                .expect("persisted probe must identify its requested URL");
+            assert!(
+                expected_urls.contains(url),
+                "unexpected persisted URL: {url}"
+            );
+            assert!(
+                persisted_urls.insert(url.to_string()),
+                "duplicate persisted URL: {url}"
+            );
+        }
+        let persisted_count = persisted_urls.len();
+        assert!((1..=2).contains(&persisted_count));
         // Simulate a torn final write after a process crash.
         fs::OpenOptions::new()
             .append(true)
@@ -715,9 +748,10 @@ mod tests {
             .unwrap();
         cancel.store(false, Ordering::Relaxed);
         let result = probe_assets(&refined, &input, &output, options, &cancel, |_, _| {}).unwrap();
-        // A dynamically refilled worker may already finish an in-flight second
-        // URL when cancellation arrives. Every persisted result is reusable.
-        assert!(matches!(result["reused_results"].as_u64(), Some(1 | 2)));
+        assert_eq!(
+            result["reused_results"].as_u64(),
+            Some(persisted_count as u64)
+        );
         assert_eq!(server.join().unwrap(), 2);
         let (_, rows) = read_csv(&output.join("P1_web_alive.csv")).unwrap();
         assert_eq!(rows.len(), 2);
