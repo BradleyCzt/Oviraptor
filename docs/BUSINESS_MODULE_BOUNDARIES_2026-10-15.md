@@ -1,3 +1,6 @@
+
+> **历史阶段说明（2026-10-15 后续整合）**：本报告保留云端 `525f1283adae79a13bcf0e07cf50772841911fb0` 阶段的原始源码、结果、失败与限制。“本地源码尚未取得/整合”仅描述当时；其后传输已解除，51 项增量通过保留候选历史的 `677ad23…` merge 整合，业务修复至 `012425b…`。012 的 full02 已完整执行但因旧注册守卫 289/294 计数单项失败（3717 pass / 1 fail / 7 ignored / 0 filtered，exit101）；后续 `24179702c9d163e1d21bf9a23c4528589355166a` 仅修守卫与 allowlist 两文件，生产未动，新源最终验收须独立核对。当前事实、最终 gate 与剩余边界见[本地增量整合报告](LOCAL_INCREMENTAL_INTEGRATION_2026-10-15.md)、[最终模块与契约映射](local-incremental-20261015/final-module-contract-map.json)及[最终验证索引](local-incremental-20261015/final-verification.json)。旧结果保留不抹除，也不转作新源码接受。
+
 # 业务模块归属与第二轮验证记录 — 2026-10-15
 
 本记录说明云端模块迁移的实际实现、已执行验证和剩余阻塞，不是安装包发布声明。验收代码为 `525f1283adae79a13bcf0e07cf50772841911fb0`；Phase 1–9 的云端回归已完成真实整体验证。新 `final-native-accepted` 无过滤全量：3,602 个唯一 case 全部恰执行一次：3,595 pass、7 个原 ignored、0 fail、0 filtered；outer/command/script 均 exit 0；Rust 1555.55s / Native command 1555.78s / collector 1555.91s。最终严格索引为 `integration/verification-2026-10-15-round2.json`。本地移交包仍未取得和整合，完整用户请求仍受此阻塞；Linux/default-library 与 synthetic-IPC 验收不代替 Mac/Windows、真实桌面或安装包验收。

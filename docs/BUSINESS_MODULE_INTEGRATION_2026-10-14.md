@@ -1,4 +1,4 @@
-> Historical first-round record. Current module ownership, second-round regression and local-handoff blocker: [2026-10-15 report](BUSINESS_MODULE_BOUNDARIES_2026-10-15.md).
+> Historical first-round record. Local-source integration is now complete; current module ownership, final regression and remaining scope: [2026-10-15 local integration report](LOCAL_INCREMENTAL_INTEGRATION_2026-10-15.md). The [second-round cloud report](BUSINESS_MODULE_BOUNDARIES_2026-10-15.md) remains historical.
 
 # Business module integration — 2026-10-14
 
