@@ -231,11 +231,13 @@ fn protection_witness_cold_protocol_deletion_refuses_actual_send_without_refund(
     let restored: String = db.query_row("SELECT sql FROM sqlite_master WHERE type='trigger' AND name='root_mode_immutable_update'", [], |r|r.get(0)).unwrap();
     assert_eq!(restored, guard, "restore exact original guard before cold verification");
     let error = agent_http_exchange(&h.context, &mut runtime, &request).unwrap_err();
-    // Both real races stop before network: either the background original-birth
-    // check withdraws entry before a claim, or the send witness rejects after
-    // the one original claim has become indeterminate. Never accept an arbitrary
+    // Original-birth verification can reject this corrupted definition before
+    // a claim, either directly or through background supervision. Otherwise the
+    // send witness rejects after the original claim becomes indeterminate.
+    // Never accept an arbitrary
     // error or erase the distinction between these financial outcomes.
-    let before_claim = error == json!({"code":"evidence_write_failed","error":"worker_supervision_denied"});
+    let before_claim = error == json!({"code":"evidence_write_failed","error":"worker_supervision_denied"})
+        || error == json!({"code":"evidence_write_failed","error":"root_mode_birth_binding_changed"});
     if !before_claim {
         assert_eq!(error["phase"], "before_send", "actual cold protocol refusal: {error}");
         assert_eq!(error["code"], terminal_code::REQUEST_RECONCILIATION_REQUIRED);
