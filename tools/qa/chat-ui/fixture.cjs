@@ -15,6 +15,8 @@ module.exports = function enhanceFixture(options = {}) {
   qa.nextDirectory = '/synthetic/approved-project';
   qa.failNextAccessWrite = false;
   qa.failNextAccessRead = false;
+  qa.holdAccessWrites=false;qa.pendingAccessWrites=[];
+  qa.releaseAccessWrites=()=>{qa.holdAccessWrites=false;for(const resume of qa.pendingAccessWrites.splice(0))resume();};
   qa.accessSkills = [{id:1,name:'Synthetic saved skill',description:'Metadata only until explicitly selected and read',enabled:true},{id:2,name:'Disabled synthetic skill',description:'Not available for selection',enabled:false}];
   qa.catalogSkills=qa.accessSkills.map(skill=>({...skill,instructions:'# Synthetic instructions\n\nReview evidence within the current project.',builtin:false,createdAt:now,updatedAt:now}));
   // These are inert identities, not URLs to call or credentials to reuse.
@@ -135,7 +137,11 @@ module.exports = function enhanceFixture(options = {}) {
         value.directories.push({id:`synthetic-grant-${value.revision}`,label:input.path.split('/').at(-1),path:input.path});value.providerDisclosureAccepted=true;value.acceptedProvider=input.providerIdentity;value.revision++;
       }
       if(cmd==='revoke_conversation_directory'){value.directories=value.directories.filter(item=>item.id!==input.grantId);value.revision++;}
-      return accessSnapshot(value);
+      // Delay delivery after saving, so tests can expose old-recipient response
+      // races without changing the backend's current value or replaying a write.
+      const response=accessSnapshot(value);
+      if(qa.holdAccessWrites)await new Promise(resolve=>qa.pendingAccessWrites.push(resolve));
+      return response;
     }
     if(cmd==='plugin:opener|open_url'){qa.calls.push({cmd,args:clone(args)});qa.openedLinks.push(args.url);return;}
 
