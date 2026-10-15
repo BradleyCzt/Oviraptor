@@ -1,0 +1,110 @@
+{
+  "recordedAtUtc": "2026-10-15T14:36:55.218217+00:00",
+  "sourceHead": "34e802a6f8d4fc093efa1d3ee732daf767d0df44",
+  "scope": "Linux default-feature application library full regression plus all-targets compilation; no release package/nondefault feature combinations/macOS runtime coverage",
+  "fullSummary": {
+    "state": "ok",
+    "passed": 3821,
+    "failed": 0,
+    "ignored": 7,
+    "measured": 0,
+    "filteredOut": 0,
+    "durationSeconds": 1687.51
+  },
+  "listedCases": 3828,
+  "binarySha256": "919a724e414ced1ac04a2e9b8bcdd82558345d4ccdea823e4aa3fccd985bb170",
+  "retainedAcceptedBinary": "/workspace/validation/asset-accuracy-20261015/retained-34e802a6-accepted-full/oviraptor_lib-5e2091491b89a07c",
+  "ignoredNames": [
+    "commands::exposure::tests_g2::g2_live_github_anonymous_repository_search_once",
+    "commands::exposure::tests_g3::g3_live_public_documents_are_read_once_each",
+    "commands::exposure::tests_g4_scale::g4_4_scale_tier",
+    "commands::exposure::tests_g4_scale::rem_scale_tier_with_per_asset_projection",
+    "commands::ownership::ownership_o3_tests::scale_100000_rows_reconciles_and_reports_metrics",
+    "commands::ownership::ownership_o3_tests::scale_20000_rows_reconciles_and_reports_metrics",
+    "commands::ownership::ownership_review_o2_tests::acceptance_on_extracted_project_copy"
+  ],
+  "fullAccepted": true,
+  "independentPostVerificationAccepted": true,
+  "actualExecToolExitCode": 0,
+  "evidence": [
+    {
+      "path": "/workspace/validation/asset-accuracy-20261015/statistics-all-targets-03-result.json",
+      "sha256": "842510e52c15ef0d40b736ce2b8e3bed2f89e437fb64fafd330825326cf12130"
+    },
+    {
+      "path": "/workspace/validation/asset-accuracy-20261015/statistics-all-targets-03-entry-result.json",
+      "sha256": "1af2dd39317989042b1a140f71571dda7d8f8112deb6001067e8264ee485db89"
+    },
+    {
+      "path": "/workspace/validation/asset-accuracy-20261015/statistics-native-build-03-result.json",
+      "sha256": "3cd5a1147430c79f35e8e38b3ae8fe11610190e117b4ff4b296ba482180f599e"
+    },
+    {
+      "path": "/workspace/validation/asset-accuracy-20261015/statistics-native-build-03-entry-result.json",
+      "sha256": "68590a0ba956e8d6dc3af53e161103fbb67596d319f04f32b11aa9284f68488d"
+    },
+    {
+      "path": "/workspace/validation/asset-accuracy-20261015/statistics-native-targeted-03-result.json",
+      "sha256": "9766a62c1f3251bc293a8acb26d835e4ed212eae7b25fbc62b426a421bb4c7c0"
+    },
+    {
+      "path": "/workspace/validation/asset-accuracy-20261015/statistics-native-targeted-03-selection.json",
+      "sha256": "620d2f5770c1e36b7de278a85f168da2c64a492be09f163f6eff19c0bd852031"
+    },
+    {
+      "path": "/workspace/validation/asset-accuracy-20261015/supervisor-statistics-native-targeted-03-receipt.json",
+      "sha256": "23d6fb805164ceda4d0445c9b1c2cf4e0fafb3f75690505c011ded478d514ae7"
+    },
+    {
+      "path": "/workspace/validation/asset-accuracy-20261015/statistics-native-broker-exact-03-result.json",
+      "sha256": "2c0015013fadb9bb29bd780e047814d590453073ef73aa12292f590e40f79725"
+    },
+    {
+      "path": "/workspace/validation/asset-accuracy-20261015/statistics-native-broker-repeat-03-result.json",
+      "sha256": "5ce5db67a3c3267b475f23bd714af71cd95fd25e16802db82a33285493d524ad"
+    },
+    {
+      "path": "/workspace/validation/asset-accuracy-20261015/statistics-broker-fixed-repeat-iterations-03/repeat-result.json",
+      "sha256": "9a7fa2660014729af5894d0ba0482f37ac470a563d555cfbdd4a64d29d6e129e"
+    },
+    {
+      "path": "/workspace/validation/asset-accuracy-20261015/statistics-native-full-02-result.json",
+      "sha256": "5555bd527146281c6a54d45afe9c1740ef2885158a3005d1a021c6366e7308e6"
+    },
+    {
+      "path": "/workspace/validation/asset-accuracy-20261015/statistics-native-full-02-selection.json",
+      "sha256": "b4957a82c7aa4395c288b6c364eb4184a902059689593f233d0def38ffd0f407"
+    },
+    {
+      "path": "/workspace/validation/asset-accuracy-20261015/statistics-native-full-02-migration.json",
+      "sha256": "5b76e192895d043660ca0374a8e39701f08254d8b5b98d2c8861931414010048"
+    },
+    {
+      "path": "/workspace/validation/asset-accuracy-20261015/supervisor-statistics-native-full-02-receipt.json",
+      "sha256": "9b74663dd21ac5b40c1dd1d391cc14b2d77bfa17ccc87f581e2f72ca774a1eaa"
+    },
+    {
+      "path": "/workspace/validation/asset-accuracy-20261015/statistics-native-full-02-exec-tool-observation.json",
+      "sha256": "07216d63565455f2296132ff80223411cd31a654423340e8d4f07f23ff4b4306"
+    },
+    {
+      "path": "/workspace/validation/asset-accuracy-20261015/statistics-native-full-02-independent-post-verification.json",
+      "sha256": "ea6b5d361eed892523b82c7989c0e5253f4c82458e194e3dfd9a611ea3864470"
+    },
+    {
+      "path": "/workspace/validation/asset-accuracy-20261015/statistics-native-full-02-independent-post-snapshot.json",
+      "sha256": "8591db93cf1e8c0dba81df153c5154642d3c196e665d5f03e5655e2929b13816"
+    },
+    {
+      "path": "/workspace/validation/asset-accuracy-20261015/retained-34e802a6-accepted-full/retention-proof.json",
+      "sha256": "17c11b9f0e78ce76a107efd2b5e8cf5c2f76ff7b2ce437cb1a2fbba9611b242e"
+    }
+  ],
+  "priorFailuresRetained": [
+    "statistics-native-targeted-01-result.json",
+    "statistics-native-full-01-result.json",
+    "supervisor-statistics-native-full-01-receipt.json",
+    "retained-5b4a5b6-failed-targeted/retention-proof.json",
+    "retained-e5fed600-aborted-full/retention-proof.json"
+  ]
+}

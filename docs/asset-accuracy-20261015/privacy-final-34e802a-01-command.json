@@ -1,0 +1,19 @@
+{
+  "operation": "strict_final_privacy_scan",
+  "command": [
+    "/opt/codex/runtimes/codex-primary-runtime/dependencies/python/bin/python3",
+    "/workspace/validation/asset-accuracy-publication-20261015/package_evidence.py",
+    "privacy",
+    "--output",
+    "/workspace/validation/asset-accuracy-publication-20261015/privacy-final-34e802a-01.json"
+  ],
+  "startedAt": "2026-10-15T14:41:23.259642+00:00",
+  "durationSeconds": 9.489,
+  "outerExitCode": 0,
+  "applicationTestsExecuted": false,
+  "finalPackExecuted": false,
+  "selectedFiles": 1691,
+  "selectedBytes": 145056183,
+  "privacyCandidateCount": 0,
+  "reportSha256": "4a5d941265886dbd10c4ab206af2fb7a6668d0567ae7c6a44f566fddbb711c87"
+}

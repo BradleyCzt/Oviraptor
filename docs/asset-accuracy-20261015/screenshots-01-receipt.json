@@ -1,0 +1,21 @@
+{
+  "applicationTestsExecuted": false,
+  "archiveRoot": "asset-accuracy-20261015-screenshots-01",
+  "bytes": 17851314,
+  "claim": "Archive integrity only; original evidence retains all pass/fail/list/build meaning.",
+  "excludedEntries": 1528,
+  "frozenSourceLabel": "34e802a6f8d4fc093efa1d3ee732daf767d0df44",
+  "gitPushPerformed": false,
+  "operation": "evidence_archive_created",
+  "privacyAssessment": {
+    "candidateCount": 0,
+    "pixelReviewClaim": "No pixel review performed by this packer; consult original local visual-review records.",
+    "reviewFileSha256": null,
+    "reviewedCandidateCount": 0
+  },
+  "publicationPart": "screenshots-01",
+  "selectedSourceBytes": 18808813,
+  "selectedSourceFiles": 171,
+  "sha256": "2cdcef5af4a867e76e2d7bec69322319632f06669d26808801fff55cc976e1a3",
+  "verifiedRegularFiles": 187
+}

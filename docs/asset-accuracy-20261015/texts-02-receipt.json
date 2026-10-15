@@ -1,0 +1,21 @@
+{
+  "applicationTestsExecuted": false,
+  "archiveRoot": "asset-accuracy-20261015-texts-02",
+  "bytes": 5533507,
+  "claim": "Archive integrity only; original evidence retains all pass/fail/list/build meaning.",
+  "excludedEntries": 1501,
+  "frozenSourceLabel": "34e802a6f8d4fc093efa1d3ee732daf767d0df44",
+  "gitPushPerformed": false,
+  "operation": "evidence_archive_created",
+  "privacyAssessment": {
+    "candidateCount": 0,
+    "pixelReviewClaim": "No pixel review performed by this packer; consult original local visual-review records.",
+    "reviewFileSha256": null,
+    "reviewedCandidateCount": 0
+  },
+  "publicationPart": "texts-02",
+  "selectedSourceBytes": 18840637,
+  "selectedSourceFiles": 198,
+  "sha256": "5706e85f165f8983792457da4fed2387b6632635c3551c67a32a61db6bef4807",
+  "verifiedRegularFiles": 214
+}

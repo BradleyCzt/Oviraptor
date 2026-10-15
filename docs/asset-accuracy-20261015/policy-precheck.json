@@ -1,0 +1,43 @@
+{
+  "operation": "read_only_policy_precheck",
+  "sourceHead": "34e802a6f8d4fc093efa1d3ee732daf767d0df44",
+  "sourceTree": "adffd73fff68147aa9158397d83aa0070564f86d",
+  "sourceReview": "/workspace/validation/asset-accuracy-20261015/delivery-source-review-34e802a.json",
+  "retainedBinaries": [
+    {
+      "binaryPath": "retained-45d5434/oviraptor_lib-5e2091491b89a07c",
+      "binaryBytes": 122137128,
+      "binaryExclusion": "retained_native_executable",
+      "proofPath": "retained-45d5434/retention-proof.json",
+      "proofRetained": true
+    },
+    {
+      "binaryPath": "retained-5b4a5b6-failed-targeted/oviraptor_lib-5e2091491b89a07c",
+      "binaryBytes": 123048504,
+      "binaryExclusion": "retained_native_executable",
+      "proofPath": "retained-5b4a5b6-failed-targeted/retention-proof.json",
+      "proofRetained": true
+    },
+    {
+      "binaryPath": "retained-e5fed600-aborted-full/oviraptor_lib-5e2091491b89a07c",
+      "binaryBytes": 123064096,
+      "binaryExclusion": "retained_native_executable",
+      "proofPath": "retained-e5fed600-aborted-full/retention-proof.json",
+      "proofRetained": true
+    }
+  ],
+  "dynamicPolicyHandlesFutureRetainedDirectories": true,
+  "pausedSourcePatch": {
+    "path": "paused-wip/source-wip.patch",
+    "bytes": 126016,
+    "sha256": "c57bc18539a442dd7fbff72b2d8b50e562d563bab30cd28d199208ad872d7aa4",
+    "exclusion": "potential_url_userinfo"
+  },
+  "policySha256": "5eca837e8b3a1c6d16f1d4317c62b2f4f73f52947982cd73e41e806586c9191f",
+  "packerSha256": "43dcff9cd451c7d6550705d511b1624ddc65236ddc043a844661c8fb8fd1d39a",
+  "applicationTestsExecuted": false,
+  "fullEvidenceScanExecuted": false,
+  "finalPackExecuted": false,
+  "acceptanceStatus": "pending_complete_native_run_and_auditors",
+  "repositoryTarget": "docs/asset-accuracy-20261015"
+}
