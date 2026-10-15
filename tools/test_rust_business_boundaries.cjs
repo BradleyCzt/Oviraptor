@@ -98,7 +98,38 @@ test('Scanning keeps the actual owner scope and explicit DTO edges', () => {
 });
 
 test('asset exports share the inventory predicate and ownership fixtures verify it', () => {
-  assert.match(read('src-tauri/src/commands/asset_export.rs'), /use super::assets::\{asset_filter, asset_from_row, ASSET_SELECT\}/);
+  const exported = read('src-tauri/src/commands/asset_export.rs');
+  const assets = read('src-tauri/src/commands/assets.rs');
+  const ownerImports = [...exported.matchAll(/^\s*use\s+super::assets::([^;]+);/gm)];
+  assert.equal(ownerImports.length, 1, 'export has one narrow Assets owner import');
+  const clause = /^\{([^{}]+)\}$/.exec(ownerImports[0][1].trim());
+  assert.ok(clause, 'Assets owner import is a plain named symbol set');
+  const helpers = clause[1].split(',').map(name => name.trim()).filter(Boolean);
+  assert.ok(helpers.every(name => /^[A-Za-z_]\w*$/.test(name)), 'no aliases, glob or nested import');
+  assert.deepEqual(helpers.sort(), ['asset_filter', 'asset_from_row', 'validate_asset_query', 'ASSET_SELECT'].sort());
+  assert.doesNotMatch(exported, /^\s*use\s+(?:super|crate::commands|crate::scanning)::\s*\*/m);
+  assert.doesNotMatch(exported, /\bfn\s+(?:asset_filter|asset_from_row|validate_asset_query)\s*\(|\bconst\s+ASSET_SELECT\b/);
+  assert.match(assets, /pub\(super\)\s+fn\s+validate_asset_query\(/);
+  const exportEntry = exported.slice(exported.indexOf('pub fn export_assets('), exported.indexOf('\n#[cfg(test)]'));
+  const exportValidation = [...exportEntry.matchAll(/\bvalidate_asset_query\s*\(\s*&request\.query\s*\)\s*\?\s*;/g)];
+  assert.equal(exportValidation.length, 1, 'export uses the shared fail-closed query validator');
+  for (const effect of [/\bdb::open\s*\(/g, /\bfs::create_dir_all\s*\(/g, /\bstd::fs::OpenOptions::new\s*\(/g, /\b(?:file|writer)\s*\.\s*(?:write_all|write_record|flush)\s*\(/g]) {
+    const matches = [...exportEntry.matchAll(effect)];
+    assert.ok(matches.length > 0, `actual export boundary is present: ${effect}`);
+    assert.ok(matches.every(match => match.index > exportValidation[0].index), `validate before database/output: ${effect}`);
+  }
+  assert.match(exportEntry, /\basset_filter\s*\(\s*&request\.query\s*,\s*true\s*\)/);
+  assert.match(exportEntry, /format!\(\s*"\{ASSET_SELECT\} WHERE \{filter\}/);
+  assert.match(exportEntry, /\.query_map\s*\(\s*params_from_iter\s*\(\s*values\.iter\s*\(\s*\)\s*\)\s*,\s*asset_from_row\s*\)/);
+  const inventoryEntry = assets.slice(assets.indexOf('fn list_assets_on('), assets.indexOf('\nfn list_assets_on_read_snapshot('));
+  assert.match(inventoryEntry, /->\s*Result<AssetPage,\s*String>\s*\{\s*validate_asset_query\s*\(\s*query\s*\)\s*\?\s*;/);
+  const inventoryValidation = [...inventoryEntry.matchAll(/\bvalidate_asset_query\s*\(\s*query\s*\)\s*\?\s*;/g)];
+  assert.equal(inventoryValidation.length, 1, 'inventory reads use the same owner validator');
+  for (const readBoundary of [/\.unchecked_transaction\s*\(/g, /\blist_assets_on_read_snapshot\s*\(/g]) {
+    const matches = [...inventoryEntry.matchAll(readBoundary)];
+    assert.ok(matches.length > 0, `actual inventory read boundary is present: ${readBoundary}`);
+    assert.ok(matches.every(match => match.index > inventoryValidation[0].index), 'inventory validates before transaction/snapshot reads');
+  }
   assert.match(scanning, /#\[cfg\(test\)\]\s*use crate::commands::assets::test_support::asset_filter;/);
   assert.match(read('src-tauri/src/commands/asset_ownership.rs'), /asset_filter\(&query, true\)/);
 });
