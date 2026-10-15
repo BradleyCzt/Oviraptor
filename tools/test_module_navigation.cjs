@@ -137,7 +137,7 @@ test('fresh Chat home never starts remote worker reads or imports and explicit A
   const app=source('src/App.vue');
   const sync=app.slice(app.indexOf('async function autoSyncWorkers()'),app.indexOf('onMounted(async()=>'));
   assert.match(sync,/if\(workerAutoSyncRunning\|\|!assetWorkspaceActive\(\)\)return;/);
-  assert.ok(sync.indexOf('!assetWorkspaceActive()')<sync.indexOf('api.listWorkerNodes()'));
+  assert.ok(sync.indexOf('!assetWorkspaceActive()')<sync.indexOf('runtimeApi.listWorkerNodes()'));
   assert.match(sync,/if\(!assetWorkspaceActive\(\)\)break;/);
   assert.match(app,/if \(module === "asset"\) void autoSyncWorkers\(\)/);
   assert.doesNotMatch(sync,/saveWorker|deleteWorker|enabled\s*=/);
