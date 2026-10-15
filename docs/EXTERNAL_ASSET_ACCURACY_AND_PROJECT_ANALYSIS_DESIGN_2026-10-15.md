@@ -1,6 +1,8 @@
 # 外部资产准确性与项目分析闭环设计
 
-版本：评审稿 v1，2026-10-15。**当前只允许文档工作；收到继续通知后才恢复源码实现。**
+版本：评审稿 v1及阶段4补充，2026-10-15。**原稿已于 `6920ec9` 交付；用户随后明确授权实施阶段1–4，并要求修复聊天项目资产精确统计。阶段5–6仍未授权实施。**
+
+阶段记录：`3ab0b40` 为后端准确性候选，`45d5434` 为UI候选；该源已实际通过 all-targets、default-feature opt1 测试二进制构建和完整 Node（1,638通过、12既有跳过），尚未执行完整 Rust 行为回归。下文第2节保留的是原文档暂停时事实，不能当作现在的完成或失败结论。新增第10.3节先明确聊天统计读取合同，再恢复该部分编码；其新源必须重新冻结验收。
 
 本文以 `main 3102693abc135f4a2b986caca851bbc935378f0b` 为事实基线，tree 为 `51023994975002ef5330b8a59891441ac7a3754c`。文中“已有”指该基线的实际代码；“冻结 WIP”指独立工作树中的未提交初版；“拟议”均未实现或验收。不能把设计、测试函数的存在或历史通过数当作当前功能完成。
 
@@ -282,6 +284,25 @@ flowchart LR
 6. conversation_links 是经过项目校验的导航引用，不自动让模型读取内容。插件契约只支持 workspace 导航，不支持资产详情深链；按钮没有 targetId。`plugins/types.ts:51`、`ConversationPluginPanel.vue:38`、`store.rs::link:335,set_links:449` 是证据。
 7. 全局工作台 IPC `get_investigation_graph(scan_id,target_url)` 和 `list_investigation_hypotheses(scan_id:Option,...)` 没有会话 project_id 校验，后者可全局列出（`commands/investigation_read.rs:133,187`）。**不能直接包装成 Chat tool**，必须服务端从会话范围验证 scan 归属后再读。
 
+### 10.3 阶段4新增必修：精确项目资产统计及搜索边界
+
+用户实测问“这个项目当前有多少资产”时，旧 Chat 只调用 `assets_search` 取得20条样本，因无总数字段而声称无法统计，并以ID跨度猜测数量；状态9+6+3仅覆盖18条而未解释另2条。该行为不合理，必须在本轮修复。这是已有同项目只读能力的窄证据读取，**不是结构化AI分析、审批或自主编排**。
+
+实施合同：
+
+1. Assets owner 提供精确库存统计与同口径搜索服务，Chat 只作有界投影。复用真实 `asset_filter`、查询验证及单次 SQLite 读事务；不在 Chat 另建近似资产 SQL，不从样本或模型文本统计。计数以项目内不同 `asset_id` 成员为单位，关联及多条 Sentinel 记录不能放大计数。
+2. 新增只读 `assets_get_stats`；项目只能取后端已验证的 `conversation.project_id`。沿用 `agent_enabled`、`read_assets`、provider disclosure、endpoint/access revision、每次 dispatch 和读后 live flight 复查。模型参数不接受 project ID、SQL 或任意路径。不得把资产数字塞入无资产授权的 `project_get_context` 或自动项目上下文。
+3. 默认“项目有多少资产”指**全部未回收的原始成员**，包含尚未回收的 rejected/not_applicable；并独立给出包含回收的项目成员、未回收、回收及未知回收状态、筛选后成员。人工 rejected、not_applicable、ownership excluded、回收是不同轴，可能交叠，不能相加冒充互斥总量；页面隔离通常同时写 rejected 与回收，因此默认已排除该类。
+4. 人工决定、探测结果等分组使用固定白名单及未知/未分类兜底；每个互斥维度须可核对到相同筛选分母。空值、未知枚举、历史无探测不补造成可达或已确认。独立轴/重叠指标明确标记，不能把9+6+3当作20条全部分布。返回 `asOf` 和本次读事务范围；它描述已保存库存，不证明现在在线，也不是跨请求持久快照。
+5. 窄严格 filter DTO 复用资产列表的合法过滤及状态口径。**本轮有意把 Chat 的旧 host/title 字面搜索升级为资产列表同一八字段参数化 LIKE**（project name、company、host、link、ip、domain、title、asset_key，保留 `%`/`_` 通配规则）；工具说明、结果 `searchSemantics` 与回归须写明，不能伪称零语义变化。默认聊天统计不继承 UI 的 review/browser_review 队列或响应折叠。
+6. `assets_search` 同时返回匹配 `total`、`returned`、`limit`、`hasMore`、明确 filters/scope/排序及 `asOf`，items 与 total 在同一读快照。结果继续最多20条；稳定ID游标若提供，须绑定项目、规范化完整筛选及真实排序，跨项目/筛选变更/非法token均拒绝。游标不能承诺跨调用旧快照仍存在。不得靠增大limit或让模型遍历分页回答总数。
+7. 系统和工具说明要求数量问题优先使用精确统计；禁止用ID最大最小差推总数，样本不等于全量；权限不足或统计失败应明说，不能用0代替未知。所有返回 scalar 有长度界限、无raw body/secret，保留32,768字节完整JSON守卫和原轮次/调用预算。
+8. UI `total` 开启折叠时是展示组数，`memberTotal` 是完整筛选原始URL数，`summary.all` 刻意忽略人工决定分组。明确这三个分母，不能直接与默认全库存数字比较。读取中、失败、旧筛选快照、真实零须区分；空探测结果显示未知。保留现有默认队列、查询键和配置默认值。
+
+验收必须实际执行：临时SQLite服务与工具dispatch、fake模型中文数量问题/下一轮工具数据/最终保存；超过20条、稀疏ID、空项目、跨项目及游标、回收与人工/归属排除、重复关联、未知状态、完整同分母分布；搜索count/page同filter、与资产列表对应raw/member口径及SFC失败/零/旧快照。拒绝资产权限、provider consent、agent关闭、读取中撤权与endpoint变更仍须保留。只用临时数据和fake gateway，不访问真实provider、模型或目标。
+
+该补充的代码与测试独立提交；`45d5434` 的通过仅用于旧阶段，新提交重新check/build及完整回归，不转记旧数字。
+
 ## 11. 拟议闭环：项目证据 → 结构化分析 → 受控动作
 
 ### 11.1 项目证据读取
@@ -386,14 +407,14 @@ status / refusalOrFailureCode / usage / createdAt / completedAt
 
 ## 16. 实施顺序、分批提交与验收
 
-**阶段0：当前文档阶段。** 只提交/交付本文及历史差距页说明；保留全部源码 WIP。收到明确继续通知前，不补缺失模块、不修编译、不继续新增测试代码。
+**阶段0：历史文档冻结。** 原稿已交付，用户现已明确要求继续阶段1–4；阶段4加入第10.3节精确统计与只读搜索修复，阶段5–6保持拟议。原冻结WIP与来源快照继续保留。
 
 | 后续阶段 | 最小目标 | 实施边界 | 通过条件 |
 | --- | --- | --- | --- |
 | 1 | 恢复在途接线；覆盖真实性和输入拒收闭环 | 原collector/receipt/summary，无新增来源/扫描 | short/unknown/changed total、上限、错误、无效记录均正确；不会错误missing；SQLite/UI摘要一致 |
 | 2 | 协议身份、旧 key 兼容、独立观测时间 | 原identity/import及最小迁移 | 不误合并；重放/倒序不刷新或覆盖事实；人工/回收/规则效果保留 |
 | 3 | 精确归属、来源冲突及有界证据 | 原ownership和receipt存储，明确预算范围 | www/裸域精确；弱线索无授权；目录迁移幂等；存储/清理不无界、不逃目录 |
-| 4 | UI真实性与同项目证据视图 | Assets DTO/详情/窄读取port | 覆盖、时间、候选/确认不混淆；跨项目和截断透明；新旧数据均可读 |
+| 4 | UI真实性、精确项目库存统计与同项目窄读取 | Assets DTO/查询服务、Chat受权只读tools与现有UI | 精确total/unknown/回收与排除口径；搜索分页不猜数量；跨项目/撤权拒绝；UI分母及读取失败透明；真实SQLite/fake模型/SFC回归 |
 | 5 | 结构化只读分析与持久快照 | 复用Chat受控循环和model gateway | schema/refs/范围验证，失败不假成功；证据与模型来源可复核；不派发动作 |
 | 6 | 审批后复用既有编排、结果回会话 | 窄proposal适配现有owner，不新建executor | CAS、授权、预算、幂等、重启/未知结果/取消均真实；无需直写底层runtime表 |
 
@@ -427,4 +448,4 @@ status / refusalOrFailureCode / usage / createdAt / completedAt
 6. 现有主动probe的范围/重定向准入，以及模型配置层fallback保留独立审查；本轮不暗改默认值或将其描述为已闭合。
 7. 结构化分析/证据快照/审批/执行桥和详情深链都是拟议能力；现有项目感知与只读工具循环则应直接复用，不再重复建设。
 
-本文是后续工作的评审依据。当前停在文档交付，所有已有源码WIP保留，收到继续通知后才恢复业务修改、编译和回归。
+本文是后续工作的评审依据。原稿冻结事实保留；用户已要求继续阶段1–4及第10.3节修复，按独立提交与新源码冻结结果验收，不合并main。
