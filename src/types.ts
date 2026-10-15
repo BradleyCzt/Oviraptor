@@ -5,6 +5,7 @@ export type * from "./features/environment/types";
 export type * from "./features/hackerone/types";
 export type * from "./features/runtime/types";
 export type * from "./features/sentinel/types";
+export type * from "./features/sentinel/rulePacksTypes";
 export type * from "./features/skills/catalogTypes";
 export type * from "./features/workspaces/types";
 export type * from "./shell/types";

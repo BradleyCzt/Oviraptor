@@ -55,14 +55,28 @@ function mount(overrides = {}, storageSeed = {}) {
   } });
   const stored=new Map(Object.entries(storageSeed));
   const storage = { getItem: key => stored.get(key)??null, setItem(key,value){stored.set(key,value);}, removeItem(key){stored.delete(key);} };
-  const i18n = {};
-  new Function('require', 'exports', 'localStorage', transpile(
-    fs.readFileSync(path.join(__dirname, '../src/i18n.ts'), 'utf8'),
-  ))(require, i18n, storage);
+  function loadI18nResource(filename) {
+    const result = {};
+    new Function('require', 'exports', 'localStorage', transpile(fs.readFileSync(filename, 'utf8')))(
+      (name) => name.startsWith('.')
+        ? loadI18nResource(path.resolve(path.dirname(filename), `${name}.ts`))
+        : require(name), result, storage,
+    );
+    return result;
+  }
+  const i18n = loadI18nResource(path.join(__dirname, '../src/i18n.ts'));
   const exports = {};
   new Function('require', 'exports', 'localStorage', 'setTimeout', appSource.script)((name) => {
     if (name === 'vue') return { ...vue, onMounted() {} };
-    if (name === './api') return { api };
+    if (name === './shell/api') return { shellApi: api };
+    if (name === './features/hackerone/api') return { hackerOneApi: api };
+    if (name === './features/workspaces/api') return { workspaceApi: api };
+    if (name === './features/configuration/api') return { configurationApi: api };
+    if (name === './features/environment/api') return { environmentApi: api };
+    if (name === './features/runtime/api') return { runtimeApi: api };
+    if (name === './features/sentinel/remoteWorkerApi') return { remoteScanningApi: api };
+    if (name === './features/assets/api') return { assetApi: api };
+    if (name === './features/sentinel/api') return { sentinelApi: api };
     if (name === './plugins') return plugins;
     if (name === './shell/builtinWorkspaces') return {BUILTIN_WORKSPACES:{asset:()=>null,sentinel:()=>null,hackerone:()=>null}};
     if (name === './shell/moduleCatalog') return catalog;

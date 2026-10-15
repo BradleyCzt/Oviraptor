@@ -93,6 +93,32 @@ test('feature-owned type contracts never depend on the legacy aggregate type fac
     'legacy types.ts must stay a type-only compatibility facade');
 });
 
+test('internal features consume explicit owners instead of aggregate API or type compatibility exports', () => {
+  const facades = new Set(['src/api.ts', 'src/types.ts']);
+  const violations = [];
+  for (const [filename, edges] of graph) {
+    if (!relative(filename).startsWith('src/features/')) continue;
+    for (const edge of edges) if (edge.target && facades.has(relative(edge.target)))
+      violations.push(`${relative(filename)} -> ${relative(edge.target)}`);
+  }
+  assert.deepEqual(violations, []);
+});
+
+test('project and Worker core APIs do not import scanning execution or unrelated configuration owners', () => {
+  const allowed = {
+    'src/features/workspaces/api.ts': new Set(['src/features/workspaces/types.ts']),
+    'src/features/runtime/api.ts': new Set(['src/features/runtime/types.ts', 'src/features/environment/types.ts']),
+  };
+  const violations = [];
+  for (const [filename, edges] of graph) {
+    const permitted = allowed[relative(filename)];
+    if (!permitted) continue;
+    for (const edge of edges) if (edge.target && !permitted.has(relative(edge.target)))
+      violations.push(`${relative(filename)} -> ${relative(edge.target)}`);
+  }
+  assert.deepEqual(violations, []);
+});
+
 test('the startup eager graph cannot mount business workspaces before explicit navigation', () => {
   const visited = new Set();
   function visit(filename) {

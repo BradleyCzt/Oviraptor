@@ -13,6 +13,8 @@ export interface AssetOwnershipDecisionExpectation {
 }
 
 export const assetApi = {
+  acknowledgeInterruptedRun: (runId: number) =>
+    invoke<void>("acknowledge_interrupted_run", { runId }),
   importTargets: (projectId: number, targetType: string, values: string[]) =>
     invoke<number>("import_targets", { input: { projectId, targetType, values } }),
   listTargets: (projectId: number) => invoke<Target[]>("list_targets", { projectId }),

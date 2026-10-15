@@ -115,7 +115,7 @@ async function mount(deleteResult = async () => {}, extraApi = {}, environment =
   const exports = {};
   new Function('require', 'exports', 'window', 'sessionStorage', 'document', board.script)((name) => {
     if (name === 'vue') return vue;
-    if (name === '../../../api') return { api };
+    if (name === '../api') return { sentinelApi: api };
     if (name === '../../../i18n') return { useI18n: () => ({ tr: (zh) => zh }) };
     if (name === '../presentation') return presentation;
     if (name === '../fuse/presentation') return fusePresentation;

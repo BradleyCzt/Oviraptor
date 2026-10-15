@@ -1,5 +1,5 @@
 import { onBeforeUnmount, ref, watch } from "vue";
-import { api } from "../../api";
+import { assetApi } from "./api";
 import type { LogEntry } from "./types";
 import { useCommittedRefresh } from "../../composables/useCommittedRefresh";
 
@@ -18,7 +18,7 @@ export function useAssetLogPanel(project: () => number | undefined, active: () =
     const current = () => !disposed && request === generation && scope === key();
     loading.value = true;
     try {
-      const rows = await api.listLogs(undefined, 300, project());
+      const rows = await assetApi.listLogs(undefined, 300, project());
       if (!current()) return;
       if (!Array.isArray(rows) || rows.length > 300 || rows.some((row, index) =>
         !row || !Number.isSafeInteger(row.id) || row.id < 1

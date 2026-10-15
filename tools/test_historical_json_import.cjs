@@ -62,11 +62,13 @@ async function mount({ picker = async () => '/chosen/history.json', importFile =
     if (name === 'vue') return vue;
     if (name === '@tauri-apps/plugin-dialog') return { open: options => { pickerCalls.push(options); return picker(options); } };
     if (name === '../api') return { sentinelApi: api };
+        if (name === '../../skills/catalogApi') return { knowledgeCatalogApi: api };
     throw new Error(`Unexpected child import ${name}`);
   }, bindings => { childBindings = bindings; });
   const parent = component('SentinelTaskCenter.vue', name => {
     if (name === 'vue') return vue;
     if (name === '../api') return { sentinelApi: api };
+        if (name === '../../skills/catalogApi') return { knowledgeCatalogApi: api };
     if (name === '../results/taskPageContract') {
       const contract = {};
       new Function('exports', transpile(fs.readFileSync(path.join(__dirname,
@@ -79,6 +81,7 @@ async function mount({ picker = async () => '/chosen/history.json', importFile =
       new Function('require', 'exports', transpile(source))((dependency) => {
         if (dependency === 'vue') return vue;
         if (dependency === '../api') return { sentinelApi: api };
+        if (dependency === '../../skills/catalogApi') return { knowledgeCatalogApi: api };
         if (dependency === './useLiveRunnerLog') return { useLiveRunnerLog() {} };
         if (['../results/historicalPreviewContract', './historicalPreviewContract'].includes(dependency)) return historicalContract;
         throw new Error(`Unexpected business module import ${dependency}`);

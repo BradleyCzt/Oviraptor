@@ -17,8 +17,8 @@ const visibleSkills = computed(() => skills.value.filter(skill => !props.exclude
 <template>
   <div class="skills-toolbar">
     <div>
-      <span class="eyebrow">{{standalone?'SAVED INSTRUCTIONS':'NEST SKILLS'}}</span>
-      <h3>{{ standalone?tr("文本指令", "Text instructions"):tr("扫描技能", "Scan skills") }}</h3>
+      <span class="eyebrow">SAVED INSTRUCTIONS</span>
+      <h3>{{ standalone?tr("文本指令", "Text instructions"):tr("技能指令", "Skill instructions") }}</h3>
       <p>{{ standalone?tr("创建或导入现有文本指令。技能包在上方管理，不在此编辑。", "Create or import existing text instructions. Package skills are managed above and cannot be edited here."):tr("每个任务自行选择 Skill；代码审计不会再默认加载“业务前端深度分析”。", "Each task chooses its own skills; code audit no longer forces the frontend skill.") }}</p>
     </div>
     <div>
@@ -72,7 +72,7 @@ const visibleSkills = computed(() => skills.value.filter(skill => !props.exclude
         <span>Objective → Scope → Analysis workflow → Output requirements</span>
         <p>{{ tr("写清检查目标、包含/排除范围、验证步骤和输出字段。不要在 Skill 中要求跳过授权边界、批量破坏或把普通信息当漏洞。", "Define objective, include/exclude scope, verification steps, and output fields. Do not request scope bypass, destructive bulk actions, or ordinary observations as vulnerabilities.") }}</p>
       </div>
-      <label class="field span-two"><span>{{ standalone?tr("指令内容", "Instructions"):tr("传给 Nest 的指令", "Instructions sent to Nest") }}</span>
+      <label class="field span-two"><span>{{ standalone?tr("指令内容", "Instructions"):tr("任务选用的指令", "Instructions selected by a task") }}</span>
         <textarea v-model="skillForm.instructions" rows="16" :placeholder="tr('点击“插入规范模板”开始填写', 'Use Insert template to start')"></textarea>
       </label>
       <div class="skill-preview span-two">

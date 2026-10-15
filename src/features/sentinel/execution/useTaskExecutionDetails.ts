@@ -2,6 +2,7 @@ import { onBeforeUnmount, ref, watch } from "vue";
 import type { AgentAttemptMailboxPage, AgentAttemptToolPage, HistoricalImportPreview, NativeScanStatus, SentinelRunnerLogView, SentinelScan, SentinelScanAttempt } from "../types";
 import type { AgentKnowledgeEntry, AgentLearningCandidate } from "../../skills/catalogTypes";
 import { sentinelApi } from "../api";
+import { knowledgeCatalogApi } from "../../skills/catalogApi";
 import { validateHistoricalPreviews } from "../results/historicalPreviewContract";
 import { useLiveRunnerLog } from "./useLiveRunnerLog";
 
@@ -174,9 +175,9 @@ export function useTaskExecutionDetails(props: { readonly preview?: SentinelScan
       }, "执行历史暂时不可读取"),
       // Draft or non-Web tasks may not have a Native run; absence is not a history error.
       readDetail(() => sentinelApi.getNativeScanStatus(scanId), (value) => { nativeStatus.value = value; }),
-      readDetail(() => sentinelApi.listAgentLearningCandidates(undefined, scanId),
+      readDetail(() => knowledgeCatalogApi.listAgentLearningCandidates(undefined, scanId),
         (value) => { learningCandidates.value = value; }, "学习候选暂时不可读取"),
-      readDetail(() => sentinelApi.listAgentKnowledge(scanId),
+      readDetail(() => knowledgeCatalogApi.listAgentKnowledge(scanId),
         (value) => { knowledge.value = value; }, "知识记录暂时不可读取"),
       readDetail(() => sentinelApi.listHistoricalImportPreviews(scanId),
         (value) => { historicalPreviews.value = validateHistoricalPreviews(value, scanId); }, "历史导入预览暂时不可读取"),

@@ -11,9 +11,10 @@ import {
   Trash2,
 } from "@lucide/vue";
 import ModalShell from "../../../shared/components/ModalShell.vue";
-import { api } from "../../../api";
+import { configurationApi } from "../api";
+import { scanningRulePacksApi } from "../../sentinel/rulePacksApi";
 import type { ConfigProfile } from "../types";
-import type { SecurityRulePack } from "../../skills/catalogTypes";
+import type { SecurityRulePack } from "../../sentinel/rulePacksTypes";
 import { useI18n } from "../../../i18n";
 
 const props = defineProps<{ profile?: ConfigProfile }>();
@@ -284,7 +285,7 @@ async function testActiveAgentProfile() {
   modelTestStatus.value = "idle";
   modelTestMessage.value = "";
   try {
-    const result = await api.testModelProfile({
+    const result = await configurationApi.testModelProfile({
       llm: profile.llm.trim(),
       deployment: profile.deployment,
       apiBase: profile.apiBase.trim(),
@@ -307,7 +308,7 @@ async function testFofaApi() {
   fofaTestStatus.value = "idle";
   fofaTestMessage.value = "";
   try {
-    const result = await api.testFofaApi({
+    const result = await configurationApi.testFofaApi({
       key: String(form.settings.fofaKey || "").trim(),
       proxyUrl: String(form.settings.proxyUrl || "").trim(),
     });
@@ -416,13 +417,13 @@ function ruleStatus(pack?: SecurityRulePack) {
 }
 async function loadRulePacks() {
   try {
-    rulePacks.value = await api.listSecurityRulePacks();
+    rulePacks.value = await scanningRulePacksApi.listSecurityRulePacks();
   } catch (reason) {
     error.value = String(reason);
   }
 }
 async function persistRulePack(definition: (typeof ruleDefinitions)[number]) {
-  return api.saveSecurityRulePack({
+  return scanningRulePacksApi.saveSecurityRulePack({
     key: definition.key,
     name: definition.name,
     engine: definition.engine,
@@ -437,7 +438,7 @@ async function syncRulePack(definition: (typeof ruleDefinitions)[number]) {
   ruleMessage.value = "";
   try {
     const id = await persistRulePack(definition);
-    await api.syncSecurityRulePack(id);
+    await scanningRulePacksApi.syncSecurityRulePack(id);
     ruleMessage.value = `${definition.name} ${tr("已进入后台同步", "is syncing in the background")}`;
     for (let attempt = 0; attempt < 600; attempt += 1) {
       await new Promise((resolve) => setTimeout(resolve, 700));
@@ -479,7 +480,7 @@ async function save() {
       }
     }
     await Promise.all(ruleDefinitions.map(persistRulePack));
-    const id = await api.saveProfile({
+    const id = await configurationApi.saveProfile({
       id: props.profile?.id && props.profile.id > 0 ? props.profile.id : undefined,
       ...form,
     });

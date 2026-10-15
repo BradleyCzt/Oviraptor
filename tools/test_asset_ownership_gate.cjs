@@ -23,7 +23,8 @@ const transpile = source => ts.transpileModule(source, {
 function compileGate(api) {
   const requireModule = name => {
     if (name === 'vue') return vue;
-    if (name === '../../../api') return { api };
+    if (name === '../api') return { assetApi: api };
+    if (name === '../ownershipDirectoryApi') return { ownershipAuthorizationApi: api };
     if (name === '@lucide/vue') return new Proxy({}, { get: () => () => null });
     if (name.endsWith('.css')) return {};
     // Child panels (e.g. the O1 project setup card) are outside this O0 gate test; they are

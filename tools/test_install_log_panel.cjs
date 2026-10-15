@@ -26,7 +26,7 @@ async function mount(options = {}) {
     module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022,
   } }).outputText)(name => {
     if (name === 'vue') return vue;
-    if (name === '../runtime/api') return { runtimeApi: { listEnvironmentInstallLogs: listing } };
+    if (name === './api') return { environmentApi: { listEnvironmentInstallLogs: listing } };
     if (name === '@tauri-apps/api/event') return { listen: async (channel, callback) => {
       assert.equal(channel, 'environment-install-log'); subscriptions++;
       if (options.registration) await options.registration;

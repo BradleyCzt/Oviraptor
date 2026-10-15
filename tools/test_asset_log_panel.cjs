@@ -20,7 +20,7 @@ async function mount(read = snapshot, options = {}) {
   } }).outputText)(name => {
     if (name === 'vue') return vue;
     if (name === '../../composables/useCommittedRefresh') return live.committed;
-    if (name === '../../api') return { api: { listLogs: async (...args) => { calls.push(args); return read(...args); } } };
+    if (name === './api') return { assetApi: { listLogs: async (...args) => { calls.push(args); return read(...args); } } };
     throw Error(`Unexpected asset panel import ${name}`);
   }, exports);
   const selection = vue.reactive({ project: 10, active: true });

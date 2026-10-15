@@ -84,7 +84,8 @@ async function mount(handlers = {}, realParent = false) {
   } });
   new Function('require', 'exports', transpile(script.content))(name => {
     if (name === 'vue') return vue;
-    if (name === '../../../api') return { api };
+    if (name === '../api') return { sentinelApi: api };
+    if (name === '../reconciliation/api') return { rootCostReconciliationApi: api };
     if (name === '../../../i18n') return { useI18n: () => ({ tr: zh => zh }) };
     if (name === '../reconciliation/contract') return contracts.contract;
     if (name === '../reconciliation/continuation') return contracts.continuation;
@@ -117,7 +118,8 @@ function loadRealParent(api, costChild) {
   const live = require('./live_runner_log_harness.cjs').liveLogHarness({ channel: 'nest://collaboration-event' });
   new Function('require', 'exports', transpile(s.content))(name => {
     if (name === 'vue') return vue;
-    if (name === '../../../api') return { api };
+    if (name === '../api') return { sentinelApi: api };
+    if (name === '../reconciliation/api') return { rootCostReconciliationApi: api };
     if (name === '../../../i18n') return { useI18n: () => ({ tr: zh => zh }) };
     if (name === './nativeRunStatusLabels') return labels;
     if (name === '../../../composables/useCommittedRefresh') return live.committed;

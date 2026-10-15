@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from "vue";
 import { FileText, Play, Plus, Trash2, UploadCloud } from "@lucide/vue";
-import { api } from "../../../api";
+import { assetApi } from "../api";
 import type { ConfigProfile } from "../../configuration/types";
 import type { Project } from "../../workspaces/types";
 import type { Target } from "../types";
@@ -17,7 +17,7 @@ const targetType = ref("auto"); const input = ref(""); const pipeline = ref("ful
 const jobName = ref(`资产采集 ${new Date().toLocaleDateString()}`); const targets = ref<Target[]>([]); const busy = ref(false);
 const lines = computed(() => input.value.split(/\r?\n/).map(v => v.trim()).filter(v => v && !v.startsWith("#")));
 
-async function refreshTargets() { targets.value = projectId.value ? await api.listTargets(projectId.value) : []; }
+async function refreshTargets() { targets.value = projectId.value ? await assetApi.listTargets(projectId.value) : []; }
 watch(() => props.selectedProjectId, value => { projectId.value = activeProjects.value.find(project=>project.id===value)?.id ?? activeProjects.value[0]?.id; });
 watch(() => props.projects, values => {
   const active=values.filter(project=>project.status!=="archived");
@@ -35,11 +35,11 @@ onMounted(refreshTargets);
 async function addTargets() {
   if (!projectId.value || !lines.value.length) return;
   try {
-    const count = await api.importTargets(projectId.value, targetType.value, lines.value);
+    const count = await assetApi.importTargets(projectId.value, targetType.value, lines.value);
     input.value = ""; await refreshTargets(); emit("notify", "success", tr(`已新增 ${count} 个目标`, `${count} targets added`));
   } catch (error) { emit("notify", "error", String(error)); }
 }
-async function removeTarget(id: number) { await api.removeTarget(id); await refreshTargets(); }
+async function removeTarget(id: number) { await assetApi.removeTarget(id); await refreshTargets(); }
 async function loadFile(event: Event) {
   const file = (event.target as HTMLInputElement).files?.[0]; if (!file) return;
   input.value = await file.text(); (event.target as HTMLInputElement).value = "";
@@ -50,7 +50,7 @@ async function start() {
   if (!targets.value.length) { emit("notify", "error", tr("请先添加查询目标", "Add at least one target")); return; }
   busy.value = true;
   try {
-    const runId = await api.startJob(projectId.value, profileId.value, jobName.value, pipeline.value);
+    const runId = await assetApi.startJob(projectId.value, profileId.value, jobName.value, pipeline.value);
     emit("started", runId); emit("notify", "success", tr(`任务 #${runId} 已启动`, `Job #${runId} started`));
   } catch (error) { emit("notify", "error", String(error)); }
   finally { busy.value = false; }

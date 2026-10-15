@@ -7,7 +7,7 @@ const { loadWorkspaceModule } = require('./result_component_harness.cjs');
 test('identity material preserves plaintext, escapes HTML and fences late task replies', async () => {
   const replies = [];
   const component = loadWorkspaceModule('src/features/sentinel/components/AgentIdentityMaterial.vue', {
-    '../../../api': { api: { getSentinelScanIdentityMaterial(project, scan) {
+    '../api': { sentinelApi: { getSentinelScanIdentityMaterial(project, scan) {
       return new Promise(resolve => replies.push({ project, scan, resolve }));
     } } },
   }).default;

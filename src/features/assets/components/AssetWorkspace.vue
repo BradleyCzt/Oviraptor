@@ -17,7 +17,8 @@ import {
   X,
 } from "@lucide/vue";
 import { openUrl } from "@tauri-apps/plugin-opener";
-import { api } from "../../../api";
+import { assetApi } from "../api";
+import { sentinelApi } from "../../sentinel/api";
 import type { Asset, AssetQuery, AssetSelection, AssetSummary, FilterCondition } from "../types";
 import type { Project } from "../../workspaces/types";
 import { useI18n } from "../../../i18n";
@@ -226,13 +227,13 @@ watch(visibleColumns, (value) => localStorage.setItem("asset-columns", JSON.stri
 async function refresh() {
   loading.value = true;
   try {
-    const page = await api.listAssets(query.value);
+    const page = await assetApi.listAssets(query.value);
     assets.value = page.items;
     total.value = page.total;
     summary.value = page.summary || emptySummary();
     if (!page.items.length && page.total > 0 && query.value.page > 1) {
       query.value.page = Math.max(1, Math.ceil(page.total / query.value.pageSize));
-      const corrected = await api.listAssets(query.value);
+      const corrected = await assetApi.listAssets(query.value);
       assets.value = corrected.items;
       total.value = corrected.total;
       summary.value = corrected.summary || emptySummary();
@@ -398,7 +399,7 @@ async function act(decision: "confirmed" | "uncertain") {
   bulkBusy.value = true;
   const note = decision === "confirmed" ? "人工确认：保留在有效资产范围" : "人工待定：需要补充归属、可访问性或业务价值证据";
   try {
-    const changed = await api.updateAssetDecisions(selectionPayload(), decision, note);
+    const changed = await assetApi.updateAssetDecisions(selectionPayload(), decision, note);
     clearSelection();
     await refresh();
     emit("notify", "success", decision === "confirmed"
@@ -426,7 +427,7 @@ async function sendToSentinel() {
     const scans = [];
     for (const [projectId, ids] of groups) {
       if(!current())return;
-      scans.push(await api.createSentinelScan(projectId, [...new Set(ids)], assetScanMode.value));
+      scans.push(await sentinelApi.createSentinelScan(projectId, [...new Set(ids)], assetScanMode.value));
     }
     if(!current())return;
     localStorage.setItem("asset-agent-scan-mode", assetScanMode.value);
@@ -441,7 +442,7 @@ async function archive(deleted: boolean) {
   if (!selectedRows.value.length || bulkBusy.value) return;
   bulkBusy.value = true;
   try {
-    const changed = await api.softDeleteAssetSelections(selectionPayload(), deleted);
+    const changed = await assetApi.softDeleteAssetSelections(selectionPayload(), deleted);
     clearSelection();
     await refresh();
     emit("notify", "success", deleted ? tr(`已将 ${changed} 条移入回收站`, `Moved ${changed} assets to trash`) : tr(`已恢复 ${changed} 条资产`, `Restored ${changed} assets`));
@@ -450,7 +451,7 @@ async function archive(deleted: boolean) {
 }
 async function exportCurrent() {
   try {
-    const result = await api.exportAssets(query.value, visibleColumns.value, true);
+    const result = await assetApi.exportAssets(query.value, visibleColumns.value, true);
     emit("notify", "success", tr(`已导出 ${result.rows} 条：${result.path}`, `Exported ${result.rows} rows: ${result.path}`));
   } catch (error) { emit("notify", "error", String(error)); }
 }
@@ -473,7 +474,7 @@ async function openAsset(asset: Asset) {
     return;
   }
   try {
-    const openedAt = await api.markAssetEntryOpened(asset.projectId, asset.id);
+    const openedAt = await assetApi.markAssetEntryOpened(asset.projectId, asset.id);
     stampEntryOpened(asset, openedAt);
   } catch (error) {
     emit("notify", "error", String(error));
@@ -495,7 +496,7 @@ async function applyTitleRule(keyword: string) {
   if (!titleRuleSelection.value) return;
   ruleBusy.value = true;
   try {
-    const result = await api.addContentRule(keyword, titleRuleSelection.value.assetId);
+    const result = await assetApi.addContentRule(keyword, titleRuleSelection.value.assetId);
     titleRuleSelection.value = undefined;
     query.value.page = 1;
     await refresh();

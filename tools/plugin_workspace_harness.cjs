@@ -30,7 +30,7 @@ function mountWorkspace(t,kind='asset',overrides={},initialProps={}){
   if(name==='@lucide/vue')return new Proxy({}, {get:()=>()=>null});
   if(name==='@tauri-apps/api/event')return{listen:overrides.listen||(async(event,callback)=>{const sub={event,callback,stopped:false};subscriptions.push(sub);return()=>{sub.stopped=true;};})};
   if(name==='../api')return{assetApi:api,sentinelApi:api,hackerOneApi:api};
-  if(name==='../../workspaces/api')return{workspaceApi:api};
+  if(name==='../../../shell/api')return{shellApi:api};
   if(name==='../useAssetLogPanel')return{useAssetLogPanel:()=>({logs:vue.ref([]),loading:vue.ref(false),readFailed:vue.ref(false),connectionUnavailable:vue.ref(false),refresh:async()=>{calls.push(['refreshAssetLogs']);}})};
   if(name==='../execution/useRunnerLogPanel')return{useRunnerLogPanel:()=>logState};
   if(name==='../presentation')return{humanizeScanCheckpoint:value=>value};
@@ -53,7 +53,8 @@ function mountLegacyAssets(t,overrides={}){
  const exports={},storage={getItem:()=>null,setItem(){}};
  new Function('require','exports','localStorage',compiled.script)(name=>{
   if(name==='vue')return{...vue,onMounted(){}};
-  if(name==='../../../api')return{api};
+  if (name === '../api') return { assetApi: api };
+    if (name === '../../sentinel/api') return { sentinelApi: api };
   if(name==='../../../i18n')return{useI18n:()=>({tr:(_zh,en)=>en})};
   if(name==='@lucide/vue')return new Proxy({}, {get:()=>()=>null});
   if(name==='@tauri-apps/plugin-opener')return{openUrl:async()=>{}};

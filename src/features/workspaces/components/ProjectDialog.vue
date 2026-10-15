@@ -2,7 +2,7 @@
 import { reactive, ref } from "vue";
 import { FolderPlus } from "@lucide/vue";
 import ModalShell from "../../../shared/components/ModalShell.vue";
-import { api } from "../../../api";
+import { workspaceApi } from "../api";
 import type { Project } from "../types";
 import { useI18n } from "../../../i18n";
 
@@ -17,7 +17,7 @@ async function save() {
   if (!form.name.trim()) { error.value = tr("请输入工作空间名称", "Enter a workspace name"); return; }
   busy.value = true; error.value = "";
   try {
-    const id = await api.saveProject({ id: props.project?.id, name: form.name, description: form.description });
+    const id = await workspaceApi.saveProject({ id: props.project?.id, name: form.name, description: form.description });
     emit("saved", id);
   } catch (reason) { error.value = String(reason); }
   finally { busy.value = false; }

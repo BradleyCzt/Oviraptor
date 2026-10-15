@@ -81,32 +81,32 @@ async function mount(overrides = {}, initialProps = {}, host = {}) {
   const handoffExports = {};
   new Function('require', 'exports', compiledHandoff)((name) => {
     if (name === 'vue') return vue;
-    if (name === '../../../api') return { api };
+    if (name === '../api') return { sentinelApi: api };
     throw new Error(`Unexpected handoff import: ${name}`);
   }, handoffExports);
   const authExports = {};
   new Function('require', 'exports', compiledAuth)((name) => {
     if (name === 'vue') return vue;
-    if (name === '../../../api') return { api };
+    if (name === '../api') return { sentinelApi: api };
     if (name === '@tauri-apps/api/event') return { listen: host.listen || (async () => () => {}) };
     throw new Error(`Unexpected browser auth import: ${name}`);
   }, authExports);
   const skillsExports = {};
   new Function('require', 'exports', compiledSkills)((name) => {
     if (name === 'vue') return vue;
-    if (name === './catalogApi') return { skillCatalogApi: api };
+    if (name === './catalogApi') return { instructionCatalogApi: api, knowledgeCatalogApi: api };
     if (name === '@tauri-apps/plugin-dialog') return { open: host.open || (async () => null) };
     throw new Error(`Unexpected skills import: ${name}`);
   }, skillsExports);
   const followupExports = {};
   new Function('require', 'exports', compiledFollowup)((name) => {
     if (name === 'vue') return vue;
-    if (name === '../../../api') return { api };
+    if (name === '../api') return { sentinelApi: api };
     throw new Error(`Unexpected followup recovery import: ${name}`);
   }, followupExports);
   const creationExports = {};
   new Function('require', 'exports', compiledCreation)((name) => {
-    if (name === '../../../api') return { api };
+    if (name === '../api') return { sentinelApi: api };
     throw new Error(`Unexpected task creation import: ${name}`);
   }, creationExports);
   const presentationExports = {};
@@ -118,7 +118,6 @@ async function mount(overrides = {}, initialProps = {}, host = {}) {
   const icon = () => null;
   new Function('require', 'exports', compiled)((name) => {
     if (name === 'vue') return vue;
-    if (name === '../api') return { api };
     if (name === '../../../i18n') return { useI18n: () => ({ tr: (zh) => zh }) };
     if (name === '@lucide/vue') return new Proxy({}, { get: () => icon });
     if (name === '@tauri-apps/plugin-dialog') return { open: async () => null };

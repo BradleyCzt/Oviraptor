@@ -92,7 +92,7 @@ async function renderPage(api) {
   let coverageDrill;
   const imports = name => {
     if (name === 'vue') return vue;
-    if (name === '../../../api') return { api: { listAssets: async () => ({ items: [], total: 0, page: 1, pageSize: 100, summary: {} }) } };
+    if (name === '../api') return { assetApi: { listAssets: async () => ({ items: [], total: 0, page: 1, pageSize: 100, summary: {} }) } };
     if (name === './api' || name === './api') return { exposureApi: api };
     if (name === './useExposureSurface') return surface;
     if (name === './useExposureEvidence') return evidence;

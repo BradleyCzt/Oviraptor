@@ -2,7 +2,7 @@
 import { onMounted, ref } from "vue";
 import { ExternalLink, RefreshCw, Search, Star, UploadCloud, X } from "@lucide/vue";
 import { openUrl } from "@tauri-apps/plugin-opener";
-import { api } from "../../../api";
+import { hackerOneApi } from "../api";
 import type { ConfigProfile } from "../../configuration/types";
 import type { HackerOneDetail, HackerOneEvent, HackerOneProgram } from "../types";
 import type { Project } from "../../workspaces/types";
@@ -14,11 +14,11 @@ const {tr}=useI18n(); const programs=ref<HackerOneProgram[]>([]); const detail=r
 const changes=ref<HackerOneEvent[]>([]);
 const search=ref(""); const busy=ref(false); const selectedProject=ref<number>();
 const profile=()=>props.profiles.find(p=>p.isDefault)||props.profiles[0];
-async function load(){[programs.value,changes.value]=await Promise.all([api.listHackerOnePrograms(search.value),api.listHackerOneEvents(50)])}
-async function sync(handle?:string){const p=profile();if(!p){emit("notify","error",tr("请先创建配置","Create a profile"));return}busy.value=true;try{await api.syncHackerOne(p.id,handle);await load();if(handle)detail.value=await api.getHackerOneDetail(handle);emit("notify","success",tr("HackerOne 信息已更新","HackerOne data updated"))}catch(e){emit("notify","error",String(e))}finally{busy.value=false}}
-async function show(program:HackerOneProgram){busy.value=true;try{const active=profile();if(!active){emit("notify","error","请先在配置中心创建配置方案");return}if(!program.scopeCount)await api.syncHackerOne(active.id,program.handle);detail.value=await api.getHackerOneDetail(program.handle);selectedProject.value=props.projects[0]?.id}catch(e){emit("notify","error",String(e))}finally{busy.value=false}}
-async function bookmark(program:HackerOneProgram){await api.setHackerOneBookmark(program.handle,!program.bookmarked);program.bookmarked=!program.bookmarked}
-async function send(){if(!detail.value||!selectedProject.value)return;try{const count=await api.addHackerOneScopesToProject(detail.value.program.handle,selectedProject.value);emit("notify","success",tr(`已发送 ${count} 个可提交网络资产到项目`,`${count} network scopes added to project`))}catch(e){emit("notify","error",String(e))}}
+async function load(){[programs.value,changes.value]=await Promise.all([hackerOneApi.listHackerOnePrograms(search.value),hackerOneApi.listHackerOneEvents(50)])}
+async function sync(handle?:string){const p=profile();if(!p){emit("notify","error",tr("请先创建配置","Create a profile"));return}busy.value=true;try{await hackerOneApi.syncHackerOne(p.id,handle);await load();if(handle)detail.value=await hackerOneApi.getHackerOneDetail(handle);emit("notify","success",tr("HackerOne 信息已更新","HackerOne data updated"))}catch(e){emit("notify","error",String(e))}finally{busy.value=false}}
+async function show(program:HackerOneProgram){busy.value=true;try{const active=profile();if(!active){emit("notify","error","请先在配置中心创建配置方案");return}if(!program.scopeCount)await hackerOneApi.syncHackerOne(active.id,program.handle);detail.value=await hackerOneApi.getHackerOneDetail(program.handle);selectedProject.value=props.projects[0]?.id}catch(e){emit("notify","error",String(e))}finally{busy.value=false}}
+async function bookmark(program:HackerOneProgram){await hackerOneApi.setHackerOneBookmark(program.handle,!program.bookmarked);program.bookmarked=!program.bookmarked}
+async function send(){if(!detail.value||!selectedProject.value)return;try{const count=await hackerOneApi.addHackerOneScopesToProject(detail.value.program.handle,selectedProject.value);emit("notify","success",tr(`已发送 ${count} 个可提交网络资产到项目`,`${count} network scopes added to project`))}catch(e){emit("notify","error",String(e))}}
 onMounted(load);
 </script>
 

@@ -8,17 +8,6 @@ export interface Target {
   createdAt: string;
 }
 
-export interface DashboardStats {
-  projectCount: number;
-  assetCount: number;
-  aliveCount: number;
-  pendingCount: number;
-  newCount: number;
-  changedCount: number;
-  blockedCount: number;
-  runningJobs: number;
-}
-
 export interface Asset {
   id: number;
   projectId: number;

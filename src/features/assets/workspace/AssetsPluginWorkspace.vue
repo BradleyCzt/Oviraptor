@@ -3,10 +3,11 @@ import { computed, defineAsyncComponent, onMounted, onUnmounted, ref, watch } fr
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { CheckCircle2, CircleAlert, Clock3, Database, ListFilter, Plus, RefreshCw, Search } from "@lucide/vue";
 import { assetApi } from "../api";
-import { workspaceApi } from "../../workspaces/api";
+import { shellApi } from "../../../shell/api";
 import { useAssetLogPanel } from "../useAssetLogPanel";
 import { useI18n } from "../../../i18n";
-import type { AssetEvent, DashboardStats, InterruptedJob, JobProgressEvent, JobRun } from "../types";
+import type { AssetEvent, InterruptedJob, JobProgressEvent, JobRun } from "../types";
+import type { DashboardStats } from "../../../shell/types";
 import type { PluginWorkspaceProps, PluginWorkspaceEmits, ResumeWorkflowResult } from "../../../shell/workspaceContract";
 const AssetWorkspace = defineAsyncComponent(() => import("../components/AssetWorkspace.vue"));
 const AssetOwnershipGate = defineAsyncComponent(() => import("../components/AssetOwnershipGate.vue"));
@@ -15,7 +16,7 @@ const QueryPanel = defineAsyncComponent(() => import("../components/QueryPanel.v
 const props = defineProps<PluginWorkspaceProps>();
 const emit = defineEmits<PluginWorkspaceEmits>();
 const { t, tr } = useI18n();
-const api = { ...assetApi, dashboardStats: workspaceApi.dashboardStats, acknowledgeInterruptedRun: workspaceApi.acknowledgeInterruptedRun };
+const api = { ...assetApi, dashboardStats: shellApi.dashboardStats };
 const activeView = computed(() => props.view);
 const projects = computed(() => props.projects);
 const profiles = computed(() => props.profiles);

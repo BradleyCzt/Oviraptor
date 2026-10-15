@@ -111,7 +111,7 @@ function loadPage(calls, api = fakeApi(calls)) {
   let panel, clusterPanel, reviewPanel, incidentsPanel, coverageComposable, coverageDrill;
   const requireModule = name => {
     if (name === 'vue') return vue;
-    if (name === '../../../api') return { api };
+    if (name === '../api') return { assetApi: api };
     if (name === '@lucide/vue') return new Proxy({}, { get: () => () => null });
     if (name.endsWith('.css')) return {};
     const key = asExposureModule(name);

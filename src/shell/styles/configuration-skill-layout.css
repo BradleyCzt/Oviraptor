@@ -1,0 +1,4 @@
+
+
+/* Configuration center: accounts, switchable Agent models, and policy budgets */
+.account-settings,.agent-policy-settings{display:flex;flex-direction:column;gap:12px}.account-settings-intro,.skill-format-guide{display:flex;align-items:flex-start;gap:10px;padding:12px;border:1px solid #dce6f2;border-radius:8px;background:#f7faff;color:#42617f}.account-settings-intro>div,.skill-format-guide{min-width:0}.account-settings-intro>div{display:flex;flex-direction:column;gap:4px}.account-settings-intro strong,.skill-format-guide strong{font-size:11px}.account-settings-intro span,.skill-format-guide span{font-size:9px;line-height:1.6;color:#6d7c8f}.skill-format-guide{flex-direction:column;gap:4px}

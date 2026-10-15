@@ -20,3 +20,6 @@ export interface EnvironmentPreparationStatus {
   owner: string | null;
   createdAt: string | null;
 }
+
+export type InstallLogRow = { id: number; stage: string; stream: string; message: string; time: string };
+export type InstallLogPage = { rows: InstallLogRow[]; more: boolean; olderRows: number; earliestId: number };

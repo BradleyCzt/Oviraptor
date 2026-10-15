@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { onUnmounted, ref } from "vue";
-import { api } from "../../../api";
+import { sentinelApi } from "../api";
 import type { NativeBudgetDiagnostics } from "../types";
 import { useI18n } from "../../../i18n";
 import { useCommittedRefresh } from "../../../composables/useCommittedRefresh";
@@ -69,7 +69,7 @@ async function load() {
   const request = ++generation, scanId = props.scanId, attempt = props.attempt;
   loading.value = true;
   try {
-    const next = await api.getNativeBudgetDiagnostics(scanId, attempt);
+    const next = await sentinelApi.getNativeBudgetDiagnostics(scanId, attempt);
     if (disposed || !opened.value || request !== generation || scanId !== props.scanId || attempt !== props.attempt) return;
     if (next.schema !== "summary_gap_v1" || next.authoritative !== false || !Array.isArray(next.roots))
       throw new Error("budget_diagnostic_receipt_mismatch");

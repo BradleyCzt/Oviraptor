@@ -19,7 +19,8 @@ const ownershipProfileDrafts = new Map<number, { form: OwnershipProfileForm; bas
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, shallowRef, watch } from "vue";
 import { Check, ChevronLeft, ChevronRight, Link2, RefreshCw, Save, ShieldCheck, ShieldQuestion, X } from "@lucide/vue";
-import { api } from "../../../api";
+import { assetApi } from "../api";
+import { ownershipAuthorizationApi } from "../ownershipDirectoryApi";
 import type { AssetOwnershipDecisionExpectation } from "../api";
 import type { Asset, AssetOwnershipProfile, AssetOwnershipSummary, AssetQuery } from "../types";
 import type { Project } from "../../workspaces/types";
@@ -120,7 +121,7 @@ async function loadProfile() {
   const generation = projectGeneration; const request = ++profileGeneration;
   profileLoading.value = true;
   try {
-    const latest = await api.getAssetOwnershipProfile(projectId);
+    const latest = await assetApi.getAssetOwnershipProfile(projectId);
     if (!isCurrent(projectId, generation) || request !== profileGeneration) return;
     serverProfile.value = latest;
     const draft = ownershipProfileDrafts.get(projectId);
@@ -135,7 +136,7 @@ async function refreshServerProfile() {
   const projectId = props.selectedProjectId; if (!projectId) return;
   const generation = projectGeneration;
   try {
-    const latest = await api.getAssetOwnershipProfile(projectId);
+    const latest = await assetApi.getAssetOwnershipProfile(projectId);
     if (isCurrent(projectId, generation) && profileProjectId.value === projectId) serverProfile.value = latest;
   } catch { /* 提示性刷新失败不影响草稿 */ }
 }
@@ -159,7 +160,7 @@ async function loadQueue() {
   selected.value = new Map();
   try {
     const query: AssetQuery = { projectId, search: search.value, conditions: [], page: page.value, pageSize: pageSize.value, includeDeleted: false, deletedView: "active", probeView: "browser_review", probeOutcomeView: "all", sentinelView: "all", decisionView: "ownership_scope", ownershipView: ownershipView.value, sortBy: "priority", sortDirection: "desc" };
-    const [nextSummary, assetPage] = await Promise.all([api.getAssetOwnershipSummary(projectId), api.listAssets(query)]);
+    const [nextSummary, assetPage] = await Promise.all([assetApi.getAssetOwnershipSummary(projectId), assetApi.listAssets(query)]);
     if (!isCurrent(projectId, generation) || request !== queueGeneration) return;
     summary.value = nextSummary; assets.value = assetPage.items; total.value = assetPage.total; selected.value = new Map(); queueProjectId.value = projectId;
   } catch (error) { if (isCurrent(projectId, generation) && request === queueGeneration) emit("notify", "error", String(error)); }
@@ -189,7 +190,7 @@ async function saveProfile() {
   const generation = projectGeneration; const base = baseProfile.value; const submitted = { ...form.value };
   saving.value = true; saveConflict.value = false;
   try {
-    const saved = await api.saveAssetOwnershipProfile(profileInput(projectId, base, submitted), expectedVersionOf(base));
+    const saved = await assetApi.saveAssetOwnershipProfile(profileInput(projectId, base, submitted), expectedVersionOf(base));
     const adopted = adoptSaved(projectId, base, submitted, saved);
     if (isCurrent(projectId, generation)) setupRefresh.value++;
     if (!isCurrent(projectId, generation)) {
@@ -213,7 +214,7 @@ async function assess() {
     : profileDirty.value && serverProfile.value ? `（按已保存档案 v${serverProfile.value.policyVersion} 评估，未包含当前未保存草稿）` : "";
   assessing.value = true;
   try {
-    const result = await api.assessAssetOwnership(projectId);
+    const result = await assetApi.assessAssetOwnership(projectId);
     emit("notify", "success", `「${projectLabel(projectId)}」已评估 ${result.assessed.toLocaleString()} 条非人工锁定资产${draftNote}；只有人工确认归属的资产可进入暴露面`);
     if (isCurrent(projectId, generation)) await loadQueue();
   } catch (error) { emit("notify", "error", isCurrent(projectId, generation) ? String(error) : `「${projectLabel(projectId)}」${String(error)}`); }
@@ -237,7 +238,7 @@ async function decide(status: string) {
   if (rows.some(asset => asset.projectId !== projectId)) { selected.value = new Map(); emit("notify", "error", "选择中包含其他工作空间的资产，已清空选择，未写入任何结论"); return; }
   bulkBusy.value = true;
   try {
-    const changed = await api.updateAssetOwnership(rows.map(asset => ({ projectId, assetId: asset.id })), status, decisionNotes[status] || "人工归属结论", learnDomainRule.value && status === "excluded", projectId, rows.map(expectationOf));
+    const changed = await assetApi.updateAssetOwnership(rows.map(asset => ({ projectId, assetId: asset.id })), status, decisionNotes[status] || "人工归属结论", learnDomainRule.value && status === "excluded", projectId, rows.map(expectationOf));
     emit("notify", "success", `「${projectLabel(projectId)}」已更新 ${changed.toLocaleString()} 条归属结论${learnDomainRule.value && status === "excluded" ? "，并保存精确主机排除规则" : ""}`);
     if (isCurrent(projectId, generation)) { setupRefresh.value++; await loadQueue(); }
   } catch (error) {
@@ -271,11 +272,11 @@ async function confirmOwnership(withAuthorization = false) {
   bulkBusy.value = true;
   const selections = rows.map(asset => ({ projectId, assetId: asset.id }));
   try {
-    const result = await api.confirmAssetOwnership({ selections, note: "", domainRuleScope: learnDomainRule.value ? ruleScope.value : "none" }, projectId, rows.map(expectationOf));
+    const result = await ownershipAuthorizationApi.confirmAssetOwnership({ selections, note: "", domainRuleScope: learnDomainRule.value ? ruleScope.value : "none" }, projectId, rows.map(expectationOf));
     emit("notify", "success", `「${projectLabel(projectId)}」已确认归属 ${result.changed.toLocaleString()} 条（未授权，授权与准入保持原值）${result.learnedRules.length ? `；已学习规则 ${result.learnedRules.join("、")}` : ""}`);
     if (withAuthorization) {
       if (!isCurrent(projectId, generation)) { emit("notify", "error", `「${projectLabel(projectId)}」已切换工作空间：第 2 步授权未执行`); return; }
-      const authorized = await api.authorizeAssetOwnership({ selections, note: "" }, projectId, result.expectations);
+      const authorized = await ownershipAuthorizationApi.authorizeAssetOwnership({ selections, note: "" }, projectId, result.expectations);
       emit("notify", "success", `「${projectLabel(projectId)}」已授权 ${authorized.toLocaleString()} 条：授权 = 允许，暴露面准入 = 是`);
     }
     if (isCurrent(projectId, generation)) { setupRefresh.value++; await loadQueue(); }
@@ -292,7 +293,7 @@ async function authorizeOwnership() {
   if (!isCurrent(projectId, generation) || !queueReady.value) { emit("notify", "error", "确认期间工作空间或复核队列已变化，未授权"); return; }
   bulkBusy.value = true;
   try {
-    const authorized = await api.authorizeAssetOwnership({ selections: rows.map(asset => ({ projectId, assetId: asset.id })), note: "" }, projectId, rows.map(expectationOf));
+    const authorized = await ownershipAuthorizationApi.authorizeAssetOwnership({ selections: rows.map(asset => ({ projectId, assetId: asset.id })), note: "" }, projectId, rows.map(expectationOf));
     emit("notify", "success", `「${projectLabel(projectId)}」已授权 ${authorized.toLocaleString()} 条：授权 = 允许，暴露面准入 = 是`);
     if (isCurrent(projectId, generation)) { setupRefresh.value++; await loadQueue(); }
   } catch (error) { await failWrite(projectId, generation, error); }
@@ -303,7 +304,7 @@ async function onDirectorySaved(projectId: number) {
   const generation = projectGeneration;
   if (!isCurrent(projectId, generation) || profileProjectId.value !== projectId) return;
   try {
-    const latest = await api.getAssetOwnershipProfile(projectId);
+    const latest = await assetApi.getAssetOwnershipProfile(projectId);
     if (!isCurrent(projectId, generation) || profileProjectId.value !== projectId) return;
     serverProfile.value = latest;
     if (!latest.updatedAt && baseProfile.value && !baseProfile.value.updatedAt && !profileDirty.value) { baseProfile.value = latest; form.value = formFromProfile(latest); }

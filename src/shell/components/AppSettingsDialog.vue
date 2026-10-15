@@ -2,7 +2,7 @@
 import { reactive, ref } from "vue";
 import { AppWindow, ImageUp, RotateCcw } from "@lucide/vue";
 import ModalShell from "../../shared/components/ModalShell.vue";
-import { api } from "../../api";
+import { shellApi } from "../api";
 import { useI18n } from "../../i18n";
 import type { AppSettings } from "../types";
 import ToolApprovalPanel from "../../features/environment/ToolApprovalPanel.vue";
@@ -18,7 +18,7 @@ const iconState = ref(props.settings.customIcon);
 
 async function save() {
   busy.value = true; error.value = "";
-  try { await api.saveAppSettings(form.reminderDays); emit("saved"); }
+  try { await shellApi.saveAppSettings(form.reminderDays); emit("saved"); }
   catch (reason) { error.value = String(reason); }
   finally { busy.value = false; }
 }
@@ -31,14 +31,14 @@ async function uploadIcon(event: Event) {
   try {
     if (file.type !== "image/png") throw new Error(tr("请选择 PNG 图片", "Select a PNG image"));
     const bytes = Array.from(new Uint8Array(await file.arrayBuffer()));
-    await api.saveAppIcon(bytes); iconState.value = true; emit("iconChanged");
+    await shellApi.saveAppIcon(bytes); iconState.value = true; emit("iconChanged");
   } catch (reason) { error.value = String(reason); }
   finally { iconBusy.value = false; input.value = ""; }
 }
 
 async function resetIcon() {
   iconBusy.value = true; error.value = "";
-  try { await api.resetAppIcon(); iconState.value = false; emit("iconChanged"); }
+  try { await shellApi.resetAppIcon(); iconState.value = false; emit("iconChanged"); }
   catch (reason) { error.value = String(reason); }
   finally { iconBusy.value = false; }
 }

@@ -1,6 +1,7 @@
 import { onMounted, onBeforeUnmount, ref } from "vue";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
-import { runtimeApi, type InstallLogPage, type InstallLogRow } from "../runtime/api";
+import { environmentApi } from "./api";
+import type { InstallLogPage, InstallLogRow } from "./types";
 
 const streams = new Set(["status", "stdout", "stderr", "success", "error"]);
 const PAGE_SIZE = 300;
@@ -42,7 +43,7 @@ export function useInstallLogPanel(changed: () => void = () => {}) {
       do {
         rerun = false;
         const after = initialized ? cursor : undefined;
-        const page = await runtimeApi.listEnvironmentInstallLogs(after, PAGE_SIZE);
+        const page = await environmentApi.listEnvironmentInstallLogs(after, PAGE_SIZE);
         if (!mounted || current !== generation) break;
         if (!validPage(page, after)) throw Error("Invalid install log page");
         if (after !== undefined && page.earliestId > after + 1) gapPossible.value = true;
@@ -72,7 +73,7 @@ export function useInstallLogPanel(changed: () => void = () => {}) {
     ++generation;
     const current = generation;
     try {
-      const page = await runtimeApi.listEnvironmentInstallLogs(undefined, PAGE_SIZE);
+      const page = await environmentApi.listEnvironmentInstallLogs(undefined, PAGE_SIZE);
       if (!validPage(page)) throw Error("Invalid install log snapshot");
       if (!mounted || current !== generation) throw Error("Install log view unavailable");
       cursor = Math.max(cursor, page.rows[page.rows.length - 1]?.id ?? 0);

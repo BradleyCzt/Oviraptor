@@ -4,13 +4,15 @@ const path = require('node:path');
 const ts = require('typescript');
 const entry = path.join(__dirname, '../src/features/sentinel/api.ts');
 const skills = path.join(__dirname, '../src/features/skills/catalogApi.ts');
+const learning = path.join(__dirname, '../src/features/sentinel/learningApi.ts');
+const rules = path.join(__dirname, '../src/features/sentinel/rulePacksApi.ts');
 const reconciliation = path.join(__dirname, '../src/features/sentinel/reconciliation/api.ts');
 
 function loadSentinelApi(invoke) {
   if (typeof invoke !== 'function') throw Error('sentinel_api_harness_requires_invoke');
   const cache = new Map();
   function load(filename) {
-    if (filename !== entry && filename !== reconciliation && filename !== skills) throw Error(`Unexpected API module: ${filename}`);
+    if (filename !== entry && filename !== reconciliation && filename !== skills && filename !== learning && filename !== rules) throw Error(`Unexpected API module: ${filename}`);
     if (cache.has(filename)) return cache.get(filename);
     const exports = {}; cache.set(filename, exports);
     const compiled = ts.transpileModule(fs.readFileSync(filename, 'utf8'), {
@@ -19,6 +21,8 @@ function loadSentinelApi(invoke) {
     new Function('require', 'exports', compiled)(name => {
       if (name === '@tauri-apps/api/core') return { invoke };
       if (filename === entry && name === '../skills/catalogApi') return load(skills);
+      if (filename === entry && name === './learningApi') return load(learning);
+      if (filename === entry && name === './rulePacksApi') return load(rules);
       if (filename === entry && name === './reconciliation/api') return load(reconciliation);
       throw Error(`Unexpected API dependency: ${name}`);
     }, exports);

@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { onUnmounted, ref, watch } from "vue";
-import { api } from "../../../api";
+import { rootCostReconciliationApi } from "../reconciliation/api";
 import { useI18n } from "../../../i18n";
 import { receiptMatchesPreview, validRootCostInventory } from "../reconciliation/contract";
 import type { RootCostInventory, RootCostPreview, RootCostReceipt } from "../reconciliation/contract";
@@ -34,7 +34,7 @@ async function load() {
   loading.value = true; error.value = "";
   if (!approveAttempted.value) { continuation.value = undefined; continuationError.value = ""; approvalChecked.value = false; }
   try {
-    const report = await api.getNativeRootCostReconciliations(scanId, attempt);
+    const report = await rootCostReconciliationApi.getNativeRootCostReconciliations(scanId, attempt);
     if (!currentScope(request, scanId, attempt)) return;
     if (!validRootCostInventory(report, scanId, attempt)) throw Error("root_cost_inventory_mismatch");
     inventory.value = report;
@@ -61,7 +61,7 @@ async function confirm() {
   const request = ++generation;
   confirming.value = true; error.value = ""; message.value = "";
   try {
-    const receipt = await api.confirmNativeRootCostReconciliation(item.scanId, item.attemptNumber,
+    const receipt = await rootCostReconciliationApi.confirmNativeRootCostReconciliation(item.scanId, item.attemptNumber,
       item.rootRunId, item.callId, item.confirmationHash);
     if (!currentScope(request, item.scanId, item.attemptNumber)) return;
     if (!receiptMatchesPreview(receipt, item)) throw Error("root_cost_confirmation_receipt_mismatch");
@@ -88,7 +88,7 @@ async function previewContinuation(receipt: RootCostReceipt) {
   approvalChecked.value = false;
   continuationLoading.value = true; continuation.value = undefined; continuationError.value = "";
   try {
-    const preview = await api.previewNativeRootFinancialContinuation(receipt.scanId, receipt.attemptNumber,
+    const preview = await rootCostReconciliationApi.previewNativeRootFinancialContinuation(receipt.scanId, receipt.attemptNumber,
       receipt.rootRunId, receipt.receiptId);
     if (!currentScope(request, receipt.scanId, receipt.attemptNumber)) return;
     if (!validRootContinuationPreview(preview, receipt)) throw Error("financial_continuation_preview_mismatch");
@@ -113,7 +113,7 @@ async function approveContinuation() {
   approveAttempted.value = true; approving.value = true; issuanceError.value = "";
   const request = ++operationGeneration;
   try {
-    const result = await api.approveNativeRootFinancialContinuation(bound.scanId, bound.attemptNumber,
+    const result = await rootCostReconciliationApi.approveNativeRootFinancialContinuation(bound.scanId, bound.attemptNumber,
       bound.rootRunId, bound.receiptId, bound.proposalHash);
     if (!operationScope(request, bound)) return;
     if (!validRootContinuationIssuance(result, bound, issuance.value)) throw Error("financial_issuance_mismatch");
@@ -129,7 +129,7 @@ async function readContinuationStatus() {
   if (!bound || approving.value || statusLoading.value || discoveryLoading.value || !operationScope(operationGeneration, bound)) return;
   const request = ++operationGeneration; statusLoading.value = true; issuanceError.value = "";
   try {
-    const result = await api.getNativeRootFinancialContinuation(bound.scanId, bound.attemptNumber,
+    const result = await rootCostReconciliationApi.getNativeRootFinancialContinuation(bound.scanId, bound.attemptNumber,
       bound.rootRunId, bound.receiptId, bound.proposalHash);
     if (!operationScope(request, bound)) return;
     if (!validRootContinuationIssuance(result, bound, issuance.value)) throw Error("financial_status_mismatch");
@@ -147,7 +147,7 @@ async function discoverContinuation() {
     && scanId === props.scanId && attempt === props.attempt && operation === operationGeneration;
   discoveryLoading.value = true; discoveryMessage.value = ""; discoveryError.value = "";
   try {
-    const report = await api.discoverNativeRootFinancialContinuation(scanId, attempt);
+    const report = await rootCostReconciliationApi.discoverNativeRootFinancialContinuation(scanId, attempt);
     if (!current()) return;
     if (!validRootContinuationDiscovery(report, scanId, attempt, issuance.value, approvedProposal.value)
       || report.issued && recoveredReceipt.value && !receiptMatchesPreview(report.issued.originalReceipt, recoveredReceipt.value))

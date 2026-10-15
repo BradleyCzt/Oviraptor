@@ -16,7 +16,7 @@ async function flush() { await new Promise(r => setImmediate(r)); for (let i = 0
 function modules(invoke) {
   const native = { invoke };
   const api = loadSentinelApi(invoke);
-  const creation = compile(readFile('src/features/sentinel/workbench/useWorkbenchTaskCreation.ts'), { '../../../api': { api } });
+  const creation = compile(readFile('src/features/sentinel/workbench/useWorkbenchTaskCreation.ts'), { '../api': { sentinelApi: api } });
   const approval = compile(readFile('src/features/environment/toolApprovalApi.ts'), { '@tauri-apps/api/core': native });
   return { api, creation, approval };
 }

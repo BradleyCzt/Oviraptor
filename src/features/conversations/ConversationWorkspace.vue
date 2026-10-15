@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, defineAsyncComponent, nextTick, ref, watch } from "vue";
 import { Archive, ArrowDown, ArrowUp, Ellipsis, MessageSquare, Plus, RefreshCw, Square, Trash2 } from "@lucide/vue";
-import type { Project } from "../../types";
+import type { Project } from "../workspaces/types";
 import type { BuiltinPluginHost } from "../../plugins";
 const ConversationPluginPanel = defineAsyncComponent(() => import("./ConversationPluginPanel.vue"));
 import ConversationToolActivity from "./ConversationToolActivity.vue";

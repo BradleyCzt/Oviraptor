@@ -1,5 +1,4 @@
 // Types owned by this module; cross-module consumers import this contract directly.
-import type { InterruptedJob } from "../assets/types";
 
 export interface Project {
   id: number;
@@ -38,17 +37,4 @@ export interface ProjectImpact {
   browserAuthSessionCount: number;
   otherRecordCount: number;
   totalRecords: number;
-}
-
-export interface StaleProject {
-  projectId: number;
-  projectName: string;
-  daysSinceUpdate?: number;
-  lastRunAt?: string;
-}
-
-export interface StartupStatus {
-  reminderDays: number;
-  staleProjects: StaleProject[];
-  interruptedJobs: InterruptedJob[];
 }

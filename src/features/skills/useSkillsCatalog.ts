@@ -1,6 +1,6 @@
 import { computed, onMounted, reactive, ref } from "vue";
 import { open } from "@tauri-apps/plugin-dialog";
-import { skillCatalogApi as api } from "./catalogApi";
+import { instructionCatalogApi as api, knowledgeCatalogApi } from "./catalogApi";
 import type { AgentSkill } from "./catalogTypes";
 
 type Notice = (type: "success" | "error" | "info", text: string) => void;
@@ -48,7 +48,7 @@ export function useSkillsCatalog(options: {
   async function refineSkill(skill: AgentSkill) {
     refiningSkillId.value = skill.id;
     try {
-      const result = await api.refineAgentSkillWithKnowledge(skill.id);
+      const result = await knowledgeCatalogApi.refineAgentSkillWithKnowledge(skill.id);
       await loadSkills();
       notify("success", result === skill.id
         ? tr("已用最新高质量知识精炼 Skill", "Skill refined with the latest high-quality knowledge")
@@ -127,7 +127,7 @@ export function useSkillsCatalog(options: {
       });
       showSkillEditor.value = false;
       await loadSkills();
-      notify("success", options.context === "library" ? tr("指令已保存，可在需要时选择使用", "Instructions saved and available to select") : tr("技能已保存，之后启动的任务会读取它", "Skill saved for future scans"));
+      notify("success", tr("指令已保存，可在需要时选择使用", "Instructions saved and available to select"));
     } catch (error) {
       notify("error", String(error));
     } finally {

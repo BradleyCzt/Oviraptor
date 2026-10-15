@@ -3,14 +3,17 @@ import { rootCostReconciliationApi } from "./reconciliation/api";
 import type { NativeSdkLogPage } from "./execution/nativeSdkLogContract";
 import type { NativeProcessLogPage } from "./execution/nativeProcessLogContract";
 import type { HumanDirectiveReviewResult, AgentDialogView, AgentDialogViewInput, AgentDialogSelection, AdministrativeClosureReceipt, AdministrativeClosurePreview, ClosureHandoffPreview, ClosureHandoffInput, ClosureHandoffReceipt, GapFollowupPreview, GapFollowupDraftInput, GapFollowupSubmission, AppSecScanResult, BrowserAuthSession, ScanIdentityMaterial, InvestigationGraph, InvestigationHypothesis, InvestigationValidation, InvestigationOverview, AgentTargetExecution, AgentRequestReview, AgentRequestReviewPage, AgentRequestReviewInput, AgentTimelineItem, AgentTimelinePage, HumanDirectiveDraft, NativeScanStatus, NativeBudgetDiagnostics, NativeSourceFindingsPage, AgentAttemptMailboxPage, AgentAttemptToolPage, PostScanDirectiveResult, SentinelCheckpoint, SentinelFinding, HistoricalImportPreview, HistoricalImportRun, SentinelFuseEntry, SentinelOpportunity, SentinelOverviewStats, SentinelRunnerLogView, SentinelScan, SentinelScanAttempt, SentinelTarget, SentinelValidation, SentinelValidationWorkItem, AgentTraceDetail, AgentTraceSummary, WorkbenchScanInput, CapabilityBundle, RoleConfigDraft } from "./types";
-import type { FofaApiTestResult, ModelProfileTestResult } from "../configuration/types";
-import type { AgentKnowledgeEntry } from "../skills/catalogTypes";
+import type { AgentKnowledgeEntry } from "../skills/knowledgeTypes";
 import { skillCatalogApi } from "../skills/catalogApi";
+import { scanningLearningApi } from "./learningApi";
+import { scanningRulePacksApi } from "./rulePacksApi";
 
 export const sentinelApi = {
   ...rootCostReconciliationApi,
   // Compatibility for existing Scanning consumers; catalog ownership stays in Skills.
   ...skillCatalogApi,
+  ...scanningLearningApi,
+  ...scanningRulePacksApi,
   recoverNativeSourcePauseResult: (scanId: string, attemptNumber: number) =>
     invoke<{ schemaVersion: 1; scanId: string; attemptNumber: number; rootRunId: string; scanStatus: "paused"; branchStatus: "partial"; changed: boolean; executionReplayed: false }>(
       "recover_native_source_pause_result", { scanId, attemptNumber }),
@@ -154,11 +157,6 @@ export const sentinelApi = {
     invoke<BrowserAuthSession>("validate_browser_auth_session", { sessionId }),
   deleteBrowserAuthSession: (sessionId: string) =>
     invoke<void>("delete_browser_auth_session", { sessionId }),
-  testModelProfile: (input: {
-    llm: string; deployment: "cloud" | "local"; apiBase: string; apiKey: string;
-  }) => invoke<ModelProfileTestResult>("test_model_profile", { input }),
-  testFofaApi: (input: { key: string; proxyUrl: string }) =>
-    invoke<FofaApiTestResult>("test_fofa_api", { input }),
   listAgentTraces: () => invoke<AgentTraceSummary[]>("list_agent_traces"),
   getAgentTrace: (scanId: string) => invoke<AgentTraceDetail>("get_agent_trace", { scanId }),
   analyzeAgentTrace: (scanId: string) =>

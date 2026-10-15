@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onUnmounted, ref, watch } from "vue";
-import { api } from "../../../api";
+import { sentinelApi } from "../api";
 import type { NativeScanStatus } from "../types";
 import { useI18n } from "../../../i18n";
 import { createNativeRunStatusLabels } from "./nativeRunStatusLabels";
@@ -53,7 +53,7 @@ async function requestAdministrativeClosure() {
   administrativeConfirmation.value = undefined;
   const current = () => !disposed && action === actionGeneration && props.scanId === selected.scanId && props.attempt === selected.attemptNumber;
   try {
-    const preview = await api.previewWebAdministrativeClosure(selected.scanId, selected.attemptNumber);
+    const preview = await sentinelApi.previewWebAdministrativeClosure(selected.scanId, selected.attemptNumber);
     if (!current()) return;
     if (preview.receipt) {
       await load();
@@ -80,7 +80,7 @@ async function confirmAdministrativeClosure() {
   administrativeError.value = "";
   const current = () => !disposed && action === actionGeneration && props.scanId === selected.scanId && props.attempt === selected.attemptNumber;
   try {
-    const receipt = await api.closeWebTaskAdministratively(selected.scanId, selected.attemptNumber, selected.operationId, selected.snapshotHash);
+    const receipt = await sentinelApi.closeWebTaskAdministratively(selected.scanId, selected.attemptNumber, selected.operationId, selected.snapshotHash);
     if (!current()) return;
     if (receipt.scanId !== selected.scanId || receipt.attemptNumber !== selected.attemptNumber || receipt.closureId !== selected.operationId
       || receipt.snapshotHash !== selected.snapshotHash || receipt.previousStatus !== selected.previousStatus || receipt.actor !== "local_operator"
@@ -127,7 +127,7 @@ async function confirmClosure() {
   const current = () => !disposed && action === actionGeneration
     && props.scanId === selected.scanId && props.attempt === selected.attemptNumber;
   try {
-    const result = await api.closeNeverDispatchedWebAttempt(selected.scanId, selected.attemptNumber);
+    const result = await sentinelApi.closeNeverDispatchedWebAttempt(selected.scanId, selected.attemptNumber);
     if (!current()) return;
     if (result.scanId !== selected.scanId || result.attemptNumber !== selected.attemptNumber
       || result.executionState !== "closed_without_dispatch" || result.automaticReplayAllowed !== false
@@ -163,7 +163,7 @@ async function confirmRecovery() {
   const current = () => !disposed && action === actionGeneration
     && props.scanId === selected.scanId && props.attempt === selected.attemptNumber;
   try {
-    const result = await api.recoverNeverDispatchedWebAttempt(selected.scanId, selected.attemptNumber);
+    const result = await sentinelApi.recoverNeverDispatchedWebAttempt(selected.scanId, selected.attemptNumber);
     if (!current()) return;
     if (result.scanId !== selected.scanId || result.attemptNumber !== selected.attemptNumber
       || result.dispatchState !== "claimed" || result.executionState !== "submitted") {
@@ -195,7 +195,7 @@ async function load() {
     && scanId === props.scanId && attempt === props.attempt;
   activeReads.value++;
   try {
-    const next = await api.getNativeScanStatus(scanId);
+    const next = await sentinelApi.getNativeScanStatus(scanId);
     if (!current()) return;
     if (next.scanId !== scanId || next.attemptNumber !== attempt) {
       state.value = undefined;

@@ -17,7 +17,7 @@ async function mount(read, options = {}) {
   } }).outputText)(name => {
     if (name === 'vue') return vue;
     if (name === './useLiveRunnerLog') return live.module;
-    if (name === '../../../api') return { api: { readSentinelRunnerLog: async (...args) => {
+    if (name === '../api') return { sentinelApi: { readSentinelRunnerLog: async (...args) => {
       calls.push(args); return read ? read(...args) : snapshot(args[0], args[1] || 1);
     } } };
     throw Error(`Unexpected panel import ${name}`);

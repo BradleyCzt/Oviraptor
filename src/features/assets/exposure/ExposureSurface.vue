@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, ref, watch } from "vue";
 import { Download, ExternalLink, Plus, Search, ShieldAlert, Square, X } from "@lucide/vue";
-import { api } from "../../../api";
+import { assetApi } from "../api";
 import { exposureApi } from "./api";
 import type { Project } from "../../workspaces/types";
 import type { ExposureFindingDraft } from "./contracts";
@@ -23,8 +23,8 @@ const emit = defineEmits<{ notify: [type: "success" | "error" | "info", text: st
 
 const project = computed(() => props.projects.find((item) => item.id === props.selectedProjectId));
 /// The exposure surface talks to its own IPC wrapper; only the asset ledger read for the
-/// bound-asset picker still comes from the shared facade, without modifying it.
-const surfaceApi = { ...exposureApi, listAssets: api.listAssets };
+/// bound-asset picker comes directly from the Assets owner, without modifying it.
+const surfaceApi = { ...exposureApi, listAssets: assetApi.listAssets };
 const surface = useExposureSurface({
   projectId: () => props.selectedProjectId,
   active: () => true,
@@ -44,7 +44,7 @@ const {
 const evidence = useExposureEvidence({
   projectId: () => props.selectedProjectId,
   active: () => true,
-  api,
+  api: exposureApi,
   notify: (kind, text) => emit("notify", kind, text),
 });
 const {

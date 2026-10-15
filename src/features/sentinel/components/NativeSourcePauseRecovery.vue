@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onUnmounted, ref, watch } from "vue";
-import { api } from "../../../api";
+import { sentinelApi } from "../api";
 import { useI18n } from "../../../i18n";
 
 const props = defineProps<{ scanId: string; attempt: number; status: string; eligible: boolean; disabled?: boolean }>();
@@ -20,7 +20,7 @@ async function recoverResult() {
     && props.attempt === attempt && props.status === "paused";
   busy.value = true; message.value = ""; error.value = "";
   try {
-    const receipt = await api.recoverNativeSourcePauseResult(scanId, attempt);
+    const receipt = await sentinelApi.recoverNativeSourcePauseResult(scanId, attempt);
     if (!current()) return;
     if (receipt.schemaVersion !== 1 || receipt.scanId !== scanId || receipt.attemptNumber !== attempt
       || receipt.scanStatus !== "paused" || receipt.branchStatus !== "partial" || receipt.executionReplayed !== false

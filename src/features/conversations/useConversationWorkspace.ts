@@ -1,5 +1,5 @@
 import { computed, onUnmounted, ref, watch } from "vue";
-import type { Project } from "../../types";
+import type { Project } from "../workspaces/types";
 import type { ConversationApi } from "./api";
 import type { Conversation, ConversationLinksInput, ConversationScope, ConversationSendInput, ConversationSnapshot, ConversationToolActivity } from "./types";
 

@@ -10,60 +10,12 @@ export interface AgentSkill {
   updatedAt: string;
 }
 
-export interface SecurityRuleChange {
-  status: "added" | "modified" | "deleted";
-  path: string;
-}
-
-export interface SecurityRulePack {
-  id: number;
-  key: string;
+export interface AgentSkillInput {
+  id?: number;
   name: string;
-  engine: string;
-  repository: string;
-  reference: string;
-  localPath: string;
-  previousVersion: string;
-  version: string;
+  description: string;
+  instructions: string;
   enabled: boolean;
-  builtin: boolean;
-  status: string;
-  lastSyncAt: string;
-  error: string;
-  addedCount: number;
-  modifiedCount: number;
-  deletedCount: number;
-  changeSummary: SecurityRuleChange[];
-  progress: number;
-  progressStage: string;
-  progressMessage: string;
 }
 
-export interface AgentKnowledgeEntry {
-  id: number;
-  scanId: string;
-  projectId?: number;
-  title: string;
-  summary: string;
-  patterns: Record<string, unknown>;
-  sourceHash: string;
-  skillId?: number;
-  createdAt: string;
-  updatedAt: string;
-}
-
-export interface AgentLearningCandidate {
-  id: number;
-  scanId: string;
-  projectId?: number;
-  scanType: string;
-  title: string;
-  summary: string;
-  candidate: Record<string, any>;
-  status: "pending" | "accepted" | "rejected" | "applied" | string;
-  targetSkillId?: number;
-  sourceHash: string;
-  createdAt: string;
-  reviewedAt: string;
-  updatedAt: string;
-}
+export type { AgentKnowledgeEntry, AgentLearningCandidate } from "./knowledgeTypes";

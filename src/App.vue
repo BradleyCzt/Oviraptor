@@ -6,7 +6,15 @@ import {
   AppWindow, FolderKanban, Languages, Menu, MessageSquare, Palette, PlayCircle, Plus, Puzzle, RefreshCw,
   Settings2, ShieldCheck, Server, SlidersHorizontal, TerminalSquare, Trash2, X,
 } from "@lucide/vue";
-import { api } from "./api";
+import { shellApi } from "./shell/api";
+import { hackerOneApi } from "./features/hackerone/api";
+import { workspaceApi } from "./features/workspaces/api";
+import { configurationApi } from "./features/configuration/api";
+import { environmentApi } from "./features/environment/api";
+import { runtimeApi } from "./features/runtime/api";
+import { remoteScanningApi } from "./features/sentinel/remoteWorkerApi";
+import { assetApi } from "./features/assets/api";
+import { sentinelApi } from "./features/sentinel/api";
 import { BUILTIN_PLUGINS, createBuiltinPluginHost, isBuiltinPluginId, getPluginPreferenceNotice, loadPluginEnabledState, savePluginEnabledState, type BuiltinPluginId, type PluginNavigationIntent } from "./plugins";
 import { BUILTIN_WORKSPACES } from "./shell/builtinWorkspaces";
 import type { AssetWorkspaceIntent, WorkspaceMetadata, ResumeWorkflowHost, ResumeWorkflowResult } from "./shell/workspaceContract";
@@ -18,11 +26,11 @@ const SkillsWorkspace = defineAsyncComponent(() => import("./features/skills/Ski
 import packageInfo from "../package.json";
 import { useI18n } from "./i18n";
 import { useInstallLogPanel } from "./features/environment/useInstallLogPanel";
-import type { AppSettings, ToastMessage, ViewKey } from "./shell/types";
+import type { AppSettings, ToastMessage, ViewKey, StartupStatus } from "./shell/types";
 import type { ConfigProfile } from "./features/configuration/types";
 import type { EnvironmentPreparationStatus, EnvironmentReport } from "./features/environment/types";
 import type { InterruptedJob, JobProgressEvent } from "./features/assets/types";
-import type { Project, ProjectImpact, StartupStatus } from "./features/workspaces/types";
+import type { Project, ProjectImpact } from "./features/workspaces/types";
 import AppSettingsDialog from "./shell/components/AppSettingsDialog.vue";
 import ConfigDialog from "./features/configuration/components/ConfigDialog.vue";
 import ProjectDialog from "./features/workspaces/components/ProjectDialog.vue";
@@ -61,7 +69,7 @@ function discardWorkspaceIntent(){
 async function refreshStartupStatus(){
   const request=++startupReadGeneration;
   try{
-    const value=await api.startupStatus();
+    const value=await shellApi.startupStatus();
     if(request!==startupReadGeneration)return;
     startup.value=value;startupReadError.value="";
     for(const [id,receipt] of resumeReceipts.value)if(receipt.state==="settling")resumeReceipts.value.delete(id);
@@ -171,7 +179,7 @@ async function refreshPluginActivity() {
   h1HasChanges.value = false;
   if (activeModule.value !== "hackerone" || !hackerOneEnabled.value || !pluginEnabled.value.hackerone) return;
   try {
-    const events = await api.listHackerOneEvents(1);
+    const events = await hackerOneApi.listHackerOneEvents(1);
     if (request === pluginActivityGeneration && activeModule.value === "hackerone") h1HasChanges.value = events.length > 0;
   } catch { /* Activity is optional; the explicitly opened workspace owns read errors. */ }
 }
@@ -217,7 +225,10 @@ function openPluginWorkspace(intent:PluginNavigationIntent) {
   const item=intent.pluginId==="sentinel"?{key:intent.section==="results"?"urls":intent.section==="workbench"?"new_scan":intent.section,view:intent.page,label:["扫描","Scanning"] as const,icon:"scan" as const,section:intent.section}:undefined;
   if(!applyRoute(intent.pluginId,intent.page,item))throw Error("plugin_disabled");
 }
-const pluginHost=createBuiltinPluginHost({api,enabled:()=>pluginEnabled.value,projectId:()=>selectedProjectId.value,projects:()=>projects.value,navigate:openPluginWorkspace});
+const pluginHost=createBuiltinPluginHost({api:{
+  listAssets:query=>assetApi.listAssets(query),
+  searchSentinelScanPage:(projectId,search,view,limit,before)=>sentinelApi.searchSentinelScanPage(projectId,search,view,limit,before),
+},enabled:()=>pluginEnabled.value,projectId:()=>selectedProjectId.value,projects:()=>projects.value,navigate:openPluginWorkspace});
 watch(selectedProjectId,()=>pluginHost.invalidate(),{flush:"sync"});
 watch(pluginEnabled,()=>{
   pluginHost.invalidate();
@@ -257,7 +268,7 @@ let workspaceRefreshGeneration=0;
 async function refresh(_waitForSecondary:boolean|Event=false){
   const request=++workspaceRefreshGeneration;
   try{
-    const [nextProjects,nextProfiles,nextSettings]=await Promise.all([api.listProjects(),api.listProfiles(),api.getAppSettings()]);
+    const [nextProjects,nextProfiles,nextSettings]=await Promise.all([workspaceApi.listProjects(),configurationApi.listProfiles(),shellApi.getAppSettings()]);
     if(request!==workspaceRefreshGeneration)return;
     projects.value=nextProjects;profiles.value=nextProfiles;appSettings.value=nextSettings;
     if(selectedProjectId.value&&!projects.value.some(project=>project.id===selectedProjectId.value))selectProject(undefined);
@@ -304,7 +315,7 @@ async function removeProject(project:Project){
   projectImpactLoadingId.value=project.id;
   pendingProjectAction.value=undefined;
   try {
-    const impact=await api.projectImpact(project.id);
+    const impact=await workspaceApi.projectImpact(project.id);
     pendingProjectAction.value={project,impact,mode:impact.totalRecords>0?"archive":"delete"};
   } catch(error){ notify("error",String(error)); }
   finally{projectImpactLoadingId.value=undefined;}
@@ -319,10 +330,10 @@ async function confirmProjectAction(){
   deletingProjectId.value=action.project.id;
   try {
     if(action.mode==="archive"){
-      await api.archiveProject(action.project.id,true);
+      await workspaceApi.archiveProject(action.project.id,true);
       notify("success",tr("工作空间已归档，历史数据保持可查","Workspace archived; history remains available"));
     } else {
-      await api.deleteProject(action.project.id);
+      await workspaceApi.deleteProject(action.project.id);
       notify("success",tr("空工作空间已删除","Empty workspace deleted"));
     }
     pendingProjectAction.value=undefined;
@@ -331,7 +342,7 @@ async function confirmProjectAction(){
   finally{deletingProjectId.value=undefined;}
 }
 async function toggleArchive(project:Project){
-  try { await api.archiveProject(project.id,project.status==="active"); await refresh(); }
+  try { await workspaceApi.archiveProject(project.id,project.status==="active"); await refresh(); }
   catch(error){ notify("error",String(error)); }
 }
 function openProfile(profile?:ConfigProfile){ editProfile.value=profile;configDialog.value=true; }
@@ -344,13 +355,13 @@ function cloneDefaultProfile(){
 async function removeProfile(profile:ConfigProfile){
   if(profile.isDefault){notify("info",tr("系统默认配置不能删除","The system default profile cannot be deleted"));return;}
   if(deletingProfileId.value!==profile.id){deletingProfileId.value=profile.id;notify("info",tr("再次点击删除以确认","Click Delete again to confirm"));return;}
-  try{await api.deleteProfile(profile.id);await refresh();notify("success",tr("配置已删除","Profile deleted"));}
+  try{await configurationApi.deleteProfile(profile.id);await refresh();notify("success",tr("配置已删除","Profile deleted"));}
   catch(error){notify("error",String(error));}
   finally{deletingProfileId.value=undefined;}
 }
 async function loadBrandIcon(){
   if(!appSettings.value.customIcon){brandIconUrl.value=defaultBrandIconUrl;return;}
-  try{brandIconUrl.value=await api.getAppIconDataUrl();}
+  try{brandIconUrl.value=await shellApi.getAppIconDataUrl();}
   catch{brandIconUrl.value=defaultBrandIconUrl;}
 }
 async function appSettingsSaved(){ appSettingsDialog.value=false; await refresh(); await loadBrandIcon(); }
@@ -358,13 +369,13 @@ async function checkEnvironment(){
   environmentChecking.value=true;
   try {
     await refreshPreparationStatus();
-    environment.value=await api.checkEnvironment(profiles.value.find(item=>item.isDefault)?.id || profiles.value[0]?.id);
+    environment.value=await environmentApi.checkEnvironment(profiles.value.find(item=>item.isDefault)?.id || profiles.value[0]?.id);
     notify("success",tr("环境检查完成","Environment check completed"));
   } catch(error){ notify("error",String(error)); }
   finally { environmentChecking.value=false; }
 }
 async function refreshPreparationStatus(){
-  try { preparationStatus.value=await api.getEnvironmentPreparationStatus(); }
+  try { preparationStatus.value=await environmentApi.getEnvironmentPreparationStatus(); }
   catch(error){ notify("error",String(error)); }
 }
 async function recoverPreparation(){
@@ -372,7 +383,7 @@ async function recoverPreparation(){
   if(!owner || recoveryAcknowledgement.value!=="已确认安装子进程停止")return;
   recoveringPreparation.value=true;
   try {
-    await api.recoverEnvironmentPreparation(owner,recoveryAcknowledgement.value);
+    await environmentApi.recoverEnvironmentPreparation(owner,recoveryAcknowledgement.value);
     recoveryAcknowledgement.value="";
     notify("success",tr("环境准备租约已人工恢复，事件已记录","Preparation lease recovered; event recorded"));
   } catch(error){ notify("error",String(error)); }
@@ -386,8 +397,8 @@ async function installEnvironment(){
   try {
     await clearEnvironmentLogs();
     const profileId=profiles.value.find(item=>item.isDefault)?.id || profiles.value[0]?.id;
-    const message=await api.installEnvironmentDependencies(profileId);
-    environment.value=await api.checkEnvironment(profileId);
+    const message=await environmentApi.installEnvironmentDependencies(profileId);
+    environment.value=await environmentApi.checkEnvironment(profileId);
     environmentInstallState.value="success";
     notify("success",message);
   } catch {
@@ -402,13 +413,13 @@ async function autoSyncWorkers(){
   if(workerAutoSyncRunning||!assetWorkspaceActive())return;
   workerAutoSyncRunning=true;
   try{
-    const nodes=await api.listWorkerNodes();
+    const nodes=await runtimeApi.listWorkerNodes();
     // Import one potentially large Worker bundle at a time. Parallel imports
     // compete for SQLite and memory with active scans and previously caused a
     // burst exactly when a suspended macOS window became visible again.
     for(const node of nodes.filter(node=>node.enabled)){
       if(!assetWorkspaceActive())break;
-      try{await api.syncWorkerNode(node.id);}catch{/* 节点错误已写入节点状态。 */}
+      try{await remoteScanningApi.syncWorkerNode(node.id);}catch{/* 节点错误已写入节点状态。 */}
     }
   }catch{/* 尚未配置 Worker 时保持安静。 */}
   finally{workerAutoSyncRunning=false;}

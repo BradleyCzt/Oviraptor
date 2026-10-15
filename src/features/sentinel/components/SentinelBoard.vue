@@ -18,7 +18,7 @@ import {
   Shield,
   ShieldCheck,
 } from "@lucide/vue";
-import { api } from "../../../api";
+import { sentinelApi } from "../api";
 import { useI18n } from "../../../i18n";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import InlineConfirm from "../../../shared/components/InlineConfirm.vue";
@@ -155,7 +155,7 @@ async function prepareClosureHandoff(scanId: string) {
   preparingHandoff = true;
   const selectedScan = selected.value;
   try {
-    const preview = await api.previewWebClosureHandoff(scanId);
+    const preview = await sentinelApi.previewWebClosureHandoff(scanId);
     if (selected.value !== selectedScan) return;
     if (preview.sourceScanId !== scanId || preview.attemptNumber !== selectedScan.attemptCount
       || preview.executionSettled !== false || preview.targetRequestsGranted !== 0) throw new Error('closure_handoff_preview_mismatch');
@@ -191,7 +191,7 @@ const projectFilter = ref<number | undefined>(props.projectId);
 const scanPages = useScanPages({
   scope: () => projectFilter.value,
   isRefreshing: () => loading.value,
-  read: (project, limit, cursor) => api.listSentinelScans(project, limit, cursor),
+  read: (project, limit, cursor) => sentinelApi.listSentinelScans(project, limit, cursor),
   onError: (message) => emit("notify", "error", message),
 });
 const { scans, scanPageSize, scanHasMore, scanLoadingMore,
@@ -236,7 +236,7 @@ async function refreshOverviewStats(project = projectFilter.value) {
   overviewError.value = false;
   overviewRequests++;
   try {
-    const next = await api.sentinelOverviewStats(project);
+    const next = await sentinelApi.sentinelOverviewStats(project);
     if (current()) stats.value = next;
   } catch (error) {
     if (current()) { overviewError.value = true; throw error; }
@@ -248,7 +248,7 @@ async function refreshOverviewStats(project = projectFilter.value) {
 const { stats: investigationStats, state: investigationSummaryState,
   refresh: refreshInvestigationSummary } = useInvestigationSummary({
   scope: () => projectFilter.value,
-  read: project => api.investigationOverview(project),
+  read: project => sentinelApi.investigationOverview(project),
 });
 const opportunityView = ref<"ready" | "all" | "history">("ready");
 const opportunityBusy = ref(0);
@@ -302,8 +302,8 @@ const fuseEntries = shallowRef<SentinelFuseEntry[]>([]);
 const fuseFilter = ref("active");
 const fuseCategoryFilter = ref("all");
 const { fuseEditor, pendingFuseRemoval, fuseBusy, fuseForm, editFuse, saveFuse, removeFuse } = useFuseDisposition({
-  save: (input) => api.saveSentinelFuseReview(input),
-  remove: (id) => api.removeSentinelFuseEntry(id),
+  save: (input) => sentinelApi.saveSentinelFuseReview(input),
+  remove: (id) => sentinelApi.removeSentinelFuseEntry(id),
   reload: () => load(),
   notify: (kind, message) => emit("notify", kind, message),
 });
@@ -332,7 +332,7 @@ const authRecoveryAutoContinuing = ref(false);
 const { matchedScanIds, applySearch } = useTaskSearch({
   query: () => props.search,
   scope: () => projectFilter.value,
-  lookup: (query) => api.searchSentinelScanIds(query),
+  lookup: (query) => sentinelApi.searchSentinelScanIds(query),
   showResults: () => { tab.value = "results"; },
   selectMatch: async () => {
     const scan = visibleScans.value[0];
@@ -344,13 +344,13 @@ const expandedSensitive = ref<number[]>([]);
 const { detail: liveTrace, busy: liveTraceBusy, load: loadSelectedTrace, reset: resetSelectedTrace } = useTaskTrace({
   scanId: () => selected.value?.id,
   projectId: () => projectFilter.value,
-  read: scanId => api.getAgentTrace(scanId),
+  read: scanId => sentinelApi.getAgentTrace(scanId),
   notify: message => emit("notify", "error", message),
 });
 const { fuseState, fuseRows, fuseTarget, fuseValidationRows, toggleFuseDetail } = useFuseDetails({
   targets,
-  loadFindings: (scanId) => api.listSentinelFindings(scanId),
-  loadValidations: (scanId) => api.listSentinelValidations(scanId),
+  loadFindings: (scanId) => sentinelApi.listSentinelFindings(scanId),
+  loadValidations: (scanId) => sentinelApi.listSentinelValidations(scanId),
   notifyError: (message) => emit("notify", "error", message),
 });
 
@@ -738,7 +738,7 @@ async function loadAgentExecution(scanId: string, url: string) {
     return;
   }
   try {
-    const execution = await api.agentTargetExecution(scanId, url);
+    const execution = await sentinelApi.agentTargetExecution(scanId, url);
     if (generation !== agentExecutionGeneration || selected.value?.id !== scanId || selectedUrl.value !== url) return;
     agentExecution.value = execution;
     agentExecutionScope.value = { scanId, targetUrl: url };
@@ -1437,14 +1437,14 @@ async function refreshSelectedEvidenceAfterValidation() {
     nextVulnerabilityScanIds,
     nextAppsecResult,
   ] = await Promise.all([
-    api.listSentinelOpportunities(projectFilter.value, undefined, undefined, 800),
-    api.listSentinelOpportunities(undefined, scanId, undefined, 800),
-    api.listSentinelValidations(scanId),
-    api.listInvestigationValidations(scanId),
+    sentinelApi.listSentinelOpportunities(projectFilter.value, undefined, undefined, 800),
+    sentinelApi.listSentinelOpportunities(undefined, scanId, undefined, 800),
+    sentinelApi.listSentinelValidations(scanId),
+    sentinelApi.listInvestigationValidations(scanId),
     refreshOverviewStats(project),
     refreshInvestigationSummary(),
-    api.listSentinelVulnerabilityScanIds(projectFilter.value),
-    api.listAppSecScanResult(scanId),
+    sentinelApi.listSentinelVulnerabilityScanIds(projectFilter.value),
+    sentinelApi.listAppSecScanResult(scanId),
   ]);
   if (detailDisposed || project !== projectFilter.value || selected.value?.id !== scanId || generation !== detailGeneration) return;
   opportunities.value = nextOpportunities;
@@ -1507,7 +1507,7 @@ async function openRepeaterForOpportunity(item: SentinelOpportunity) {
   repeaterApi.value = undefined;
   repeaterHypothesis.value = undefined;
   try {
-    const graph = await api.getInvestigationGraph(item.scanId, item.targetUrl);
+    const graph = await sentinelApi.getInvestigationGraph(item.scanId, item.targetUrl);
     repeaterApi.value = findReplayApiFromGraph(item, graph);
     repeaterHypothesis.value = graph.hypotheses.find((hypothesis) => hypothesis.sourceOpportunityKey === item.opportunityKey)
       || graph.hypotheses.find((hypothesis) => String(hypothesis.contract?.endpoint || "") === opportunityEndpoint(item));
@@ -1608,7 +1608,7 @@ const evidenceChainRows = computed(() => {
 async function setOpportunityStatus(item: SentinelOpportunity, status: string) {
   opportunityBusy.value = item.id;
   try {
-    await api.updateSentinelOpportunityStatus(item.id, status);
+    await sentinelApi.updateSentinelOpportunityStatus(item.id, status);
     const replace = (rows: SentinelOpportunity[]) =>
       rows.map((row) => (row.id === item.id ? { ...row, status } : row));
     opportunities.value = replace(opportunities.value);
@@ -1654,7 +1654,7 @@ function startAuthCapturePolling(session: BrowserAuthSession) {
   const timer = window.setInterval(async () => {
     if (authRecoveryBusy.value && authRecoveryBusy.value !== session.id) return;
     try {
-      const updated = await api.finishBrowserAuthSession(session.id);
+      const updated = await sentinelApi.finishBrowserAuthSession(session.id);
       await reloadAuthRecoverySessions();
       if (updated.status === "valid") {
         stopAuthCapturePolling(session.id);
@@ -1684,12 +1684,12 @@ async function load() {
       nextVulnerabilityScanIds,
       nextOpportunities,
     ] = await Promise.all([
-      api.listSentinelScans(project, scanPageSize),
-      api.listSentinelTargets(project),
+      sentinelApi.listSentinelScans(project, scanPageSize),
+      sentinelApi.listSentinelTargets(project),
       refreshOverviewStats(project),
       refreshInvestigationSummary(),
-      api.listSentinelVulnerabilityScanIds(project),
-      api.listSentinelOpportunities(project, undefined, undefined, 800),
+      sentinelApi.listSentinelVulnerabilityScanIds(project),
+      sentinelApi.listSentinelOpportunities(project, undefined, undefined, 800),
     ]);
     if (!current()) return;
     replaceScanHead(nextScans);
@@ -1697,12 +1697,12 @@ async function load() {
     vulnerabilityScanIds.value = nextVulnerabilityScanIds;
     opportunities.value = nextOpportunities;
     if (tab.value === "fuse") {
-      const entries = await api.listSentinelFuseZone(project);
+      const entries = await sentinelApi.listSentinelFuseZone(project);
       if (!current()) return;
       fuseEntries.value = entries;
     }
     if (tab.value === "validations") {
-      const items = await api.listSentinelValidationWorkItems(project);
+      const items = await sentinelApi.listSentinelValidationWorkItems(project);
       if (!current()) return;
       validationWorkItems.value = items;
     }
@@ -1752,12 +1752,12 @@ async function liveSync() {
       nextVulnerabilityScanIds,
       nextOpportunities,
     ] = await Promise.all([
-      api.listSentinelScans(projectFilter.value, scanPageSize),
-      api.listSentinelTargets(projectFilter.value),
+      sentinelApi.listSentinelScans(projectFilter.value, scanPageSize),
+      sentinelApi.listSentinelTargets(projectFilter.value),
       refreshOverviewStats(project),
       refreshInvestigationSummary(),
-      api.listSentinelVulnerabilityScanIds(projectFilter.value),
-      api.listSentinelOpportunities(projectFilter.value, undefined, undefined, 800),
+      sentinelApi.listSentinelVulnerabilityScanIds(projectFilter.value),
+      sentinelApi.listSentinelOpportunities(projectFilter.value, undefined, undefined, 800),
     ]);
     if (!current()) return;
     mergeScanPage(nextScans);
@@ -1811,14 +1811,14 @@ function clearResultDetails() {
 }
 async function readResultDetails(scan: SentinelScan) {
   return Promise.all([
-    api.listSentinelCheckpoints(scan.id),
-    api.listSentinelFindings(scan.id),
-    api.listSentinelValidations(scan.id),
-    api.listInvestigationValidations(scan.id),
-    scan.previousScanId ? api.listSentinelFindings(scan.previousScanId).catch(() => []) : Promise.resolve([]),
-    api.listSentinelOpportunities(undefined, scan.id, undefined, 800),
-    api.listSentinelScanAttempts(scan.id),
-    scan.scanType === "web" ? Promise.resolve({ vulnerabilities: [], sources: [] }) : api.listAppSecScanResult(scan.id),
+    sentinelApi.listSentinelCheckpoints(scan.id),
+    sentinelApi.listSentinelFindings(scan.id),
+    sentinelApi.listSentinelValidations(scan.id),
+    sentinelApi.listInvestigationValidations(scan.id),
+    scan.previousScanId ? sentinelApi.listSentinelFindings(scan.previousScanId).catch(() => []) : Promise.resolve([]),
+    sentinelApi.listSentinelOpportunities(undefined, scan.id, undefined, 800),
+    sentinelApi.listSentinelScanAttempts(scan.id),
+    scan.scanType === "web" ? Promise.resolve({ vulnerabilities: [], sources: [] }) : sentinelApi.listAppSecScanResult(scan.id),
   ]);
 }
 function publishResultDetails(details: Awaited<ReturnType<typeof readResultDetails>>) {
@@ -1881,7 +1881,7 @@ async function loadInvestigationGraph(scanId?: string, url?: string) {
   }
   investigationBusy.value = true;
   try {
-    const graph = await api.getInvestigationGraph(scanId, url);
+    const graph = await sentinelApi.getInvestigationGraph(scanId, url);
     if (current()) investigationGraph.value = graph;
   } catch (error) {
     if (current()) {
@@ -1896,7 +1896,7 @@ async function loadInvestigationGraph(scanId?: string, url?: string) {
 async function updateInvestigationStatus(item: InvestigationHypothesis, status: string) {
   investigationUpdatingId.value = item.id;
   try {
-    await api.updateInvestigationHypothesis(item.id, status);
+    await sentinelApi.updateInvestigationHypothesis(item.id, status);
     await loadInvestigationGraph(item.scanId, item.targetUrl);
     emit("notify", "success", status === "in_progress" ? "已进入有界验证队列" : "调查假设状态已更新");
   } catch (error) {
@@ -1915,7 +1915,7 @@ async function preview(scan: SentinelScan) {
     return;
   }
   try {
-    const list = await api.listSentinelFindings(scan.id);
+    const list = await sentinelApi.listSentinelFindings(scan.id);
     previewUrls.value = [
       ...new Set(list.map((f) => f.targetUrl).filter((u) => u && u !== "*")),
     ];
@@ -1960,7 +1960,7 @@ function onTaskArchived(scan: SentinelScan) {
 }
 async function confirm(scan: SentinelScan) {
   try {
-    await api.confirmSentinelScan(scan.id);
+    await sentinelApi.confirmSentinelScan(scan.id);
     emit("notify", "success", "任务已确认，前端深度解析与原生 Web 调查已启动");
     await load();
     await preview(scans.value.find((s) => s.id === scan.id) || scan);
@@ -1972,7 +1972,7 @@ async function pauseScan(scan: SentinelScan) {
   if (!window.confirm("确定请求暂停吗？系统会等待执行线程退出后标记“已暂停”；已保存证据、未知目标效果和未确认清理记录会保留。")) return;
   scanControlBusy.value = scan.id;
   try {
-    await api.pauseSentinelScan(scan.id);
+    await sentinelApi.pauseSentinelScan(scan.id);
     emit(
       "notify",
       "success",
@@ -1989,7 +1989,7 @@ async function pauseScan(scan: SentinelScan) {
 async function resumeScan(scan: SentinelScan) {
   scanControlBusy.value = scan.id;
   try {
-    await api.resumeSentinelScan(scan.id);
+    await sentinelApi.resumeSentinelScan(scan.id);
     emit(
       "notify",
       "success",
@@ -2007,7 +2007,7 @@ async function resumeScan(scan: SentinelScan) {
 }
 async function executeRescan(scan: SentinelScan) {
   if (scan.scanType && scan.scanType !== "web") {
-    const next = await api.rescanWorkbenchScan(scan.id);
+    const next = await sentinelApi.rescanWorkbenchScan(scan.id);
     await load();
     await openScan(scans.value.find((item) => item.id === next.id) || next);
     emit(
@@ -2017,7 +2017,7 @@ async function executeRescan(scan: SentinelScan) {
     );
     return;
   }
-  const next = await api.rescanSentinelScan(scan.id);
+  const next = await sentinelApi.rescanSentinelScan(scan.id);
   await load();
   const fresh = scans.value.find((item) => item.id === next.id) || next;
   await openScan(fresh);
@@ -2033,11 +2033,11 @@ async function rescan(scan: SentinelScan) {
   scanControlBusy.value = scan.id;
   try {
     if (!scan.scanType || scan.scanType === "web") {
-      const boundSessions = await api.listSentinelScanAuthSessions(scan.id);
+      const boundSessions = await sentinelApi.listSentinelScanAuthSessions(scan.id);
       const sessions = await Promise.all(
         boundSessions.map((session) =>
           session.status === "valid"
-            ? api.validateBrowserAuthSession(session.id)
+            ? sentinelApi.validateBrowserAuthSession(session.id)
             : Promise.resolve(session),
         ),
       );
@@ -2058,13 +2058,13 @@ async function rescan(scan: SentinelScan) {
 }
 async function reloadAuthRecoverySessions() {
   if (!authRecoveryScan.value) return;
-  authRecoverySessions.value = await api.listSentinelScanAuthSessions(authRecoveryScan.value.id);
+  authRecoverySessions.value = await sentinelApi.listSentinelScanAuthSessions(authRecoveryScan.value.id);
 }
 async function reopenAuthRecovery(session: BrowserAuthSession) {
   if (!authRecoveryScan.value) return;
   authRecoveryBusy.value = session.id;
   try {
-    const opened = await api.openBrowserAuthSession({
+    const opened = await sentinelApi.openBrowserAuthSession({
       id: session.id,
       projectId: session.projectId,
       name: session.name,
@@ -2083,7 +2083,7 @@ async function reopenAuthRecovery(session: BrowserAuthSession) {
 async function finishAuthRecovery(session: BrowserAuthSession) {
   authRecoveryBusy.value = session.id;
   try {
-    const updated = await api.finishBrowserAuthSession(session.id);
+    const updated = await sentinelApi.finishBrowserAuthSession(session.id);
     await reloadAuthRecoverySessions();
     emit(
       "notify",
@@ -2100,7 +2100,7 @@ async function finishAuthRecovery(session: BrowserAuthSession) {
 async function validateAuthRecovery(session: BrowserAuthSession) {
   authRecoveryBusy.value = session.id;
   try {
-    const updated = await api.validateBrowserAuthSession(session.id);
+    const updated = await sentinelApi.validateBrowserAuthSession(session.id);
     await reloadAuthRecoverySessions();
     emit(
       "notify",
@@ -2156,7 +2156,7 @@ async function remove() {
   if (!scan || deleting.value) return;
   deleting.value = true;
   try {
-    await api.deleteSentinelScan(scan.id);
+    await sentinelApi.deleteSentinelScan(scan.id);
     if (selected.value?.id === scan.id) {
       selected.value = undefined;
       findings.value = [];
@@ -2185,7 +2185,7 @@ async function exportProject() {
     emit(
       "notify",
       "success",
-      `项目包已导出：${await api.exportSentinelProject(transferProjectId.value)}`,
+      `项目包已导出：${await sentinelApi.exportSentinelProject(transferProjectId.value)}`,
     );
   } catch (e) {
     emit("notify", "error", String(e));
@@ -2207,7 +2207,7 @@ async function saveValidation() {
   const generation = detailGeneration;
   const form = { ...validationForm };
   try {
-    await api.saveSentinelValidation({
+    await sentinelApi.saveSentinelValidation({
       scanId,
       url: item.targetUrl,
       findingKey: findingKey(item),
@@ -2217,7 +2217,7 @@ async function saveValidation() {
     // The write belongs to its original task even if the user navigated away.
     // Only publish the subsequent read into a still-matching view.
     const [nextValidations] = await Promise.all([
-      api.listSentinelValidations(scanId),
+      sentinelApi.listSentinelValidations(scanId),
       project === projectFilter.value && !detailDisposed ? refreshOverviewStats(project) : Promise.resolve(),
     ]);
     if (!detailDisposed && project === projectFilter.value && scanId === selected.value?.id && generation === detailGeneration) {
@@ -2225,7 +2225,7 @@ async function saveValidation() {
       if (validationEditor.value === item) validationEditor.value = undefined;
     }
     if (tab.value === "validations" && project === projectFilter.value && !detailDisposed) {
-      const nextItems = await api.listSentinelValidationWorkItems(project);
+      const nextItems = await sentinelApi.listSentinelValidationWorkItems(project);
       if (!detailDisposed && project === projectFilter.value) validationWorkItems.value = nextItems;
     }
     emit(
@@ -2252,7 +2252,7 @@ async function saveValidationWorkItem() {
   const project = projectFilter.value;
   const form = { ...validationWorkForm };
   try {
-    await api.saveSentinelValidation({
+    await sentinelApi.saveSentinelValidation({
       scanId: item.scanId,
       url: item.url,
       findingKey: item.findingKey,
@@ -2260,7 +2260,7 @@ async function saveValidationWorkItem() {
       ...form,
     });
     const [nextItems] = await Promise.all([
-      api.listSentinelValidationWorkItems(project),
+      sentinelApi.listSentinelValidationWorkItems(project),
       project === projectFilter.value && !detailDisposed ? refreshOverviewStats(project) : Promise.resolve(),
     ]);
     if (!detailDisposed && project === projectFilter.value) {
@@ -2344,9 +2344,9 @@ watch(tab, async (value) => {
   try {
     if (value === "queue" && !previewScan.value && queueScans.value[0])
       await preview(queueScans.value[0]);
-    if (value === "fuse" || value === "queue") fuseEntries.value = await api.listSentinelFuseZone(projectFilter.value);
+    if (value === "fuse" || value === "queue") fuseEntries.value = await sentinelApi.listSentinelFuseZone(projectFilter.value);
     if (value === "validations") {
-      validationWorkItems.value = await api.listSentinelValidationWorkItems(projectFilter.value);
+      validationWorkItems.value = await sentinelApi.listSentinelValidationWorkItems(projectFilter.value);
       const first = selectedValidationWorkItems.value[0];
       if (first && !validationWorkEditor.value) editValidationWorkItem(first);
     }

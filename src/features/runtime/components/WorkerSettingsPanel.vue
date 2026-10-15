@@ -14,7 +14,8 @@ import {
   Square,
   Trash2,
 } from "@lucide/vue";
-import { api } from "../../../api";
+import { runtimeApi } from "../api";
+import { remoteScanningApi } from "../../sentinel/remoteWorkerApi";
 import type { EnvironmentReport } from "../../environment/types";
 import type { LocalWorkerSettings, RemoteWorkerNode, WorkerHealth } from "../types";
 import type { SentinelScan } from "../../sentinel/types";
@@ -45,8 +46,8 @@ async function load() {
   loading.value = true;
   try {
     [local.value, nodes.value] = await Promise.all([
-      api.getLocalWorkerSettings(),
-      api.listWorkerNodes(),
+      runtimeApi.getLocalWorkerSettings(),
+      runtimeApi.listWorkerNodes(),
     ]);
   } catch (error) {
     message("error", String(error));
@@ -59,7 +60,7 @@ async function saveLocal() {
   if (!local.value) return;
   savingLocal.value = true;
   try {
-    local.value = await api.saveLocalWorkerSettings({
+    local.value = await runtimeApi.saveLocalWorkerSettings({
       enabled: local.value.enabled,
       port: Number(local.value.port),
       accessToken: local.value.accessToken,
@@ -83,7 +84,7 @@ async function copy(value: string, label: string) {
 
 async function addNode() {
   try {
-    const id = await api.saveWorkerNode({
+    const id = await runtimeApi.saveWorkerNode({
       ...form.value,
       enabled: true,
     });
@@ -99,7 +100,7 @@ async function removeNode(node: RemoteWorkerNode) {
   if (busyNode.value) return;
   busyNode.value = node.id;
   try {
-    await api.deleteWorkerNode(node.id);
+    await runtimeApi.deleteWorkerNode(node.id);
     await load();
     message("success", `${node.name} 已从主控端移除；Worker 本机数据未删除`);
   } catch (error) {
@@ -113,18 +114,18 @@ async function inspectNode(node: RemoteWorkerNode) {
   busyNode.value = node.id;
   try {
     const [nodeHealth, nodeEnvironment, nodeScans] = await Promise.all([
-      api.testWorkerNode(node.id),
-      api.getRemoteWorkerEnvironment(node.id),
-      api.listRemoteWorkerScans(node.id),
+      runtimeApi.testWorkerNode(node.id),
+      runtimeApi.getRemoteWorkerEnvironment(node.id),
+      remoteScanningApi.listRemoteWorkerScans(node.id),
     ]);
     health.value[node.id] = nodeHealth;
     environments.value[node.id] = nodeEnvironment;
     scans.value[node.id] = nodeScans;
     message("success", `${node.name} 连接正常，环境与任务状态已刷新`);
-    nodes.value = await api.listWorkerNodes();
+    nodes.value = await runtimeApi.listWorkerNodes();
   } catch (error) {
     message("error", String(error));
-    nodes.value = await api.listWorkerNodes().catch(() => nodes.value);
+    nodes.value = await runtimeApi.listWorkerNodes().catch(() => nodes.value);
   } finally {
     busyNode.value = undefined;
   }
@@ -133,9 +134,9 @@ async function inspectNode(node: RemoteWorkerNode) {
 async function syncNode(node: RemoteWorkerNode) {
   busyNode.value = node.id;
   try {
-    const count = await api.syncWorkerNode(node.id);
+    const count = await remoteScanningApi.syncWorkerNode(node.id);
     message("success", `${node.name} 已读取 ${count} 条只读历史记录，可在任务中心的历史产物中查看；不会创建或恢复本地扫描任务，已删除或较旧轮次可能不显示。`);
-    nodes.value = await api.listWorkerNodes();
+    nodes.value = await runtimeApi.listWorkerNodes();
   } catch (error) {
     message("error", String(error));
   } finally {
@@ -150,12 +151,12 @@ async function control(
 ) {
   busyNode.value = node.id;
   try {
-    await api.controlRemoteWorkerScan({
+    await remoteScanningApi.controlRemoteWorkerScan({
       nodeId: node.id,
       scanId: scan.id,
       action,
     });
-    scans.value[node.id] = await api.listRemoteWorkerScans(node.id);
+    scans.value[node.id] = await remoteScanningApi.listRemoteWorkerScans(node.id);
     message("success", `远程任务已${action === "pause" ? "暂停" : action === "resume" ? "继续" : "取消"}`);
   } catch (error) {
     message("error", String(error));

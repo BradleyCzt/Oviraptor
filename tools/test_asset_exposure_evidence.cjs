@@ -288,7 +288,7 @@ test('the exposure page offers the pending tab, the evidence control and no auto
   let coverageDrill;
   const imports = name => {
     if (name === 'vue') return vue;
-    if (name === '../../../api') return { api };
+    if (name === '../api') return { assetApi: api };
     if (name === './useExposureSurface') return surface;
     if (name === './useExposureEvidence') return evidence;
     if (name === './api' || name === './api') return { exposureApi: api };

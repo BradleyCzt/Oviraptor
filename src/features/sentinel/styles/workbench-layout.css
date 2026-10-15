@@ -1,0 +1,30 @@
+
+.agent-workbench .workbench-form{overflow:hidden}.agent-workbench textarea{min-height:150px}.workbench-grid{align-items:start}
+@media(max-width:1100px){.token-summary-grid{grid-template-columns:repeat(3,minmax(120px,1fr))}.token-type-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media(max-width:680px){.token-overview-heading{grid-template-columns:1fr}.token-scope-switch{justify-self:start}.token-summary-grid,.token-type-grid{grid-template-columns:1fr 1fr;padding-inline:12px}.token-type-grid dl{grid-template-columns:repeat(3,1fr)}.sentinel-task-card header .status-chip{margin-left:0}.model-editor-actions{flex-wrap:wrap}}
+
+/* Keep token accounting readable when the desktop window is narrow. */
+.sentinel-token-overview{container:sentinel-token / inline-size;min-width:0}
+.token-overview-heading{min-width:0}
+.token-overview-heading>div{min-width:0}
+.token-scope-switch{min-width:0;max-width:100%;flex-wrap:wrap}
+.token-scope-switch button{white-space:nowrap}
+.token-summary-grid,.token-type-grid{min-width:0}
+.token-summary-grid article strong{min-width:0;white-space:normal;overflow-wrap:anywhere;word-break:break-word}
+.token-type-grid>article{min-width:0}
+.token-type-grid article header{min-width:0}
+.token-type-grid article header span{min-width:0;overflow-wrap:anywhere;word-break:break-word}
+.token-type-grid article header strong{flex:0 0 auto;white-space:normal;overflow-wrap:anywhere;word-break:break-word}
+.token-type-grid dl div{min-width:0}
+.token-type-grid dt,.token-type-grid dd{min-width:0;overflow-wrap:anywhere;word-break:break-word;white-space:normal}
+@container sentinel-token (max-width:1040px){
+  .token-summary-grid{grid-template-columns:repeat(3,minmax(0,1fr))}
+  .token-type-grid{grid-template-columns:repeat(2,minmax(0,1fr))}
+}
+@container sentinel-token (max-width:620px){
+  .token-overview-heading{grid-template-columns:1fr}
+  .token-scope-switch{justify-self:start}
+  .token-summary-grid{grid-template-columns:repeat(2,minmax(0,1fr));padding-inline:0}
+  .token-type-grid{grid-template-columns:1fr;padding-inline:0}
+  .token-type-grid dl{grid-template-columns:repeat(3,minmax(0,1fr))}
+}
