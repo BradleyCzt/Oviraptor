@@ -87,10 +87,21 @@ Agent or claimed to be isolated by directory changes alone.
 1. Owner contracts: `e4a6199` moves 128 declarations into nine owner contracts,
    updates 100 consumers, and retains type-only compatibility exports.
    Frontend build and application-shell 107/107 passed for this stage.
-2. Business components and Skills dependency direction: in progress.
-3. Rust command namespaces and IPC ownership: in progress.
-4. Scope/provider/skill consent and bounded resource tools: in progress.
-5. Final regression, independent review and branch publication: pending.
+2. Business components and Skills dependency direction: `9fd21c2` moves 17
+   components to owners, extracts the shared instruction catalog into Skills,
+   and guards actual static/dynamic imports with TypeScript/Vue AST traversal.
+   See [frontend ownership](FRONTEND_MODULE_OWNERSHIP_2026-10-14.md).
+3. Rust command namespaces: `50738a1`, `d9fe132`, `e3c5b7d` establish seven
+   module owners and preserve 33 IPC names. Source guards and project deletion
+   UI regressions pass 26/26; the extracted production inventory-frame parser
+   passes its independent native Rust test 1/1. These do not prove whole-crate
+   compilation. See [Rust boundaries](RUST_BUSINESS_MODULE_BOUNDARIES_2026-10-14.md).
+4. Package source/integrity/import boundaries: `306d0fd`; scope/provider/Skill
+   consent and paged resources: `b8636ae`; pending-consent revocation fix:
+   `8247b74`. Access UI tests pass 20/20. Native tests await actual execution.
+5. Browser QA expansion: `1c4c3a7`; final all-Node, production build, native
+   compilation/tests and actual Chromium verification are in progress.
+   The independent branch has been pushed; it has not been merged.
 
 Exact WIP baseline was archived to `/workspace/baseline-d61454c` for independent
 validation. Dependencies were installed from the official npm registry with
@@ -119,9 +130,119 @@ integration working tree. Counts overlap between suites and must not be added.
 | `npm run test:plugins` | 66 passed, 0 failed | `/workspace/validation/baseline-plugins.log` |
 | `npm run test:release-bundle` | 11 passed, 12 platform skips, 0 failed | `/workspace/validation/baseline-release-bundle.log` |
 | `cargo test --manifest-path src-tauri/Cargo.toml --locked --lib --no-run --jobs 2` before private system dependencies | Failed, exit 101: missing `glib-2.0.pc` | `/workspace/validation/rust-baseline-initial.log` |
+| Same native test build after private system dependencies | Reached E0583 for both missing test modules in the checkpoint; stopped after diagnostics (exit 143), not passed | `/workspace/validation/rust-baseline-native.log` |
 
 Dependency installation attempts are also retained: the first `npm ci` failed
 because the default home cache was not writable; retry using the workspace
 cache and official registry succeeded. Its incidental `yarn.lock` rewrite was
 reverted before commits. The Library transfer attempts failed without creating
 archive bytes. No failed or skipped check is represented as a passing test.
+
+### Integration findings and failures retained
+
+- Component migration initially failed type checking because three lazy-panel
+  imports still used the old component paths. Corrected before the successful
+  production build. The second UI run was 1,102 passed / 18 failed: 17 failures
+  came from workspace harness API mocks at the wrong relative path; one came
+  from the moved confirmation component mock. All 35 tests in the affected
+  suites subsequently passed. Original failed logs remain in
+  `/tmp/oviraptor-components-{build,ui,ui2}.log`.
+- The first all-tools Node run was 1,517 tests: 1,371 passed, 134 failed and
+  12 platform skips (`/workspace/validation/final-all-node.log`). This broader
+  command includes tests absent from `test:ui`: an isolated exact-baseline run
+  confirms all 128 human-review cases already failed because their API loader
+  omitted the reconciliation module. Five workbench tool-selection failures
+  were introduced by the new Skills catalog API dependency; the corresponding
+  baseline tests pass 5/5. The remaining failure is the local CDP runtime
+  fixture. None are suppressed or counted as passed; fixes and reruns follow.
+- The first integration `cargo check --locked --lib` failed with E0425 in
+  `commands/assets.rs`: a JSON helper had been inherited through `include!`.
+  Commit `4c7b9f5` makes decoding explicit inside the asset owner and retains the
+  invalid-JSON fallback. The fixed whole-crate production check passed with
+  exit 0 in 33.85 seconds; log
+  `/workspace/validation/rust-integration-check-fixed.log`.
+- Independent review identified a request/consent capture race and pending
+  consent accidentally blocking revocation; both were fixed in `b8636ae` and
+  `8247b74`. `c480363` adds persistent monotonic Skill generations and deletion
+  tombstones: disable/re-enable or edit/restore cannot revive old consent even
+  when timestamps and final content match.
+- Initial actual Chromium acceptance passed 17/17 with no runtime errors,
+  unknown IPC or external requests. It used synthetic IPC and retained 29
+  screenshots plus stable source manifests in `/workspace/validation/browser`.
+  A later independent UI review reproduced stale consent labels when returning
+  to the permanently mounted Chat page; that navigation/configuration path is
+  being corrected and will be rerun before final acceptance. The initial pass
+  alone is not claimed to cover that newly identified path.
+
+### Follow-up corrections and native execution
+
+- `5c921a5` refreshes the existing Chat access panel on reactivation and after a
+  successful configuration save. `1504dcb` prevents an old access-write response
+  from replacing a newer recipient/Skill refresh. Seven real Workspace plus
+  AccessPanel regression cases were added; they do not invoke a reload helper
+  or remount the panel to simulate a working lifecycle.
+- `b3d009c` makes human-review and workbench-selection fixtures load the actual
+  API leaves through the existing harness. Actual corrected runs pass 128/128
+  and 5/5, retaining the original behavior assertions. `d227d00` confines the
+  loopback Chromium fixture's writable configuration/cache to temporary XDG
+  paths. On this container only, the explicit
+  `OVIRAPTOR_TEST_NO_SANDBOX=1` test launcher is required; production browser
+  behavior and global `HOME` are unchanged. The corrected CDP test passes 1/1
+  and proves anonymous capture, blocked cross-origin requests and comparison
+  identity isolation against local synthetic servers.
+- The complete native test target compiled successfully before execution
+  (`rust-integration-test-no-run.log`, exit 0, 2m00s). Focused native runs pass:
+  conversations 57/57, Skill packages 16/16, model protocol 34/34, and 45/45
+  selected migrated command tests. Filtering is explicit in each log and is
+  not reported as a complete Rust-suite pass.
+- Initial `execution_service::` run was 20 passed / 3 failed. One existing
+  test explicitly asserts Darwin's `EPERM` response for a zombie-only process
+  group; Linux correctly returns 0. `ef35080` makes that platform-specific
+  contract macOS-only, retaining all assertions. It still requires macOS
+  execution and is not counted as passing on Linux.
+- The other two failures retained killed descendants because this container's
+  PID 1 is `tail` and does not reap orphans. A Linux child-subreaper control
+  run passed both unchanged fork-storm tests (2/2) and reaped 994 orphaned
+  descendants. `a798012` adds `tools/run_with_subreaper.py` as a reproducible
+  outer test runner. It changes no application cleanup logic or test assertion.
+  Complete native testing is run under this wrapper with two test threads.
+
+Final all-suite results and source identities are recorded below only after
+the frozen-source runs finish. This work continued into 2026-10-15 UTC.
+
+### Wider native regression findings
+
+The first complete-suite attempt was stopped after a known failing binary had
+completed 590 tests: 577 passed, 13 failed, 0 ignored; 2,987 had not run.
+`rust-full-suite-partial-summary.json` records this as incomplete. The 11 schema
+fixture failures are addressed by `213e1ea`: the legacy-downgrade fixture removes
+a trigger that could not exist in that legacy database and asserts it is rebuilt
+on upgrade; the collaboration-event fixture selects only its own table DDL
+instead of accidentally including later business triggers. Their original
+production schema and fixtures were compared with `d61454c` Git blobs.
+
+Two takeover tests and five HTTP-journal tests used pre-contract fixtures that
+lacked authenticated Root birth records. `fce6274` supplies actual test-only v5
+birth records while preserving the old fixture for malformed-history negative
+tests. The first combined run was 28 passed / 5 failed; the remaining failures
+exposed canonical target URL differences in the new fixture. `2023d9d` corrects
+those targets, orders exposure crash-fixture identities by the real claim key,
+and uses temporary Node version probes instead of assuming Mac installation
+paths. HTTP-journal assertions remain unchanged. An unreachable-body server
+also has bounded accept so an admission failure yields a failure instead of
+hanging the test indefinitely.
+
+Broader Source/human-directive tests exposed a separate production boundary:
+Source plans have an owner-specific canonical hash that omits attempt identity,
+whereas homogeneous Web execution inspected their raw JSON hash before deciding
+whether it owned the plan. The proposed correction is being independently
+reviewed with Source/Web positive cases and corrupted mode/hash negative cases;
+Source fixture hashes and production financial/lease semantics are not changed
+to accommodate the Web validator.
+
+Actual final Chromium acceptance is now 18/18, with zero runtime errors, unknown
+IPC and external fetches. The 225-file browser source manifest is unchanged
+before build, after build and after browser execution. The final app bundle
+includes `1504dcb`; QA commit is `379b097`. The earlier UI refresh failures and
+late-response race are retained as real browser red-test evidence. Screenshots
+remain local test evidence; they are not in Git or the Library evidence archive.

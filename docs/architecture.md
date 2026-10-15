@@ -4,12 +4,17 @@
 也不代表所有模块已完成发布验收。设计审计及证据边界见
 [`NEST_DESIGN_AUDIT_2026-10-13.md`](NEST_DESIGN_AUDIT_2026-10-13.md)。
 
+2026-10-14 集成分支的最新模块归属、源码来源、验证记录与本地移交阻塞见
+[`BUSINESS_MODULE_INTEGRATION_2026-10-14.md`](BUSINESS_MODULE_INTEGRATION_2026-10-14.md)。
+该分支保留 `d61454c` WIP，未合并 main，尚不是已验收安装包。
+
 ## 主要边界
 
 | 入口 | 责任 |
 |---|---|
-| `src/App.vue`、`src/components/`、`src/features/` | Vue 界面与业务视图 |
-| `src/api.ts`、`src/types.ts` | 前端 IPC 调用及 TypeScript 数据契约 |
+| `src/App.vue`、`src/shell/`、`src/features/` | 主应用组合、导航与按业务归属的 Vue 视图 |
+| `src/shared/components/` | 无业务依赖的基础弹窗、确认组件 |
+| `src/features/*/api.ts`、各 owner `types.ts` | 领域 IPC 调用及 TypeScript 数据契约；根 `api.ts`、`types.ts` 保留兼容门面 |
 | `src-tauri/src/lib.rs` | Tauri 启动、共享 AppState、命令注册与应用生命周期 |
 | `src-tauri/src/commands.rs`、`commands/` | 命令门面与业务编排；混用 include 和真实子模块 |
 | `src-tauri/src/agent_runtime/` | Native 运行契约、事件/状态、调度、预算、租约、收据和恢复 |
