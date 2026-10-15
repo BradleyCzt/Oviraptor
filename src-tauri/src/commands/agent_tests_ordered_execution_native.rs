@@ -30,8 +30,12 @@ fn ordered_execution_native_loop_dispatches_both_assessments_under_original_capa
     assert_eq!(receipts[1]["predecessor"]["receiptId"], receipts[0]["receiptId"]);
     assert_ne!(receipts[0]["workerId"], receipts[1]["workerId"]);
     assert_eq!(ordered_exec_native(&connection, &root_id), native);
-    assert_eq!(seen.lock().unwrap().len(), 9,
-        "four original paid Root including HumanDirective, one bootstrap Mapper, two actual assessments, two actual executor rounds: {outcome:?}");
+    let budget_assessment = coordinator_original_budget_assessment_count(
+        &connection, &root_id, &seen.lock().unwrap(),
+        &["bootstrap", "mapper-output", "budget-allocation", "human-directive", "budget-consumption"],
+    );
+    assert_eq!(seen.lock().unwrap().len() - budget_assessment, 9,
+        "four original paid Root including HumanDirective, one bootstrap Mapper, two actual assessments, two actual executor rounds, excluding the separately proven original Web-cost advisory: {outcome:?}");
     let executor_calls: i64 = connection.query_row(
         "SELECT COUNT(*) FROM agent_web_model_journal WHERE child_run_id=?1 AND phase='received'",
         [&session.executor.run_id], |r| r.get(0)).unwrap();
@@ -44,6 +48,8 @@ fn ordered_execution_native_loop_dispatches_both_assessments_under_original_capa
     }
     assert_eq!(ordered_exec_projection(&connection, &id)["state"], "completed");
     multi_agent_finish_execution(&h.context, &mut session, &outcome).unwrap();
+    coordinator_finished_web_replay_spends_zero(&h.context, &mut session, &outcome,
+        || seen.lock().unwrap().len());
     drop(session);
     drop(connection);
     let _ = fs::remove_dir_all(h.root);
