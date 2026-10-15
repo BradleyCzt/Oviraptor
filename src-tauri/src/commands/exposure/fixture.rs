@@ -46,7 +46,7 @@ pub fn response(status: u16, headers: &[(&str, &str)], body: &str) -> String {
         503 => "Service Unavailable",
         _ => "Status",
     };
-    let mut text = format!("HTTP/1.1 {status} {reason}\r\n");
+    let mut text = format!("HTTP/1.1 {status} {reason}\r\nConnection: close\r\n");
     for (name, value) in headers {
         text.push_str(&format!("{name}: {value}\r\n"));
     }
