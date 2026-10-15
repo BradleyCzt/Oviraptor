@@ -109,6 +109,8 @@ export interface AssetSummary {
   rejected: number;
   notApplicable: number;
   sentToAgent: number;
+  /** Legacy responses may omit unclassified/unknown manual-decision counts. */
+  unknown?: number;
 }
 
 export interface AssetPage {
@@ -204,6 +206,43 @@ export interface PageIsolationPreview {
   previewToken: string;
 }
 
+export interface CollectionRetentionSummary {
+  scope: "owned_collection_files_and_control_metadata_only";
+  runBytes: number;
+  projectBytes: number;
+  globalBytes: number;
+  expiredFiles: number;
+  expiredBytes: number;
+  unmanagedRuns: number;
+  unknownFiles: number;
+  historyTruncated: boolean;
+  maxRunBytes: number;
+  maxProjectBytes: number;
+  maxGlobalBytes: number;
+  maxPages: number;
+  maxAgeSeconds: number;
+}
+
+export interface CollectionSummary {
+  schemaVersion: 1;
+  /** Completion of the collection queries, independently of the job terminal. */
+  executionComplete: boolean;
+  coverageComplete: boolean;
+  queries: number;
+  completedQueries: number;
+  failedQueries: number;
+  truncatedQueries: number;
+  partialQueries: number;
+  invalidRecords: number;
+  candidates: number;
+  importedCandidates: number | null;
+  probedAssets: number | null;
+  reusedPages: number;
+  errorCategories: string[];
+  reasons: string[];
+  retention?: CollectionRetentionSummary | null;
+}
+
 export interface JobRun {
   id: number;
   projectId: number;
@@ -221,6 +260,7 @@ export interface JobRun {
   startedAt?: string;
   finishedAt?: string;
   createdAt: string;
+  collectionSummary?: CollectionSummary | null;
 }
 
 export interface InterruptedJob {

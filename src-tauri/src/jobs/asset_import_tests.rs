@@ -3,6 +3,9 @@ use super::*;
 #[path = "asset_import_lock_tests.rs"]
 mod asset_import_lock_tests;
 
+#[path = "asset_observation_tests.rs"]
+mod asset_observation_tests;
+
 #[test]
 fn page_rule_production_import_isolates_future_ports_and_keeps_original_rule_state_on_reentry() {
     let mut f = Fixture::new();
@@ -126,11 +129,23 @@ fn partial_collection_never_marks_historical_assets_missing() {
             .unwrap()
     };
     assert_eq!(count(), 0);
+    let binding="a".repeat(64);
+    let complete=serde_json::json!({"complete":true,"coverage_complete":true,"queries":1,"completed_queries":1,
+        "failed_queries":0,"truncated_queries":0,"partial_queries":0,"invalid_records":0,
+        "field_coverage_complete":true,"coverage_reasons":[],"error_categories":[],"binding_sha256":binding});
+    // Even a complete current run cannot infer absence in an unknown or
+    // differently bound historical collection scope.
+    assert!(mark_missing(&path,9001,9002,&complete).unwrap());
+    assert_eq!(count(),0);
+    f.connection.execute("UPDATE project_assets SET last_collection_binding=?1",["b".repeat(64)]).unwrap();
+    assert!(mark_missing(&path,9001,9002,&complete).unwrap());
+    assert_eq!(count(),0);
+    f.connection.execute("UPDATE project_assets SET last_collection_binding=?1",[&binding]).unwrap();
     assert!(mark_missing(
         &path,
         9001,
         9002,
-        &serde_json::json!({"complete":true,"coverage_complete":true})
+        &complete
     )
     .unwrap());
     assert_eq!(count(), 1);
@@ -138,7 +153,7 @@ fn partial_collection_never_marks_historical_assets_missing() {
         &path,
         9001,
         9002,
-        &serde_json::json!({"complete":true,"coverage_complete":true})
+        &complete
     )
     .unwrap());
     assert_eq!(count(), 1);

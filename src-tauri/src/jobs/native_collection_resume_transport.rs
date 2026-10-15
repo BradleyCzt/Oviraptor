@@ -29,8 +29,15 @@ impl Failure {
     }
 
     pub(super) fn checkpoint(detail: String) -> Self {
+        let limited = detail.contains("resource_limited")
+            || detail.starts_with("receipt_retention_limit:")
+            || detail.starts_with("receipt_metadata_limit:");
         Self {
-            category: "checkpoint_io",
+            category: if limited {
+                "resource_limited"
+            } else {
+                "checkpoint_io"
+            },
             detail,
             retryable: false,
             stop_collection: true,
@@ -62,6 +69,129 @@ pub(super) fn sanitize(detail: &str, key: &str, proxy: &str) -> String {
         result = urls.replace_all(&result, "[URL REDACTED]").into_owned();
     }
     result.chars().take(1800).collect()
+}
+
+// Success receipts retain useful endpoint URLs. Only configured credentials,
+// including their URL-encoded forms, are replaced; error sanitization above is
+// deliberately stricter. Hashes over receipts describe this redacted JSON.
+pub(super) fn redact_payload(payload: &Value, key: &str, proxy: &str) -> (Value, bool) {
+    fn percent_decoded(raw: &str) -> String {
+        let bytes = raw.as_bytes();
+        let mut decoded = Vec::new();
+        let mut offset = 0;
+        while offset < bytes.len() {
+            if bytes[offset] == b'%' && offset + 2 < bytes.len() {
+                let hex = |byte: u8| (byte as char).to_digit(16).map(|v| v as u8);
+                if let (Some(high), Some(low)) = (hex(bytes[offset + 1]), hex(bytes[offset + 2])) {
+                    decoded.push(high * 16 + low);
+                    offset += 3;
+                    continue;
+                }
+            }
+            decoded.push(bytes[offset]);
+            offset += 1;
+        }
+        String::from_utf8_lossy(&decoded).into_owned()
+    }
+    let mut secrets = Vec::new();
+    for secret in [key, proxy] {
+        if !secret.is_empty() {
+            secrets.push(secret.to_string());
+        }
+    }
+    if let Ok(url) = reqwest::Url::parse(proxy) {
+        for secret in [Some(url.username()), url.password()].into_iter().flatten() {
+            if !secret.is_empty() {
+                secrets.push(secret.to_string());
+                secrets.push(percent_decoded(secret));
+            }
+        }
+    }
+    let raw = secrets.clone();
+    for secret in raw {
+        if let Ok(mut url) = reqwest::Url::parse("http://redaction.invalid/") {
+            url.query_pairs_mut().append_pair("value", &secret);
+            if let Some(encoded) = url.query().and_then(|q| q.strip_prefix("value=")) {
+                if !encoded.is_empty() {
+                    secrets.push(encoded.to_string());
+                }
+            }
+        }
+    }
+    secrets.sort_by_key(|value| std::cmp::Reverse(value.len()));
+    secrets.dedup();
+    fn replace(text: &str, secrets: &[String]) -> String {
+        // Even a one-character configured credential can be embedded in an
+        // echo. Empty replacement cannot itself reintroduce another secret.
+        // Repeat because removing one token can join fragments of another.
+        let mut out = text.to_string();
+        loop {
+            let before = out.len();
+            for secret in secrets {
+                out = out.replace(secret, "");
+            }
+            if out.len() == before {
+                return out;
+            }
+        }
+    }
+    fn walk(value: &Value, secrets: &[String]) -> Value {
+        match value {
+            Value::String(text) => Value::String(replace(text, secrets)),
+            Value::Array(rows) => Value::Array(rows.iter().map(|row| walk(row, secrets)).collect()),
+            Value::Object(object) => Value::Object(
+                object
+                    .iter()
+                    .map(|(key, value)| {
+                        let key = replace(key, secrets);
+                        (key, walk(value, secrets))
+                    })
+                    .collect(),
+            ),
+            _ => value.clone(),
+        }
+    }
+    let redacted = walk(payload, &secrets);
+    let changed = redacted != *payload;
+    (redacted, changed)
+}
+
+pub(super) const REDACTION_RULE_VERSION: &str = "configured-secret-redaction-v2-locator-gate";
+
+/// A sanitized locator is not a newly discovered endpoint. Keep the rejected
+/// row indices alongside the sanitized payload so replay cannot admit it.
+pub(super) fn redact_page(
+    payload: &Value,
+    key: &str,
+    proxy: &str,
+    fields: &[String],
+) -> (Value, bool, Vec<usize>) {
+    let (redacted, changed) = redact_payload(payload, key, proxy);
+    let mut rejected = Vec::new();
+    if let (Some(before), Some(after)) = (
+        payload.get("results").and_then(Value::as_array),
+        redacted.get("results").and_then(Value::as_array),
+    ) {
+        for (index, (before, after)) in before.iter().zip(after).enumerate() {
+            let altered = ["host", "link", "ip", "port", "protocol", "domain"]
+                .iter()
+                .any(|field| {
+                    if before.is_object() {
+                        before.get(*field) != after.get(*field)
+                    } else if let Some(position) =
+                        fields.iter().position(|name| name.as_str() == *field)
+                    {
+                        before.get(position) != after.get(position)
+                    } else {
+                        false
+                    }
+                });
+            if altered {
+                rejected.push(index);
+            }
+        }
+    }
+    (redacted, changed, rejected)
 }
 
 pub(super) fn field_restricted(detail: &str) -> bool {
@@ -170,6 +300,9 @@ fn network_failure(error: reqwest::Error, key: &str, proxy: &str) -> Failure {
 pub(super) struct PageReceipt {
     pub(super) payload: Value,
     pub(super) attempts: usize,
+    pub(super) received_at: String,
+    pub(super) secrets_redacted: bool,
+    pub(super) redacted_locator_rows: Vec<usize>,
 }
 
 pub(super) struct Transport {
@@ -268,10 +401,13 @@ impl Transport {
                 }
             });
             match response {
-                Ok(payload) => {
+                Ok((payload, secrets_redacted, received_at, redacted_locator_rows)) => {
                     return Ok(PageReceipt {
                         payload,
                         attempts: attempt + 1,
+                        received_at,
+                        secrets_redacted,
+                        redacted_locator_rows,
                     })
                 }
                 Err(mut failure) => {
@@ -294,7 +430,10 @@ impl Transport {
         unreachable!("bounded FOFA retry loop always returns")
     }
 
-    async fn request_once(&self, endpoint: &reqwest::Url) -> Result<Value, Failure> {
+    async fn request_once(
+        &self,
+        endpoint: &reqwest::Url,
+    ) -> Result<(Value, bool, String, Vec<usize>), Failure> {
         let mut response = self
             .client
             .get(endpoint.clone())
@@ -343,6 +482,7 @@ impl Transport {
             }
             body.extend_from_slice(&chunk);
         }
+        let received_at = chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
         let payload: Value = serde_json::from_slice(&body).map_err(|error| Failure {
             category: "response_json",
             detail: format!("FOFA 响应 JSON 解析失败：{error}"),
@@ -350,12 +490,24 @@ impl Transport {
             stop_collection: false,
             attempts: 0,
         })?;
+        let fields = endpoint
+            .query_pairs()
+            .find(|(key, _)| key == "fields")
+            .map(|(_, value)| value.split(',').map(str::to_string).collect::<Vec<_>>())
+            .unwrap_or_default();
+        let (payload, secrets_redacted, redacted_locator_rows) =
+            redact_page(&payload, &self.key, &self.proxy, &fields);
         if payload.get("error").and_then(Value::as_bool) == Some(true) {
             let failure = provider_failure(&payload, &self.key, &self.proxy);
             if failure.retryable && !field_restricted(&failure.detail) {
                 return Err(failure);
             }
-            return Ok(payload);
+            return Ok((
+                payload,
+                secrets_redacted,
+                received_at,
+                redacted_locator_rows,
+            ));
         }
         if !super::native_collection_resume::valid_page(&payload) {
             return Err(Failure {
@@ -366,6 +518,11 @@ impl Transport {
                 attempts: 0,
             });
         }
-        Ok(payload)
+        Ok((
+            payload,
+            secrets_redacted,
+            received_at,
+            redacted_locator_rows,
+        ))
     }
 }

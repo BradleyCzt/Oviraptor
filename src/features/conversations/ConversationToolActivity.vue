@@ -8,6 +8,7 @@ const { tr } = useI18n();
 const completed = computed(() => props.activity.filter(item => item.status === "completed").length);
 const labels: Record<string, readonly [string, string]> = {
   project_get_context: ["读取项目概况", "Read project context"],
+  assets_get_stats: ["统计项目资产", "Count project assets"],
   assets_search: ["查询项目资产", "Search project assets"], assets_read: ["读取资产详情", "Read asset details"],
   scans_search: ["查询已有扫描", "Search saved scans"], scans_read_summary: ["读取扫描摘要", "Read scan summary"],
   skills_list: ["查看已授权 Skills", "List permitted skills"], skills_read: ["读取 Skill", "Read a skill"],

@@ -685,6 +685,7 @@ CREATE TABLE IF NOT EXISTS runs (
     config_snapshot TEXT NOT NULL DEFAULT '{}',
     output_dir TEXT NOT NULL DEFAULT '',
     error TEXT NOT NULL DEFAULT '',
+    collection_summary_json TEXT NOT NULL DEFAULT '',
     created_at TEXT NOT NULL DEFAULT (datetime('now','localtime')),
     started_at TEXT,
     finished_at TEXT
@@ -728,6 +729,7 @@ CREATE TABLE IF NOT EXISTS project_assets (
     first_seen TEXT NOT NULL DEFAULT (datetime('now','localtime')),
     last_seen TEXT NOT NULL DEFAULT (datetime('now','localtime')),
     last_run_id INTEGER REFERENCES runs(id) ON DELETE SET NULL,
+    last_collection_binding TEXT NOT NULL DEFAULT '',
     entry_opened_at TEXT,
     PRIMARY KEY(project_id, asset_id)
 );

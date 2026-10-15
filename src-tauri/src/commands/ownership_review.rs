@@ -8,7 +8,7 @@
 //   CAS 校验快照/组版本/策略/目录/绑定/expectedActionHash，逐条审计旧值与新值。
 // - 归属确认只写归属事实：不创建授权、不设暴露面准入；授权仍走既有合同（第三方/排除沿用既有“拒绝 + 不准入”的收窄语义）。
 
-const OWNERSHIP_GROUP_ALGORITHM: &str = "o2-review-groups-v1";
+const OWNERSHIP_GROUP_ALGORITHM: &str = "o2-review-groups-v2-endpoint-host";
 const OWNERSHIP_ANALYSIS_CHUNK: i64 = 500;
 /// 心跳超过该秒数的 running 任务视为工作线程已丢失，可被重新认领并从 last_asset_id 继续。
 const OWNERSHIP_ANALYSIS_STALE_SECS: i64 = 120;
@@ -71,7 +71,7 @@ fn ownership_rules_version(
     project_id: i64,
 ) -> Result<String, String> {
     let mut statement = connection
-        .prepare("SELECT rule_type||'|'||pattern||'|'||action FROM asset_ownership_rules WHERE project_id=?1 AND enabled=1 ORDER BY 1")
+        .prepare("SELECT rule_type||'|'||pattern||'|'||action||'|'||source FROM asset_ownership_rules WHERE project_id=?1 AND enabled=1 ORDER BY 1")
         .map_err(|error| error.to_string())?;
     let rules = statement
         .query_map([project_id], |row| row.get::<_, String>(0))
@@ -311,6 +311,7 @@ struct OwnershipClassifier {
     /// O3：精确主机规则（rule_type='host'），只匹配完全相同的主机，不泛化到子域。
     approved_hosts: Vec<String>,
     excluded_hosts: Vec<String>,
+    legacy_approved_rules: Vec<(String, String)>,
     shared_domains: Vec<String>,
     excluded_domains: Vec<String>,
     excluded_names: Vec<String>,
@@ -343,9 +344,10 @@ fn ownership_classifier(
         Vec::new()
     };
     let (mut approved_hosts, mut excluded_hosts) = (Vec::new(), Vec::new());
+    let mut legacy_approved_rules = Vec::new();
     {
         let mut statement = connection
-            .prepare("SELECT rule_type,pattern,action FROM asset_ownership_rules WHERE project_id=?1 AND enabled=1 ORDER BY id")
+            .prepare("SELECT rule_type,pattern,action,source FROM asset_ownership_rules WHERE project_id=?1 AND enabled=1 ORDER BY id")
             .map_err(|error| error.to_string())?;
         let rules = statement
             .query_map([project_id], |row| {
@@ -353,12 +355,17 @@ fn ownership_classifier(
                     row.get::<_, String>(0)?,
                     row.get::<_, String>(1)?,
                     row.get::<_, String>(2)?,
+                    row.get::<_, String>(3)?,
                 ))
             })
             .map_err(|error| error.to_string())?
             .collect::<Result<Vec<_>, _>>()
             .map_err(|error| error.to_string())?;
-        for (rule_type, pattern, action) in rules {
+        for (rule_type, pattern, action, source) in rules {
+            if ownership_legacy_learned_rule(&rule_type, &action, &source) {
+                legacy_approved_rules.push((rule_type, pattern));
+                continue;
+            }
             match (rule_type.as_str(), action.as_str()) {
                 ("domain", "approve") => approved_domains.push(pattern),
                 ("domain", "exclude") => excluded_domains.push(pattern),
@@ -390,6 +397,7 @@ fn ownership_classifier(
         approved_domains,
         approved_hosts,
         excluded_hosts,
+        legacy_approved_rules,
         shared_domains: if saved {
             profile.shared_domains.clone()
         } else {
@@ -419,12 +427,12 @@ fn ownership_classifier(
             match identifier.kind.as_str() {
                 "official_domain" => classifier
                     .official_hosts
-                    .entry(normalize_ownership_domain(&identifier.value))
+                    .entry(normalize_ownership_host(&identifier.value))
                     .or_default()
                     .push(entity.id),
                 "shared_domain" => classifier
                     .shared_hosts
-                    .entry(normalize_ownership_domain(&identifier.value))
+                    .entry(normalize_ownership_host(&identifier.value))
                     .or_default()
                     .push(entity.id),
                 _ => {
@@ -435,6 +443,10 @@ fn ownership_classifier(
                 }
             }
         }
+    }
+    for ids in classifier.official_hosts.values_mut().chain(classifier.shared_hosts.values_mut()) {
+        ids.sort_unstable();
+        ids.dedup();
     }
     Ok(classifier)
 }
@@ -453,15 +465,7 @@ fn ownership_nav_bucket(kind: &str) -> &'static str {
 
 impl OwnershipClassifier {
     fn classify(&self, input: &OwnershipAssetInput) -> OwnershipMemberFacts {
-        let host = [
-            input.domain.as_str(),
-            input.host.as_str(),
-            input.link.as_str(),
-        ]
-        .into_iter()
-        .map(normalize_ownership_domain)
-        .find(|value| !value.is_empty())
-        .unwrap_or_default();
+        let host = ownership_endpoint_host(&input.link, &input.host);
         let is_ip = host.parse::<std::net::IpAddr>().is_ok()
             || (host.is_empty() && !input.ip.trim().is_empty());
         let parts = if is_ip {
@@ -490,6 +494,15 @@ impl OwnershipClassifier {
             .unwrap_or_default();
         let combined = format!("{} {} {}", input.company, input.title, org);
         let mut counters: Vec<&'static str> = Vec::new();
+        if ownership_source_domain_conflicts(&host, &input.domain) {
+            counters.push("source_domain_mismatch");
+        }
+        if ownership_source_host_conflicts(&input.link, &input.host) {
+            counters.push("source_host_mismatch");
+        }
+        if self.legacy_approved_rules.iter().any(|(kind, pattern)| ownership_legacy_rule_matches(&host, kind, pattern)) {
+            counters.push("legacy_learned_rule_unverified");
+        }
 
         // 边界：默认可注册域（PSL）；共享域名/共享主机与 private 后缀租户只按精确主机或租户，不泛化到根域。
         let profile_shared = !host.is_empty()
@@ -701,7 +714,7 @@ impl OwnershipClassifier {
         let counter_kind = counters.join("+");
         let conflict = counters
             .iter()
-            .any(|kind| matches!(*kind, "entity_mismatch" | "multiple_entities"));
+            .any(|kind| matches!(*kind, "entity_mismatch" | "multiple_entities" | "source_domain_mismatch" | "source_host_mismatch"));
         let manual = input.decision_source == "manual";
         let lane: &'static str = if manual {
             "manual"
@@ -2848,7 +2861,7 @@ mod ownership_review_o2_tests {
         assert!(
             run.versions
                 .algorithm_version
-                .contains("o2-review-groups-v1")
+                .starts_with("o2-review-groups-v2-endpoint-host;")
                 && run.versions.algorithm_version.contains("psl-")
         );
         assert!(
@@ -3083,7 +3096,7 @@ mod ownership_review_o2_tests {
                 g(8).boundary_kind.as_str(),
                 g(8).boundary_value.as_str()
             ),
-            ("conflict", "exact_host", "10086.cn")
+            ("conflict", "exact_host", "www.10086.cn")
         );
         // CIDR 公司字段：网络线索，反证组，不当法人。
         assert_eq!(

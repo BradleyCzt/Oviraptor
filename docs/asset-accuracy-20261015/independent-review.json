@@ -1,0 +1,198 @@
+{
+  "schemaVersion": 1,
+  "recordedAtUtc": "2026-10-15T14:40:28.522378+00:00",
+  "sourceHead": "34e802a6f8d4fc093efa1d3ee732daf767d0df44",
+  "codeHead": "34e802a6f8d4fc093efa1d3ee732daf767d0df44",
+  "sourceCleanAfterIndependentAudit": true,
+  "finalIndependentReviewPassed": true,
+  "acceptedCurrentCloudCodeRegression": true,
+  "remainingBlockers": [],
+  "acceptedMachineIndex": {
+    "path": "/workspace/validation/asset-accuracy-20261015/final-audit-34e/final-gates-ACCEPTED-01.json",
+    "sha256": "2a0e1fe5124f3c4b29443dbcab49b91a8be798e5ed2f222b58f83581517263b2",
+    "bytes": 248990
+  },
+  "completionAuditor": {
+    "path": "/workspace/validation/asset-accuracy-20261015/final-audit-34e/audit-final-gates-completion.py",
+    "sha256": "18f17fd73859b04cf23b0dda19197070c5fded7e3adb96318e3d639def68b6ee",
+    "bytes": 48108
+  },
+  "originalPreparedAuditorUnmodified": {
+    "path": "/workspace/validation/asset-accuracy-20261015/final-audit-34e/audit-final-gates.py",
+    "sha256": "b7f3304aa8b72e2151f9136857f318ca7f618a718c896e6dea469511a45c8037",
+    "bytes": 37306
+  },
+  "contract": {
+    "path": "/workspace/validation/asset-accuracy-20261015/final-audit-34e/prepared-contract.json",
+    "sha256": "6149d17b88d04314d0390321f2511bb5249035a9e4eeaa87126577547f76a045",
+    "bytes": 20296
+  },
+  "all16RequiredGatesPassed": true,
+  "native": {
+    "actualFullResult": {
+      "path": "/workspace/validation/asset-accuracy-20261015/statistics-native-full-02-result.json",
+      "sha256": "5555bd527146281c6a54d45afe9c1740ef2885158a3005d1a021c6366e7308e6",
+      "bytes": 969981
+    },
+    "rawFullLog": {
+      "path": "/workspace/validation/asset-accuracy-20261015/statistics-native-full-02.log",
+      "sha256": "54f9de30e36264eba4554b6dbce378ff1cbf59eb5d2273da6969ea797316debe",
+      "bytes": 419836
+    },
+    "fullActualCommand": [
+      "python3",
+      "tools/run_with_subreaper.py",
+      "/workspace/asset-accuracy-target/debug/deps/oviraptor_lib-5e2091491b89a07c",
+      "--test-threads=8"
+    ],
+    "fullSummary": {
+      "state": "ok",
+      "passed": 3821,
+      "failed": 0,
+      "ignored": 7,
+      "measured": 0,
+      "filteredOut": 0,
+      "durationSeconds": 1687.51
+    },
+    "fullCommandDurationSeconds": 1687.668,
+    "actualEachOnceCases": 3828,
+    "preservedPriorNames": 3725,
+    "addedUniqueNames": 103,
+    "originalIgnoreIdentitiesPreserved": 7,
+    "defaultFeatures": [],
+    "actualCargoProfile": {
+      "opt_level": "1",
+      "debuginfo": 0,
+      "debug_assertions": true,
+      "overflow_checks": true,
+      "test": true
+    },
+    "binarySha256": "919a724e414ced1ac04a2e9b8bcdd82558345d4ccdea823e4aa3fccd985bb170",
+    "binaryPath": "/workspace/asset-accuracy-target/debug/deps/oviraptor_lib-5e2091491b89a07c",
+    "actualTargetedResult": {
+      "path": "/workspace/validation/asset-accuracy-20261015/statistics-native-targeted-03-result.json",
+      "sha256": "9766a62c1f3251bc293a8acb26d835e4ed212eae7b25fbc62b426a421bb4c7c0",
+      "bytes": 147078
+    },
+    "targetedSummary": {
+      "state": "ok",
+      "passed": 354,
+      "failed": 0,
+      "ignored": 3,
+      "measured": 0,
+      "filteredOut": 3471,
+      "durationSeconds": 16.22
+    },
+    "targetedSelectionRelationship": "original actual356 union broker exactcase=357; all103new actualok",
+    "independentSupervisor": {
+      "path": "/workspace/validation/asset-accuracy-20261015/supervisor-statistics-native-full-02-receipt.json",
+      "sha256": "9b74663dd21ac5b40c1dd1d391cc14b2d77bfa17ccc87f581e2f72ca774a1eaa",
+      "bytes": 1609
+    },
+    "actualToolExitObservation": {
+      "path": "/workspace/validation/asset-accuracy-20261015/statistics-native-full-02-exec-tool-observation.json",
+      "sha256": "07216d63565455f2296132ff80223411cd31a654423340e8d4f07f23ff4b4306",
+      "bytes": 656
+    },
+    "actualToolSession": 85779,
+    "actualToolExitCode": 0,
+    "postVerification": {
+      "path": "/workspace/validation/asset-accuracy-20261015/statistics-native-full-02-independent-post-verification.json",
+      "sha256": "ea6b5d361eed892523b82c7989c0e5253f4c82458e194e3dfd9a611ea3864470",
+      "bytes": 6855
+    },
+    "completeInputSetsAndHashesAndCurrentBinaryUnchanged": true,
+    "protectedOldFull03ArtifactsPreserved": 7,
+    "historicalIndependentBinariesPreserved": 3,
+    "newAcceptedBinaryCopy": {
+      "path": "/workspace/validation/asset-accuracy-20261015/retained-34e802a6-accepted-full/oviraptor_lib-5e2091491b89a07c",
+      "sha256": "919a724e414ced1ac04a2e9b8bcdd82558345d4ccdea823e4aa3fccd985bb170",
+      "bytes": 123232152
+    }
+  },
+  "frontend": {
+    "freshSourceHead": "34e802a6f8d4fc093efa1d3ee732daf767d0df44",
+    "actual98Node": {
+      "tests": 1662,
+      "passed": 1650,
+      "skipped": 12,
+      "failed": 0,
+      "prior1588OccurrencesPreserved": true,
+      "addedOccurrences": 74
+    },
+    "actualBrowser16": {
+      "tests": 16,
+      "passed": 16,
+      "failed": 0
+    },
+    "actualBrowser28": {
+      "passed": 28,
+      "failed": 0,
+      "onlyThreeApprovedLiteralChangesReversibleToWholeOldRunner": true
+    },
+    "uniqueCombinedBrowserCaseCount": null,
+    "sourceByteEquivalentActualEarlierNpmBuildReused": true,
+    "actualFrontendBuildSourceInputs": 409,
+    "index": {
+      "path": "/workspace/validation/asset-accuracy-20261015/stats-certified-complete-regression-index.json",
+      "sha256": "87d1a0336b2a4a55cd8cc8732e2f741a0b82307d58ffe395bd0ada09b7dc6915",
+      "bytes": 2672
+    },
+    "browserScope": "Actual Chromium pixels and actual Vue dist; synthetic IPC. No native desktop/provider/scanning run implied."
+  },
+  "brokerDiagnostics": {
+    "newFiniteRepeatedExecutions": 84,
+    "newRepeatedUniqueCases": 1,
+    "actualAll84RawLogsAndReceiptsChecked": true,
+    "repeatResult": {
+      "path": "/workspace/validation/asset-accuracy-20261015/statistics-broker-fixed-repeat-iterations-03/repeat-result.json",
+      "sha256": "9a7fa2660014729af5894d0ba0482f37ac470a563d555cfbdd4a64d29d6e129e",
+      "bytes": 69764
+    },
+    "exactSingleAdditionalDiagnostic": {
+      "path": "/workspace/validation/asset-accuracy-20261015/statistics-native-broker-exact-03-result.json",
+      "sha256": "2c0015013fadb9bb29bd780e047814d590453073ef73aa12292f590e40f79725",
+      "bytes": 2824
+    },
+    "notAddedToFullUniqueCaseCount": true
+  },
+  "preservedHistory": {
+    "priorE5FullResult": {
+      "path": "/workspace/validation/asset-accuracy-20261015/statistics-native-full-01-result.json",
+      "sha256": "cf5fb651a9d77da14aac211a2cc8375befeac3e20bb758f1e6146794d46cfecb",
+      "bytes": 639535
+    },
+    "classification": "partial_or_terminated_no_full_suite_footer",
+    "actualExitCode": 143,
+    "completedCaseRows": 1559,
+    "observedFailureCount": 1,
+    "summary": null,
+    "originalPanicBodyCaptured": false,
+    "originalFailureAssertionLineKnown": false,
+    "old261DiagnosticsWereOneUniqueCaseNotReproductionOfOriginalPanic": true,
+    "allPriorDraftsAndAuditorsPreserved": true,
+    "retainedFailureHistoryCount": 15,
+    "oldDRAFT03": {
+      "path": "/workspace/validation/asset-accuracy-20261015/final-audit/final-gates-DRAFT-03.json",
+      "sha256": "f05e197eec5772d337f600e765c5ebd9dcde524ae2ece2cd7b0c1b5527ab88f7",
+      "bytes": 148266
+    },
+    "newDRAFT01": {
+      "path": "/workspace/validation/asset-accuracy-20261015/final-audit-34e/final-gates-DRAFT-01.json",
+      "sha256": "f9c24222cb52f6ad44460486bfca4c99d9598908492a1fdd69a028dfe26b5539",
+      "bytes": 100653
+    },
+    "newDRAFT02": {
+      "path": "/workspace/validation/asset-accuracy-20261015/final-audit-34e/final-gates-DRAFT-02.json",
+      "sha256": "be04ef57ba7506e6da16f2d3ead8bebf52ee79a48bb4d7d0739a7052a6689b88",
+      "bytes": 248990
+    }
+  },
+  "independentSourceReview": {
+    "path": "/workspace/validation/asset-accuracy-20261015/broker-timing-review/independent-review-34e802a.json",
+    "sha256": "40178e129e2da013941a240b1e58ab892a897a85639e8c4fc5291811ad83b372",
+    "bytes": 8741
+  },
+  "scope": "Frozen34e Linux cloud default-feature application-library regression and actual Chromium with synthetic IPC; source only reviewed by this agent, no tests rerun. No real external provider/target, macOS/DMG, nondefault feature combinations or unimplemented structured-analysis/approval/orchestration acceptance.",
+  "repositoryOrPriorEvidenceModifiedByReviewer": false
+}

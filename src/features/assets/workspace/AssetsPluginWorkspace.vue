@@ -6,6 +6,7 @@ import { assetApi } from "../api";
 import { shellApi } from "../../../shell/api";
 import { useAssetLogPanel } from "../useAssetLogPanel";
 import { useI18n } from "../../../i18n";
+import CollectionRunSummary from "../components/CollectionRunSummary.vue";
 import type { AssetEvent, InterruptedJob, JobProgressEvent, JobRun } from "../types";
 import type { DashboardStats } from "../../../shell/types";
 import type { PluginWorkspaceProps, PluginWorkspaceEmits, ResumeWorkflowResult } from "../../../shell/workspaceContract";
@@ -22,6 +23,11 @@ const projects = computed(() => props.projects);
 const profiles = computed(() => props.profiles);
 const selectedProjectId = computed(() => props.projectId);
 const selectedProject = computed(() => props.projects.find(project => project.id === props.projectId));
+const quickProfile = computed(() => props.profiles.find(profile => profile.isDefault) || props.profiles[0]);
+const quickProbeEnabled = computed(() => quickProfile.value?.settings.runProbe !== false);
+const quickRefineEnabled = computed(() => quickProfile.value?.settings.runRefine !== false || quickProbeEnabled.value);
+const quickPlan = computed(() => [tr("采集", "Collect"), tr("候选入库", "Import candidates"),
+  ...(quickRefineEnabled.value ? [tr("分层", "Refine")] : []), ...(quickProbeEnabled.value ? [tr("探测", "Probe")] : [])].join(" → "));
 const runs = ref<JobRun[]>([]);
 const events = ref<AssetEvent[]>([]);
 const stats = ref<DashboardStats>();
@@ -145,11 +151,12 @@ function eventLabel(type:string){ const zh=({new:"新增",changed:"变化",missi
         <template v-if="activeView==='dashboard'">
           <div class="hero-row">
             <div><span class="eyebrow">OVERVIEW</span><h2>{{selectedProject?tr(`${selectedProject.name} 概览`,`${selectedProject.name} overview`):tr('所有项目资产概览','All-project asset overview')}}</h2><p>{{tr('数据保存在本地 SQLite；仅变化事件进入历史，不重复保存完整镜像。','Data stays in local SQLite; history stores changes instead of duplicate full snapshots.')}}</p></div>
-            <div class="hero-actions"><button class="button ghost" @click="refresh"><RefreshCw :size="16" /> {{t.refresh}}</button><button v-if="selectedProject?.status==='archived'" class="button warning" @click="toggleArchive(selectedProject)">{{tr('恢复工作空间后继续','Restore workspace to continue')}}</button><button v-else-if="selectedProjectId" class="button secondary" @click="quickStartProject(selectedProjectId,undefined,undefined,'reprobe')"><RefreshCw :size="16" /> {{tr('复测现有资产','Re-probe existing')}}</button><button v-if="selectedProjectId&&selectedProject?.status!=='archived'" class="button secondary" @click="quickStartProject(selectedProjectId)"><RefreshCw :size="16" /> {{tr('重新采集并探测','Collect and probe')}}</button><button class="button primary" @click="navigate('query')"><Plus :size="16" /> {{t.newQuery}}</button></div>
+            <div class="hero-actions"><button class="button ghost" @click="refresh"><RefreshCw :size="16" /> {{t.refresh}}</button><button v-if="selectedProject?.status==='archived'" class="button warning" @click="toggleArchive(selectedProject)">{{tr('恢复工作空间后继续','Restore workspace to continue')}}</button><button v-else-if="selectedProjectId" class="button secondary" @click="quickStartProject(selectedProjectId,undefined,undefined,'reprobe')"><RefreshCw :size="16" /> {{tr('复测现有资产','Re-probe existing')}}</button><button v-if="selectedProjectId&&selectedProject?.status!=='archived'" class="button secondary" data-asset-action="collect" @click="quickStartProject(selectedProjectId)"><RefreshCw :size="16" /> {{quickProfile && quickProbeEnabled ? tr('重新采集并探测','Collect and probe') : tr('重新采集候选','Collect candidates')}}</button><button class="button primary" @click="navigate('query')"><Plus :size="16" /> {{t.newQuery}}</button></div>
           </div>
+          <p v-if="selectedProject?.status==='active'" class="quick-collection-plan" :data-quick-profile="quickProfile?.id" :data-quick-probe-plan="!quickProfile ? 'unknown' : quickProbeEnabled ? 'enabled' : 'disabled'">{{quickProfile ? `${quickProfile.name} · ${quickPlan}` : tr('请先创建执行配置','Create an execution profile first')}}<small v-if="quickProfile && !quickProbeEnabled">{{tr('本轮不探测可访问性；来源候选不代表当前可用。','This run does not probe availability; source candidates do not prove current accessibility.')}}</small></p>
           <div class="stats-grid">
-            <article class="stat-card"><div class="stat-icon blue"><Database :size="20" /></div><span>{{tr('资产总数','Total assets')}}</span><strong>{{(stats?.assetCount||0).toLocaleString()}}</strong><small>{{tr(`${stats?.projectCount||0} 个活跃项目`,`${stats?.projectCount||0} active projects`)}}</small></article>
-            <article class="stat-card"><div class="stat-icon green"><CheckCircle2 :size="20" /></div><span>{{tr('浏览器可访问','Browser accessible')}}</span><strong>{{(stats?.aliveCount||0).toLocaleString()}}</strong><small>{{tr('不包含仅 TCP 端口存活；旧数据需复测','Excludes TCP-only; re-probe legacy data')}}</small></article>
+            <article class="stat-card"><div class="stat-icon blue"><Database :size="20" /></div><span>{{tr('资产与候选','Assets and candidates')}}</span><strong>{{(stats?.assetCount||0).toLocaleString()}}</strong><small>{{tr(`${stats?.projectCount||0} 个活跃项目`,`${stats?.projectCount||0} active projects`)}}</small></article>
+            <article class="stat-card"><div class="stat-icon green"><CheckCircle2 :size="20" /></div><span>{{tr('最近探测有 Web 响应','Last probe: Web response')}}</span><strong>{{(stats?.aliveCount||0).toLocaleString()}}</strong><small>{{tr('含受限和需渲染页面；不是本轮可访问性证明','Includes restricted/render-required pages; not proof of this run’s availability')}}</small></article>
             <article class="stat-card"><div class="stat-icon violet"><ListFilter :size="20" /></div><span>{{tr('待人工确认','Pending review')}}</span><strong>{{(stats?.pendingCount||0).toLocaleString()}}</strong><small>{{tr('P1/P2/P3 复核队列','P1/P2/P3 review queue')}}</small></article>
             <button class="stat-card stat-button" @click="navigate('quarantine')"><div class="stat-icon amber"><CircleAlert :size="20" /></div><span>{{tr('内容隔离','Content blocked')}}</span><strong>{{(stats?.blockedCount||0).toLocaleString()}}</strong><small>{{tr('点击进入隔离区查看','Open quarantine for review')}}</small></button>
           </div>
@@ -158,7 +165,7 @@ function eventLabel(type:string){ const zh=({new:"新增",changed:"变化",missi
               <div v-if="events.length" class="change-list"><div v-for="event in events.slice(0,8)" :key="event.id" class="change-row"><span class="change-type" :class="`event-${event.eventType}`">{{eventLabel(event.eventType)}}</span><div><strong>{{event.company||event.host||event.assetKey}}</strong><span>{{event.summary}}</span></div><time>{{event.createdAt}}</time></div></div><div v-else class="empty-state small">{{tr('完成首次任务后，这里会显示新增和变化资产','New and changed assets appear here after the first job')}}</div>
             </section>
             <section class="panel recent-jobs"><div class="panel-heading"><div><span class="eyebrow">JOBS</span><h3>{{tr('任务状态','Job status')}}</h3></div><button class="text-button" @click="navigate('tasks')">{{tr('任务中心','Job center')}}</button></div>
-              <div v-if="runs.length" class="job-mini-list"><div v-for="run in runs.slice(0,6)" :key="run.id" class="job-mini"><div class="job-mini-head"><span class="status-dot" :class="statusTone(run.status)"></span><strong>{{run.name}}</strong><em>{{stageLabel(run.stage)}}</em></div><div class="progress-track"><i :style="{width:`${run.progress}%`}"></i></div><small>{{run.projectName}} · {{run.createdAt}}</small></div></div><div v-else class="empty-state small">{{tr('暂无运行记录','No job history')}}</div>
+              <div v-if="runs.length" class="job-mini-list"><div v-for="run in runs.slice(0,6)" :key="run.id" class="job-mini"><div class="job-mini-head"><span class="status-dot" :class="statusTone(run.status)"></span><strong>{{run.name}}</strong><em>{{stageLabel(run.stage)}}</em></div><div class="progress-track"><i :style="{width:`${run.progress}%`}"></i></div><small>{{run.projectName}} · {{run.createdAt}}</small><CollectionRunSummary v-if="run.pipeline!=='reprobe'" :run="run" compact /></div></div><div v-else class="empty-state small">{{tr('暂无运行记录','No job history')}}</div>
             </section>
           </div>
         </template>
@@ -180,7 +187,7 @@ function eventLabel(type:string){ const zh=({new:"新增",changed:"变化",missi
 
         <template v-else-if="activeView==='tasks'">
           <div class="section-toolbar"><div><span class="eyebrow">JOB CENTER</span><h2>{{tr('任务中心','Job center')}}</h2><p>{{tr('长时间任务可独立运行、查看结构化日志并安全取消。','Long jobs run independently with structured logs and safe cancellation.')}}</p></div><div><button class="button ghost" @click="refresh"><RefreshCw :size="16" /> {{t.refresh}}</button><button class="button primary" @click="navigate('query')"><Plus :size="16" /> {{tr('新建任务','New job')}}</button></div></div>
-          <div class="run-list"><article v-for="run in runs" :key="run.id" class="run-card panel"><div class="run-status-mark" :class="statusTone(run.status)"><component :is="run.status==='completed'?CheckCircle2:['failed','interrupted'].includes(run.status)?CircleAlert:Clock3" :size="20" /></div><div class="run-main"><div class="run-title"><strong>{{run.name}}</strong><span class="run-id">#{{run.id}}</span><span class="run-stage">{{stageLabel(run.stage)}}</span></div><p>{{run.projectName}} · {{tr('创建于','created')}} {{run.createdAt}}</p><div class="run-progress"><div class="progress-track"><i :style="{width:`${run.progress}%`}"></i></div><span>{{Math.round(run.progress)}}%</span></div><small v-if="runLiveMessages[run.id]&&['running','queued','cancel_requested'].includes(run.status)" class="run-live-message">{{runLiveMessages[run.id]}}</small><small v-if="run.error" class="run-error">{{run.error}}</small></div><div class="run-side"><span class="status-chip" :class="statusTone(run.status)">{{stageLabel(run.status)}}</span><button v-if="['full','collect','reprobe'].includes(run.pipeline)&&['interrupted','failed','cancelled'].includes(run.status)" class="button secondary compact" @click="resumeInterrupted({runId:run.id,projectId:run.projectId,projectName:run.projectName,profileId:run.profileId,name:run.name,pipeline:run.pipeline,createdAt:run.createdAt})">{{tr('从断点继续','Resume checkpoint')}}</button><button v-if="['running','queued','cancel_requested'].includes(run.status)" class="button danger compact" @click="cancelJob(run.id)">{{tr('取消','Cancel')}}</button><button class="button ghost compact" @click="navigate('logs')">{{tr('日志','Logs')}}</button></div></article><div v-if="!runs.length" class="empty-state panel">{{tr('暂无任务','No jobs')}}</div></div>
+          <div class="run-list"><article v-for="run in runs" :key="run.id" class="run-card panel"><div class="run-status-mark" :class="statusTone(run.status)"><component :is="run.status==='completed'?CheckCircle2:['failed','interrupted'].includes(run.status)?CircleAlert:Clock3" :size="20" /></div><div class="run-main"><div class="run-title"><strong>{{run.name}}</strong><span class="run-id">#{{run.id}}</span><span class="run-stage">{{stageLabel(run.stage)}}</span></div><p>{{run.projectName}} · {{tr('创建于','created')}} {{run.createdAt}}</p><div class="run-progress"><div class="progress-track"><i :style="{width:`${run.progress}%`}"></i></div><span :title="tr('执行进度，不是覆盖率','Execution progress, not coverage')">{{Math.round(run.progress)}}%</span></div><small v-if="runLiveMessages[run.id]&&['running','queued','cancel_requested'].includes(run.status)" class="run-live-message">{{runLiveMessages[run.id]}}</small><CollectionRunSummary v-if="run.pipeline!=='reprobe'" :run="run" /><small v-if="run.error" class="run-error">{{run.error}}</small></div><div class="run-side"><span class="status-chip" :class="statusTone(run.status)">{{tr('执行','Execution')}} · {{stageLabel(run.status)}}</span><button v-if="['full','collect','reprobe'].includes(run.pipeline)&&['interrupted','failed','cancelled'].includes(run.status)" class="button secondary compact" @click="resumeInterrupted({runId:run.id,projectId:run.projectId,projectName:run.projectName,profileId:run.profileId,name:run.name,pipeline:run.pipeline,createdAt:run.createdAt})">{{tr('从断点继续','Resume checkpoint')}}</button><button v-if="['running','queued','cancel_requested'].includes(run.status)" class="button danger compact" @click="cancelJob(run.id)">{{tr('取消','Cancel')}}</button><button class="button ghost compact" @click="navigate('logs')">{{tr('日志','Logs')}}</button></div></article><div v-if="!runs.length" class="empty-state panel">{{tr('暂无任务','No jobs')}}</div></div>
         </template>
 
         <template v-else-if="activeView==='logs'">
@@ -196,5 +203,13 @@ function eventLabel(type:string){ const zh=({new:"新增",changed:"变化",missi
   </section>
 </template>
 <style scoped>
+.quick-collection-plan{margin:0 0 14px;font-size:11px;line-height:1.6;color:var(--muted);overflow-wrap:anywhere}.quick-collection-plan small{display:block;font-size:10px}
 .plugin-workspace-toolbar{display:flex;justify-content:flex-end;margin-bottom:14px}.plugin-read-error{color:var(--red);font-size:12px;overflow-wrap:anywhere}
+@media(max-width:760px){
+  .run-card{display:grid;grid-template-columns:38px minmax(0,1fr);align-items:start}
+  .run-main{grid-column:2;grid-row:1;overflow-wrap:anywhere}
+  .run-status-mark{grid-column:1;grid-row:1}
+  .run-title,.run-side{flex-wrap:wrap}
+  .run-side{grid-column:2;grid-row:2}
+}
 </style>

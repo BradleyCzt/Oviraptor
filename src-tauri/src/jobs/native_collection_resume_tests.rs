@@ -72,8 +72,11 @@ impl Server {
                 else {
                     continue;
                 };
-                let endpoint =
-                    reqwest::Url::parse(&format!("http://fixture.invalid{target}")).unwrap();
+                let endpoint = if target.starts_with("http://") || target.starts_with("https://") {
+                    reqwest::Url::parse(target).unwrap()
+                } else {
+                    reqwest::Url::parse(&format!("http://fixture.invalid{target}")).unwrap()
+                };
                 let pairs = endpoint.query_pairs().collect::<HashMap<_, _>>();
                 let request = Request {
                     query: String::from_utf8(
@@ -205,6 +208,70 @@ fn collect(
     )
 }
 
+fn query_summaries(summary: &serde_json::Value) -> &[serde_json::Value] {
+    summary["query_summaries"]
+        .as_array()
+        .expect("collection summaries must retain typed per-query coverage evidence")
+}
+
+fn assert_summary_contract(summary: &serde_json::Value) {
+    for field in [
+        "queries",
+        "completed_queries",
+        "failed_queries",
+        "truncated_queries",
+        "partial_queries",
+        "invalid_records",
+        "candidates",
+        "reused_pages",
+    ] {
+        assert!(
+            summary[field].is_u64(),
+            "missing numeric {field}: {summary}"
+        );
+    }
+    assert!(summary["complete"].is_boolean());
+    assert!(summary["coverage_complete"].is_boolean());
+    assert!(summary.get("error_categories").is_some());
+    assert_eq!(
+        query_summaries(summary).len() as u64,
+        summary["queries"].as_u64().unwrap()
+    );
+    assert_eq!(
+        summary["queries"].as_u64().unwrap(),
+        summary["completed_queries"].as_u64().unwrap()
+            + summary["failed_queries"].as_u64().unwrap()
+    );
+}
+
+fn assert_query_coverage_reason(summary: &serde_json::Value, reason: &str) {
+    assert_eq!(summary["coverage_complete"], false, "{summary}");
+    for query in query_summaries(summary) {
+        assert!(
+            query["coverage_reasons"]
+                .as_array()
+                .expect("query coverage reasons must be structured codes")
+                .iter()
+                .any(|value| value.as_str() == Some(reason)),
+            "missing {reason}: {query}"
+        );
+    }
+}
+
+fn assert_utc_receipt(value: &str) {
+    let received = chrono::DateTime::parse_from_rfc3339(value)
+        .expect("page receipt time must be an RFC3339 timestamp");
+    assert_eq!(received.offset().local_minus_utc(), 0, "{value}");
+}
+
+fn assert_legacy_time_warning(summary: &serde_json::Value) {
+    assert!(summary["compatibility_reasons"]
+        .as_array()
+        .expect("legacy compatibility facts must remain separate from current coverage")
+        .iter()
+        .any(|value| value.as_str() == Some("legacy_time_unknown")));
+}
+
 #[test]
 fn actual_collection_resume_reuses_successful_pages_even_when_cache_is_disabled() {
     let broken = Arc::new(AtomicBool::new(true));
@@ -225,6 +292,7 @@ fn actual_collection_resume_reuses_successful_pages_even_when_cache_is_disabled(
     assert!(error.contains("cert.domain=\"example.test\""));
     assert!(error.contains("http_client"));
     assert_eq!(fixture.pages().len(), 5);
+    assert_summary_contract(&fixture.state());
     assert_eq!(fixture.state()["complete"], false);
     assert_eq!(fixture.state()["candidates"], 5);
     assert_eq!(server.requests().len(), 6);
@@ -276,7 +344,14 @@ fn actual_collection_resume_reuses_successful_pages_even_when_cache_is_disabled(
 
 #[test]
 fn actual_collection_resume_imports_legacy_url_hash_pages_with_their_real_fields() {
-    let server = Server::new(|request| Reply::Json(payload(request, 1)));
+    // The historical name remains traceable. Undated raw pages now retain
+    // their original schema as compatibility evidence and are safely refetched;
+    // they are no longer imported as if they had a fresh observation time.
+    let server = Server::new(|request| {
+        let mut value = payload(request, 1);
+        value["results"][0]["title"] = "fresh provider response".into();
+        Reply::Json(value)
+    });
     let fixture = Fixture::new();
     let legacy = fixture.output.join("native-cache");
     fs::create_dir_all(&legacy).unwrap();
@@ -298,6 +373,7 @@ fn actual_collection_resume_imports_legacy_url_hash_pages_with_their_real_fields
     .iter()
     .map(|value| value.to_string())
     .collect::<Vec<_>>();
+    let mut original_pages = BTreeMap::new();
     for (index, query) in queries.iter().enumerate() {
         let fields = if index == 0 { &safe } else { &configured };
         let endpoint = fofa_endpoint(&server.url, &options(false), query, 1, 1, fields).unwrap();
@@ -307,17 +383,56 @@ fn actual_collection_resume_imports_legacy_url_hash_pages_with_their_real_fields
             page: 1,
             fields: fields.clone(),
         };
-        fs::write(
-            legacy.join(format!("{signature}.json")),
-            payload(&request, 1).to_string(),
-        )
-        .unwrap();
+        let original = payload(&request, 1).to_string();
+        fs::write(legacy.join(format!("{signature}.json")), &original).unwrap();
+        original_pages.insert(signature, (fields.clone(), original));
     }
     let summary = collect(&fixture, &server, options(false)).unwrap();
+    assert_summary_contract(&summary);
     assert_eq!(summary["migrated_legacy_pages"], 3);
+    assert_eq!(summary["reused_pages"], 0);
+    assert_eq!(summary["request_attempts"], 3);
     assert_eq!(summary["candidates"], 3);
-    assert!(server.requests().is_empty());
+    assert_eq!(summary["coverage_complete"], true);
+    assert_legacy_time_warning(&summary);
+    assert_eq!(server.requests().len(), 3);
+    assert!(server
+        .requests()
+        .iter()
+        .all(|request| request.fields == configured));
     assert_eq!(fixture.pages().len(), 3);
+    let receipts: serde_json::Value = serde_json::from_slice(
+        &fs::read(
+            fixture
+                .output
+                .join("collection-checkpoint-v1/legacy-receipts.json"),
+        )
+        .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(receipts["version"], 1);
+    let receipts = receipts["records"].as_array().unwrap();
+    assert_eq!(receipts.len(), 3);
+    for receipt in receipts {
+        let signature = receipt["request_sha256"].as_str().unwrap();
+        let (fields, original) = original_pages.get(signature).unwrap();
+        assert_eq!(receipt["fields"], json!(fields));
+        assert_eq!(receipt["received_at"], serde_json::Value::Null);
+        assert_eq!(receipt["reason"], "legacy_time_unknown");
+        assert_eq!(
+            receipt["payload_sha256"],
+            format!("{:x}", Sha256::digest(original.as_bytes()))
+        );
+        assert_eq!(
+            fs::read_to_string(legacy.join(format!("{signature}.json"))).unwrap(),
+            *original
+        );
+    }
+    let (_, candidates) = read_csv(&fixture.output.join("candidates.csv")).unwrap();
+    for row in candidates {
+        assert_eq!(text(&row, &["title"]), "fresh provider response");
+        assert_utc_receipt(&text(&row, &["collection_received_at"]));
+    }
     let binding =
         fs::read_to_string(fixture.output.join("collection-checkpoint-v1/binding.json")).unwrap();
     assert!(!binding.contains(&options(false).key));
@@ -389,16 +504,16 @@ fn actual_collection_resume_legacy_key_change_cannot_silently_restart_all_querie
         .unwrap_err()
         .contains("未静默重发"));
     assert!(server.requests().is_empty());
-    assert_eq!(fs::read_to_string(path).unwrap(), original);
+    assert_eq!(fs::read_to_string(&path).unwrap(), original);
     assert!(!fixture
         .output
         .join("collection-checkpoint-v1/binding.json")
         .exists());
-    assert_eq!(
-        collect(&fixture, &server, options(false)).unwrap()["reused_pages"],
-        1
-    );
-    assert_eq!(server.requests().len(), 2);
+    let summary = collect(&fixture, &server, options(false)).unwrap();
+    assert_eq!(summary["reused_pages"], 0);
+    assert_eq!(summary["request_attempts"], 3);
+    assert_eq!(server.requests().len(), 3);
+    assert_eq!(fs::read_to_string(path).unwrap(), original);
 }
 
 #[test]
@@ -578,6 +693,12 @@ fn actual_collection_resume_stops_after_bounded_retries_and_preserves_partial_re
     );
     assert_eq!(fixture.state()["complete"], false);
     assert_eq!(fixture.state()["candidates"], 2);
+    assert_summary_contract(&fixture.state());
+    assert!(fixture.state()["error_categories"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|category| category.as_str() == Some("http_server")));
     assert!(messages
         .iter()
         .any(|message| message.starts_with("FOFA 查询失败：") && message.contains("cert.domain=")));
@@ -761,9 +882,424 @@ fn actual_collection_resume_rate_limit_is_global_and_configured_page_limits_rema
     let mut policy = options(false);
     policy.max_pages = 1;
     let summary = collect(&limited, &limited_server, policy).unwrap();
+    assert_summary_contract(&summary);
+    assert_eq!(summary["complete"], true);
     assert_eq!(summary["truncated_queries"], 3);
+    assert_eq!(summary["partial_queries"], 3);
     assert_eq!(summary["coverage_complete"], false);
+    assert_query_coverage_reason(&summary, "page_limit");
     assert_eq!(limited.state()["coverage_complete"], false);
+    assert_eq!(limited_server.requests().len(), 3);
+    assert!(limited_server
+        .requests()
+        .iter()
+        .all(|request| request.page == 1));
+}
+
+#[test]
+fn actual_collection_resume_short_page_cannot_prove_remaining_results_were_collected() {
+    let server = Server::new(|request| Reply::Json(payload(request, 4)));
+    let fixture = Fixture::new();
+    let mut policy = options(false);
+    policy.page_size = 2;
+    let summary = collect(&fixture, &server, policy).unwrap();
+    assert_summary_contract(&summary);
+    assert_eq!(summary["complete"], true);
+    assert_eq!(summary["failed_queries"], 0);
+    assert_eq!(summary["truncated_queries"], 0);
+    assert_eq!(summary["partial_queries"], 3);
+    assert_query_coverage_reason(&summary, "short_page");
+    assert_eq!(fixture.state()["coverage_complete"], false);
+    assert_eq!(server.requests().len(), 3);
+    let (_, logs) = read_csv(&fixture.output.join("query_log.csv")).unwrap();
+    for log in logs {
+        assert_eq!(text(&log, &["fetched"]), "1");
+        assert_eq!(text(&log, &["total_matches"]), "4");
+        assert_eq!(text(&log, &["partial"]), "true");
+    }
+}
+
+#[test]
+fn actual_collection_resume_unknown_total_keeps_fetching_full_pages_without_claiming_coverage() {
+    for string_total in [false, true] {
+        let server = Server::new(move |request| {
+            let mut value = payload(request, 2);
+            if string_total {
+                value["size"] = "2".into();
+            } else {
+                value.as_object_mut().unwrap().remove("size");
+            }
+            if request.page >= 3 {
+                value["results"] = json!([]);
+            }
+            Reply::Json(value)
+        });
+        let fixture = Fixture::new();
+        let summary = collect(&fixture, &server, options(false)).unwrap();
+        assert_summary_contract(&summary);
+        assert_eq!(summary["complete"], true);
+        assert_eq!(summary["failed_queries"], 0);
+        assert_query_coverage_reason(&summary, "unknown_total");
+        assert_eq!(fixture.state()["coverage_complete"], false);
+        assert_eq!(server.requests().len(), 9, "string_total={string_total}");
+        for query in query_summaries(&summary) {
+            assert_eq!(query["fetched_rows"], 2);
+            assert_eq!(query["valid_rows"], 2);
+            assert_eq!(query["rejected_rows"], 0);
+        }
+    }
+}
+
+#[test]
+fn actual_collection_resume_changed_total_remains_unproven_even_after_reaching_latest_count() {
+    let server =
+        Server::new(|request| Reply::Json(payload(request, if request.page == 1 { 2 } else { 3 })));
+    let fixture = Fixture::new();
+    let summary = collect(&fixture, &server, options(false)).unwrap();
+    assert_summary_contract(&summary);
+    assert_eq!(summary["complete"], true);
+    assert_query_coverage_reason(&summary, "total_changed");
+    assert_eq!(fixture.state()["coverage_complete"], false);
+    assert!(server.requests().iter().any(|request| request.page == 2));
+    for query in query_summaries(&summary) {
+        assert_eq!(query["fetched_rows"], 3);
+        assert_eq!(query["valid_rows"], 3);
+    }
+}
+
+#[test]
+fn actual_collection_resume_empty_record_shapes_are_counted_and_never_become_candidates() {
+    let server = Server::new(|_| Reply::Json(json!({"error":false,"size":2,"results":[[],{}]})));
+    let fixture = Fixture::new();
+    let mut policy = options(false);
+    policy.page_size = 2;
+    let summary = collect(&fixture, &server, policy).unwrap();
+    assert_summary_contract(&summary);
+    assert_eq!(summary["complete"], true);
+    assert_eq!(summary["candidates"], 0);
+    assert_eq!(summary["invalid_records"], 6);
+    assert_query_coverage_reason(&summary, "invalid_records");
+    for query in query_summaries(&summary) {
+        assert_eq!(query["fetched_rows"], 2);
+        assert_eq!(query["valid_rows"], 0);
+        assert_eq!(query["rejected_rows"], 2);
+    }
+    let (_, candidates) = read_csv(&fixture.output.join("candidates.csv")).unwrap();
+    assert!(candidates.is_empty());
+    assert_eq!(server.requests().len(), 3);
+}
+
+#[test]
+fn actual_collection_resume_explicit_zero_total_empty_result_is_a_complete_empty_query() {
+    let server = Server::new(|_| Reply::Json(json!({"error":false,"size":0,"results":[]})));
+    let fixture = Fixture::new();
+    let summary = collect(&fixture, &server, options(false)).unwrap();
+    assert_summary_contract(&summary);
+    assert_eq!(summary["complete"], true);
+    assert_eq!(summary["coverage_complete"], true);
+    assert_eq!(summary["invalid_records"], 0);
+    assert_eq!(summary["candidates"], 0);
+    assert_eq!(server.requests().len(), 3);
+    for query in query_summaries(&summary) {
+        assert_eq!(query["fetched_rows"], 0);
+        assert_eq!(query["valid_rows"], 0);
+        assert_eq!(query["rejected_rows"], 0);
+        assert!(query["coverage_reasons"].as_array().unwrap().is_empty());
+    }
+}
+
+#[test]
+fn actual_collection_resume_field_fallback_records_actual_columns_and_incomplete_field_coverage() {
+    let requested = fofa_fields("professional");
+    let full_fields = requested.clone();
+    let server = Server::new(move |request| {
+        if request.fields == full_fields {
+            Reply::Json(json!({"error":true,"errmsg":"field permission denied"}))
+        } else {
+            Reply::Json(payload(request, 1))
+        }
+    });
+    let fixture = Fixture::new();
+    let summary = collect(&fixture, &server, options(false)).unwrap();
+    assert_summary_contract(&summary);
+    assert_eq!(summary["complete"], true);
+    assert_query_coverage_reason(&summary, "field_downgrade");
+    let requests = server.requests();
+    let actual = requests
+        .iter()
+        .find(|request| request.fields != requested)
+        .expect("account field restriction must cause a basic-field request")
+        .fields
+        .clone();
+    assert!(!actual.is_empty());
+    for query in query_summaries(&summary) {
+        assert_eq!(query["requested_fields"], json!(requested));
+        assert_eq!(query["actual_field_sets"], json!([actual]));
+        assert_eq!(query["field_coverage_complete"], false);
+    }
+    let (_, candidates) = read_csv(&fixture.output.join("candidates.csv")).unwrap();
+    assert!(!candidates.is_empty());
+    for row in candidates {
+        let fields: Vec<String> =
+            serde_json::from_str(&text(&row, &["collection_actual_fields_json"])).unwrap();
+        assert_eq!(fields, actual);
+    }
+}
+
+#[test]
+fn actual_collection_resume_replays_original_receipt_time_and_provider_observation_verbatim() {
+    const OBSERVED: &str = "2024-01-02 03:04:05";
+    let server = Server::new(|request| {
+        let mut value = payload(request, 1);
+        value["results"][0]["lastupdatetime"] = OBSERVED.into();
+        Reply::Json(value)
+    });
+    let fixture = Fixture::new();
+    let before = chrono::Utc::now();
+    let first = collect(&fixture, &server, options(false)).unwrap();
+    let after = chrono::Utc::now();
+    assert_summary_contract(&first);
+    let original = fs::read(fixture.output.join("candidates.csv")).unwrap();
+    let (_, candidates) = read_csv(&fixture.output.join("candidates.csv")).unwrap();
+    assert!(!candidates.is_empty());
+    for row in &candidates {
+        let received_at = text(row, &["collection_received_at"]);
+        assert_utc_receipt(&received_at);
+        let received = chrono::DateTime::parse_from_rfc3339(&received_at).unwrap();
+        assert!(received.timestamp() >= before.timestamp());
+        assert!(received.timestamp() <= after.timestamp());
+        assert_eq!(text(row, &["collection_provider_observed_at"]), OBSERVED);
+        assert_eq!(text(row, &["collection_page"]), "1");
+        assert!(!text(row, &["collection_rule_version"]).is_empty());
+        for field in ["collection_payload_sha256", "collection_request_sha256"] {
+            let digest = text(row, &[field]);
+            assert_eq!(digest.len(), 64, "{field}={digest}");
+            assert!(digest.chars().all(|value| value.is_ascii_hexdigit()));
+        }
+        let actual: Vec<String> =
+            serde_json::from_str(&text(row, &["collection_actual_fields_json"])).unwrap();
+        assert_eq!(actual, fofa_fields("professional"));
+    }
+    for query in query_summaries(&first) {
+        let first_at = query["received_at_first"].as_str().unwrap();
+        let last_at = query["received_at_last"].as_str().unwrap();
+        assert_utc_receipt(first_at);
+        assert_eq!(
+            first_at, last_at,
+            "one successful page has one receipt time"
+        );
+    }
+    // Cross a whole UTC second so regenerating a replay timestamp cannot pass
+    // just because the first collection and replay happened in the same tick.
+    thread::sleep(Duration::from_millis(1100));
+    let replay = collect(&fixture, &server, options(false)).unwrap();
+    assert_eq!(replay["request_attempts"], 0);
+    assert_eq!(replay["reused_pages"], 3);
+    assert_eq!(server.requests().len(), 3);
+    assert_eq!(
+        fs::read(fixture.output.join("candidates.csv")).unwrap(),
+        original
+    );
+    for (original, restored) in query_summaries(&first).iter().zip(query_summaries(&replay)) {
+        assert_eq!(restored["received_at_first"], original["received_at_first"]);
+        assert_eq!(restored["received_at_last"], original["received_at_last"]);
+    }
+}
+
+#[test]
+fn actual_collection_resume_refetches_v1_pages_without_inventing_their_receipt_time() {
+    let refreshed = Arc::new(AtomicBool::new(false));
+    let fresh = refreshed.clone();
+    let server = Server::new(move |request| {
+        let mut value = payload(request, 1);
+        if fresh.load(Ordering::SeqCst) {
+            value["results"][0]["title"] = "fresh receipt after legacy recovery".into();
+        }
+        Reply::Json(value)
+    });
+    let fixture = Fixture::new();
+    collect(&fixture, &server, options(false)).unwrap();
+    let page = fixture.pages().pop().unwrap();
+    let mut saved: serde_json::Value = serde_json::from_slice(&fs::read(&page).unwrap()).unwrap();
+    let signature = saved["request_sha256"].as_str().unwrap().to_string();
+    let payload_sha256 = saved["payload_sha256"].clone();
+    let fields = saved["fields"].clone();
+    saved.as_object_mut().unwrap().remove("received_at");
+    saved.as_object_mut().unwrap().remove("rule_version");
+    let original = saved.to_string();
+    fs::write(&page, &original).unwrap();
+    refreshed.store(true, Ordering::SeqCst);
+
+    let summary = collect(&fixture, &server, options(false)).unwrap();
+    assert_summary_contract(&summary);
+    assert_eq!(summary["complete"], true);
+    assert_eq!(summary["coverage_complete"], true);
+    assert_eq!(summary["request_attempts"], 1);
+    assert_eq!(summary["reused_pages"], 2);
+    assert_legacy_time_warning(&summary);
+    assert_eq!(server.requests().len(), 4);
+    let archive = fixture
+        .output
+        .join("collection-checkpoint-v1/legacy-pages")
+        .join(page.file_name().unwrap());
+    assert_eq!(fs::read_to_string(archive).unwrap(), original);
+    let receipts: serde_json::Value = serde_json::from_slice(
+        &fs::read(
+            fixture
+                .output
+                .join("collection-checkpoint-v1/legacy-receipts.json"),
+        )
+        .unwrap(),
+    )
+    .unwrap();
+    let records = receipts["records"].as_array().unwrap();
+    let legacy = records
+        .iter()
+        .find(|value| value["request_sha256"].as_str() == Some(signature.as_str()))
+        .unwrap();
+    assert_eq!(legacy["received_at"], serde_json::Value::Null);
+    assert_eq!(legacy["reason"], "legacy_time_unknown");
+    assert_eq!(legacy["payload_sha256"], payload_sha256);
+    assert_eq!(legacy["fields"], fields);
+    let current: serde_json::Value = serde_json::from_slice(&fs::read(page).unwrap()).unwrap();
+    assert_utc_receipt(current["received_at"].as_str().unwrap());
+    assert_eq!(
+        current["payload"]["results"][0]["title"],
+        "fresh receipt after legacy recovery"
+    );
+}
+
+#[test]
+fn actual_collection_resume_success_payload_echoes_never_persist_keys_or_proxy_credentials() {
+    const PROXY_USER: &str = "fixture-proxy-user";
+    const PROXY_PASSWORD: &str = "fixture-proxy-password+private@secret";
+    let policy = options(false);
+    let key = policy.key.clone();
+    let mut key_url = reqwest::Url::parse("http://fixture.invalid/").unwrap();
+    key_url.query_pairs_mut().append_pair("key", &key);
+    let encoded_key = key_url
+        .query()
+        .unwrap()
+        .trim_start_matches("key=")
+        .to_string();
+    let echoed_key = key.clone();
+    let echoed_encoded_key = encoded_key.clone();
+    let server = Server::new(move |request| {
+        let mut value = payload(request, 1);
+        value["results"][0]["title"] = format!(
+            "key={echoed_key}; encoded={echoed_encoded_key}; proxy={PROXY_USER}:{PROXY_PASSWORD}"
+        )
+        .into();
+        value["provider_echo"] = json!({
+            "nested":[{"key":echoed_key,"encoded_key":echoed_encoded_key}],
+            "proxy_password":PROXY_PASSWORD,
+            "proxy_url":format!("http://{PROXY_USER}:{PROXY_PASSWORD}@127.0.0.1:12345/")
+        });
+        Reply::Json(value)
+    });
+    // The same loopback fixture accepts absolute request URIs as an HTTP proxy.
+    // Every origin and proxy address remains 127.0.0.1.
+    let mut proxy_url = reqwest::Url::parse(&server.url).unwrap();
+    proxy_url.set_path("/");
+    proxy_url.set_username(PROXY_USER).unwrap();
+    proxy_url.set_password(Some(PROXY_PASSWORD)).unwrap();
+    let encoded_password = proxy_url.password().unwrap().to_string();
+    let mut policy = policy;
+    policy.proxy = proxy_url.to_string();
+    let fixture = Fixture::new();
+    let summary = collect(&fixture, &server, policy).unwrap();
+    assert_summary_contract(&summary);
+    assert_eq!(summary["complete"], true);
+    assert_eq!(server.requests().len(), 3);
+
+    let password = PROXY_PASSWORD.to_string();
+    let mut directories = vec![fixture.output.clone()];
+    while let Some(directory) = directories.pop() {
+        for entry in fs::read_dir(directory).unwrap() {
+            let path = entry.unwrap().path();
+            if path.is_dir() {
+                directories.push(path);
+                continue;
+            }
+            let bytes = fs::read(&path).unwrap();
+            let persisted = String::from_utf8_lossy(&bytes);
+            for secret in [&key, &encoded_key, &password, &encoded_password] {
+                assert!(
+                    !persisted.contains(secret),
+                    "successful response leaked configured credentials to {}",
+                    path.display()
+                );
+            }
+        }
+    }
+    let (_, candidates) = read_csv(&fixture.output.join("candidates.csv")).unwrap();
+    assert!(!candidates.is_empty());
+    for row in candidates {
+        assert!(text(&row, &["host"]).starts_with("http://example.test/"));
+        assert_eq!(text(&row, &["collection_payload_redacted"]), "true");
+        assert_eq!(
+            text(&row, &["collection_payload_hash_semantics"]),
+            "sha256-redacted-json-v1"
+        );
+    }
+    for page in fixture.pages() {
+        let saved: serde_json::Value = serde_json::from_slice(&fs::read(page).unwrap()).unwrap();
+        assert_eq!(saved["payload_redacted"], true);
+        assert_eq!(saved["payload_hash_semantics"], "sha256-redacted-json-v1");
+        assert_eq!(
+            saved["payload_sha256"],
+            format!(
+                "{:x}",
+                Sha256::digest(serde_json::to_vec(&saved["payload"]).unwrap())
+            )
+        );
+    }
+}
+
+#[test]
+fn actual_collection_resume_failed_legacy_refetch_preserves_unknown_time_and_typed_failure() {
+    let server = Server::new(|_| Reply::Status(400));
+    let fixture = Fixture::new();
+    let legacy = fixture.output.join("native-cache");
+    fs::create_dir_all(&legacy).unwrap();
+    let queries = build_fofa_queries(&fixture.seeds, false).unwrap();
+    let fields = fofa_fields("professional");
+    let endpoint = fofa_endpoint(&server.url, &options(false), &queries[0], 1, 1, &fields).unwrap();
+    let signature = format!("{:x}", Sha256::digest(endpoint.as_str().as_bytes()));
+    let request = Request {
+        query: queries[0].query.clone(),
+        page: 1,
+        fields,
+    };
+    let original = payload(&request, 1).to_string();
+    let path = legacy.join(format!("{signature}.json"));
+    fs::write(&path, &original).unwrap();
+    let error = collect(&fixture, &server, options(false)).unwrap_err();
+    assert!(error.contains("http_client"));
+    let state = fixture.state();
+    assert_summary_contract(&state);
+    assert_eq!(state["complete"], false);
+    assert_eq!(state["coverage_complete"], false);
+    assert_eq!(state["failed_queries"], 3);
+    assert_eq!(state["reused_pages"], 0);
+    assert_eq!(state["candidates"], 0);
+    assert_legacy_time_warning(&state);
+    assert_eq!(server.requests().len(), 3);
+    assert_eq!(fs::read_to_string(path).unwrap(), original);
+    let receipts: serde_json::Value = serde_json::from_slice(
+        &fs::read(
+            fixture
+                .output
+                .join("collection-checkpoint-v1/legacy-receipts.json"),
+        )
+        .unwrap(),
+    )
+    .unwrap();
+    let records = receipts["records"].as_array().unwrap();
+    assert_eq!(records.len(), 1);
+    assert_eq!(records[0]["request_sha256"], signature);
+    assert_eq!(records[0]["received_at"], serde_json::Value::Null);
+    assert_eq!(records[0]["reason"], "legacy_time_unknown");
 }
 
 #[test]
@@ -843,4 +1379,335 @@ fn actual_collection_resume_transports_share_one_runtime_without_waiting_for_blo
     );
     release_tx.send(()).unwrap();
     runtime.block_on(resolver).unwrap();
+}
+
+#[test]
+fn actual_collection_resume_duplicate_pages_stop_without_claiming_coverage() {
+    let server = Server::new(|request| {
+        let mut first = request.clone();
+        first.page = 1;
+        Reply::Json(payload(&first, 10))
+    });
+    let fixture = Fixture::new();
+    let summary = collect(&fixture, &server, options(false)).unwrap();
+    assert_summary_contract(&summary);
+    assert_eq!(summary["complete"], true);
+    assert_query_coverage_reason(&summary, "duplicate_page");
+    assert_eq!(server.requests().len(), 6);
+    assert!(server.requests().iter().all(|request| request.page <= 2));
+}
+
+#[test]
+fn actual_collection_resume_changed_binding_is_bound_to_every_candidate_and_state() {
+    let server = Server::new(|request| Reply::Json(payload(request, 1)));
+    let fixture = Fixture::new();
+    let first = collect(&fixture, &server, options(false)).unwrap();
+    let binding = first["binding_sha256"].as_str().unwrap();
+    assert_eq!(binding.len(), 64);
+    assert_eq!(fixture.state()["binding_sha256"], binding);
+    let (_, rows) = read_csv(&fixture.output.join("candidates.csv")).unwrap();
+    assert!(!rows.is_empty());
+    assert!(rows
+        .iter()
+        .all(|row| text(row, &["collection_binding_sha256"]) == binding));
+    let other = Fixture::new();
+    let mut changed = options(false);
+    changed.max_pages = 1;
+    let second = collect(&other, &server, changed).unwrap();
+    assert_ne!(second["binding_sha256"], first["binding_sha256"]);
+    assert_eq!(second["coverage_complete"], true);
+}
+
+#[test]
+fn actual_collection_resume_short_secrets_are_redacted_when_embedded_and_encoded() {
+    let raw = json!({"echo":"prefix:k+;proxy:u:p@;suffix","nested":["k%2B","u%3Ap%40","p%40"]});
+    let (redacted, changed) = native_collection_resume_transport::redact_payload(
+        &raw,
+        "k+",
+        "http://u:p%40@127.0.0.1:1234/",
+    );
+    assert!(changed);
+    let bytes = serde_json::to_string(&redacted).unwrap();
+    for secret in ["k+", "k%2B", "p@", "p%40", "u"] {
+        assert!(!bytes.contains(secret), "{redacted}");
+    }
+    // Redaction can destroy a network identifier. Such a row is rejected by
+    // the ordinary identity validator, rather than counted as full coverage.
+    let (network, _) =
+        native_collection_resume_transport::redact_payload(&json!({"host":"http://h/"}), "h", "");
+    let rows = flatten_fofa(&json!([network]), &["host".into()]);
+    assert!(!super::super::asset_identity::valid_network_identity(
+        "",
+        &text(&rows[0], &["host"]),
+        "",
+        "",
+        ""
+    ));
+}
+
+#[test]
+fn actual_collection_resume_current_run_byte_budget_is_reported_before_another_request() {
+    let server = Server::new(|request| Reply::Json(payload(request, 1)));
+    let fixture = Fixture::new();
+    collect(&fixture, &server, options(false)).unwrap();
+    let pages = fixture.pages();
+    let original = fs::read(&pages[0]).unwrap();
+    let oversized = fixture.output.join("collection-checkpoint-v1/legacy-pages");
+    fs::create_dir_all(&oversized).unwrap();
+    let sparse = oversized.join(format!("{}.json", "f".repeat(64)));
+    fs::File::create(&sparse)
+        .unwrap()
+        .set_len(native_collection_resume::MAX_RECEIPT_BYTES + 1)
+        .unwrap();
+    let neighbor = fixture.root.join("other-run");
+    fs::create_dir_all(&neighbor).unwrap();
+    fs::write(neighbor.join("keep.json"), b"synthetic unrelated evidence").unwrap();
+    let error = collect(&fixture, &server, options(false)).unwrap_err();
+    assert!(error.contains("resource_limited"), "{error}");
+    let state = fixture.state();
+    assert_summary_contract(&state);
+    assert_eq!(state["complete"], false);
+    assert_eq!(state["coverage_complete"], false);
+    assert_eq!(state["retention"]["limit_reached"], true);
+    assert!(state["coverage_reasons"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|v| v == "retention_limit"));
+    assert_eq!(server.requests().len(), 3);
+    assert_eq!(fs::read(&pages[0]).unwrap(), original);
+    assert_eq!(
+        fs::read(neighbor.join("keep.json")).unwrap(),
+        b"synthetic unrelated evidence"
+    );
+    assert!(sparse.exists());
+}
+
+#[test]
+fn actual_collection_resume_expired_receive_time_refetches_without_forging_observation() {
+    let server = Server::new(|request| Reply::Json(payload(request, 1)));
+    let fixture = Fixture::new();
+    collect(&fixture, &server, options(false)).unwrap();
+    let page = fixture.pages().pop().unwrap();
+    let mut saved: serde_json::Value = serde_json::from_slice(&fs::read(&page).unwrap()).unwrap();
+    saved["received_at"] = (chrono::Utc::now() - chrono::Duration::days(8))
+        .to_rfc3339()
+        .into();
+    fs::write(&page, saved.to_string()).unwrap();
+    let summary = collect(&fixture, &server, options(false)).unwrap();
+    assert_eq!(summary["request_attempts"], 1);
+    assert_eq!(summary["reused_pages"], 2);
+    assert_eq!(summary["retention"]["expired_pages"], 1);
+    assert_eq!(summary["coverage_complete"], true);
+    let current: serde_json::Value = serde_json::from_slice(&fs::read(&page).unwrap()).unwrap();
+    assert_ne!(current["received_at"], saved["received_at"]);
+    let (_, rows) = read_csv(&fixture.output.join("candidates.csv")).unwrap();
+    assert!(rows
+        .iter()
+        .all(|row| text(row, &["collection_provider_observed_at"]).is_empty()));
+}
+
+#[test]
+fn actual_collection_resume_owned_storage_registers_all_artifacts_and_refuses_extra_http() {
+    use crate::jobs::collection_retention::{CollectionStorage, Limits};
+    fn owned_fixture(pages: usize) -> (Fixture, CollectionStorage) {
+        let mut fixture = Fixture::new();
+        let jobs = fixture.root.join("jobs");
+        let run = jobs.join("synthetic-run");
+        fs::create_dir_all(&run).unwrap();
+        fixture.output = run.join("collection");
+        let limits = Limits {
+            run_bytes: 2 * 1024 * 1024,
+            project_bytes: 4 * 1024 * 1024,
+            global_bytes: 8 * 1024 * 1024,
+            pages,
+            ..Limits::default()
+        };
+        let storage = CollectionStorage::open(
+            &jobs,
+            &fixture.output,
+            1,
+            1,
+            chrono::Utc::now().timestamp(),
+            limits,
+        )
+        .unwrap();
+        (fixture, storage)
+    }
+    let server = Server::new(|request| Reply::Json(payload(request, 1)));
+    let (fixture, storage) = owned_fixture(10);
+    let summary = collect_fofa_at_impl(
+        &fixture.seeds,
+        &fixture.output,
+        options(true),
+        &AtomicBool::new(false),
+        &server.url,
+        Some(&storage),
+        |_, _, _| {},
+    )
+    .unwrap();
+    assert_summary_contract(&summary);
+    assert_eq!(summary["coverage_complete"], true);
+    assert_eq!(server.requests().len(), 3);
+    assert_eq!(storage.report().unwrap().stored_pages, 3);
+    assert!(
+        !fixture.output.join("native-cache").exists(),
+        "new runs must not duplicate raw pages"
+    );
+    let manifest: serde_json::Value = serde_json::from_slice(
+        &fs::read(fixture.output.join(".collection-retention-v1.json")).unwrap(),
+    )
+    .unwrap();
+    let entries = manifest["entries"].as_object().unwrap();
+    for path in [
+        "collection-checkpoint-v1/binding.json",
+        "collection_state.json",
+        "query_plan.csv",
+        "query_log.csv",
+        "candidates.csv",
+        "review_candidates.csv",
+    ] {
+        let entry = entries
+            .get(path)
+            .unwrap_or_else(|| panic!("unregistered {path}"));
+        assert_eq!(entry["phase"], "available");
+        let bytes = fs::read(fixture.output.join(path)).unwrap();
+        assert_eq!(entry["hash"], format!("{:x}", Sha256::digest(&bytes)));
+        assert_eq!(entry["bytes"], bytes.len());
+    }
+    for path in fixture.pages() {
+        let relative = path
+            .strip_prefix(&fixture.output)
+            .unwrap()
+            .to_str()
+            .unwrap();
+        assert_eq!(entries[relative]["kind"], "page");
+        assert!(entries[relative]["receivedAt"].is_i64());
+        assert_eq!(
+            entries[relative]["hash"],
+            format!("{:x}", Sha256::digest(fs::read(&path).unwrap()))
+        );
+    }
+    assert_eq!(storage.report().unwrap().unknown_files, 0);
+    // Exercise the same real collector with a one-page owned budget. The first
+    // page is durable; page two is refused before HTTP and later queries do not
+    // consume another request. This is not a mocked storage helper.
+    let limited_server = Server::new(|request| Reply::Json(payload(request, 2)));
+    let (limited, storage) = owned_fixture(1);
+    let error = collect_fofa_at_impl(
+        &limited.seeds,
+        &limited.output,
+        options(false),
+        &AtomicBool::new(false),
+        &limited_server.url,
+        Some(&storage),
+        |_, _, _| {},
+    )
+    .unwrap_err();
+    assert!(error.contains("resource_limited"), "{error}");
+    let state = limited.state();
+    assert_summary_contract(&state);
+    assert_eq!(state["complete"], false);
+    assert_eq!(state["coverage_complete"], false);
+    assert_eq!(state["failed_queries"], 3);
+    assert_eq!(state["candidates"], 1);
+    assert!(state["error_categories"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|code| code == "resource_limited"));
+    assert_eq!(limited_server.requests().len(), 1);
+    assert_eq!(limited.pages().len(), 1);
+    assert_eq!(storage.report().unwrap().stored_pages, 1);
+}
+
+#[test]
+fn actual_collection_resume_redacted_locators_never_become_rewritten_probe_targets() {
+    for arrays in [false, true] {
+        let server = Server::new(move |request| {
+            if arrays {
+                let row = request
+                    .fields
+                    .iter()
+                    .map(|field| match field.as_str() {
+                        "host" | "link" => json!("http://example.test/original"),
+                        "ip" => json!("192.0.2.5"),
+                        "port" => json!("80"),
+                        "protocol" => json!("http"),
+                        _ => json!(""),
+                    })
+                    .collect::<Vec<_>>();
+                Reply::Json(json!({"error":false,"size":1,"results":[row]}))
+            } else {
+                Reply::Json(payload(request, 1))
+            }
+        });
+        let fixture = Fixture::new();
+        let mut policy = options(false);
+        policy.key = "x".into();
+        let summary = collect(&fixture, &server, policy).unwrap();
+        assert_summary_contract(&summary);
+        assert_eq!(summary["complete"], true);
+        assert_eq!(summary["coverage_complete"], false);
+        assert_eq!(summary["invalid_records"], 3);
+        assert_eq!(summary["candidates"], 0);
+        assert_query_coverage_reason(&summary, "redacted_locator");
+        let (fields, rows) = read_csv(&fixture.output.join("candidates.csv")).unwrap();
+        assert!(fields.iter().any(|field| field == "host"));
+        assert!(
+            rows.is_empty(),
+            "sanitized eample.test is not a source target"
+        );
+        for page in fixture.pages() {
+            let saved: serde_json::Value =
+                serde_json::from_slice(&fs::read(page).unwrap()).unwrap();
+            assert_eq!(saved["redacted_locator_rows"], json!([0]));
+            assert_eq!(saved["payload_redacted"], true);
+            assert_eq!(
+                saved["redaction_rule_version"],
+                native_collection_resume_transport::REDACTION_RULE_VERSION
+            );
+        }
+        let mut policy = options(false);
+        policy.key = "x".into();
+        let replay = collect(&fixture, &server, policy).unwrap();
+        assert_eq!(replay["request_attempts"], 0);
+        assert_eq!(replay["candidates"], 0);
+        assert_eq!(replay["invalid_records"], 3);
+        assert_eq!(server.requests().len(), 3);
+    }
+}
+
+#[test]
+fn actual_collection_resume_partial_page_overlap_is_not_proven_by_raw_row_count() {
+    let server = Server::new(|request| {
+        let mut original = request.clone();
+        original.page = 1;
+        let first = payload(&original, 4)["results"][0].clone();
+        let mut other = first.clone();
+        let endpoint = format!(
+            "{}-{}",
+            first["host"].as_str().unwrap(),
+            if request.page == 1 { "B" } else { "C" }
+        );
+        other["host"] = endpoint.clone().into();
+        other["link"] = endpoint.into();
+        Reply::Json(json!({"error":false,"size":4,"results":[first,other]}))
+    });
+    let fixture = Fixture::new();
+    let mut policy = options(false);
+    policy.page_size = 2;
+    let summary = collect(&fixture, &server, policy).unwrap();
+    assert_eq!(summary["complete"], true);
+    assert_query_coverage_reason(&summary, "duplicate_record");
+    assert_eq!(server.requests().len(), 6);
+    for query in query_summaries(&summary) {
+        assert_eq!(query["fetched_rows"], 4);
+        assert_eq!(query["valid_rows"], 4);
+        assert!(!query["coverage_reasons"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|reason| reason == "duplicate_page"));
+    }
 }

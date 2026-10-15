@@ -1,0 +1,24 @@
+{
+  "operation": "final_pack",
+  "command": [
+    "/opt/codex/runtimes/codex-primary-runtime/dependencies/python/bin/python3",
+    "/workspace/validation/asset-accuracy-publication-20261015/package_evidence.py",
+    "pack",
+    "--validation-complete",
+    "--frozen-head",
+    "34e802a6f8d4fc093efa1d3ee732daf767d0df44",
+    "--output",
+    "/workspace/validation/asset-accuracy-publication-20261015/final-34e802a-01"
+  ],
+  "startedAt": "2026-10-15T14:42:17.762684+00:00",
+  "durationSeconds": 140.942,
+  "outerExitCode": 0,
+  "strictPrivacyReportSha256": "4a5d941265886dbd10c4ab206af2fb7a6668d0567ae7c6a44f566fddbb711c87",
+  "applicationTestsExecuted": false,
+  "gitActionsPerformed": false,
+  "archiveCount": 9,
+  "selectedSourceFiles": 1691,
+  "selectedSourceBytes": 145056183,
+  "allSelectedEvidenceCoveredExactlyOnce": true,
+  "setReceiptSha256": "0e2cfec2d651c818a5c1aef3eed751d2bf800a5505e5e36739fd3573f80832aa"
+}

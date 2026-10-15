@@ -437,6 +437,12 @@ pub fn initialize(app_data_dir: &Path) -> Result<PathBuf, String> {
         .map_err(|e|format!("无法初始化任务工具冻结计划：{e}"))?;
     connection.execute_batch(include_str!("tool_supply/selection/schema.sql"))
         .map_err(|e|format!("无法初始化新草稿工具准备选择：{e}"))?;
+    // Existing runs have unknown coverage. Do not fabricate completed receipts
+    // or reinterpret their historical terminal state during this additive migration.
+    ensure_column(&connection, "runs", "collection_summary_json", "TEXT NOT NULL DEFAULT ''")?;
+    // Unknown historical scopes cannot establish absence under a new query plan.
+    ensure_column(&connection, "project_assets", "last_collection_binding", "TEXT NOT NULL DEFAULT ''")?;
+    crate::asset_logs::initialize(&connection)?;
     migrate_import_membership_source_paths(&connection)?;
     suspend_collaboration_event_triggers(&connection)?;
     migrate_legacy_agent_and_retry_columns(&mut connection)?;

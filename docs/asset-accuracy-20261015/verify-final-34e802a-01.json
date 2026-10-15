@@ -1,0 +1,156 @@
+{
+  "operation": "independent_final_archive_verification",
+  "startedAt": "2026-10-15T14:45:17.416408+00:00",
+  "durationSeconds": 1.381,
+  "outerExitCode": 0,
+  "archiveCount": 9,
+  "results": [
+    {
+      "file": "texts-01.tar.gz",
+      "command": [
+        "/opt/codex/runtimes/codex-primary-runtime/dependencies/python/bin/python3",
+        "/workspace/validation/asset-accuracy-publication-20261015/package_evidence.py",
+        "verify",
+        "--output",
+        "/workspace/validation/asset-accuracy-publication-20261015/final-34e802a-01/texts-01.tar.gz",
+        "--expected-sha256",
+        "ee06f0ba6958d9e7ef71d925e2a6ed8bc696cee1f4bb8152fae6a71bf898189b"
+      ],
+      "outerExitCode": 0,
+      "durationSeconds": 0.155,
+      "stdout": "{\"applicationTestsExecuted\": false, \"bytes\": 5906120, \"gitPushPerformed\": false, \"operation\": \"archive_integrity_verification\", \"sha256\": \"ee06f0ba6958d9e7ef71d925e2a6ed8bc696cee1f4bb8152fae6a71bf898189b\", \"verifiedRegularFiles\": 173}\n",
+      "stderr": ""
+    },
+    {
+      "file": "texts-02.tar.gz",
+      "command": [
+        "/opt/codex/runtimes/codex-primary-runtime/dependencies/python/bin/python3",
+        "/workspace/validation/asset-accuracy-publication-20261015/package_evidence.py",
+        "verify",
+        "--output",
+        "/workspace/validation/asset-accuracy-publication-20261015/final-34e802a-01/texts-02.tar.gz",
+        "--expected-sha256",
+        "5706e85f165f8983792457da4fed2387b6632635c3551c67a32a61db6bef4807"
+      ],
+      "outerExitCode": 0,
+      "durationSeconds": 0.163,
+      "stdout": "{\"applicationTestsExecuted\": false, \"bytes\": 5533507, \"gitPushPerformed\": false, \"operation\": \"archive_integrity_verification\", \"sha256\": \"5706e85f165f8983792457da4fed2387b6632635c3551c67a32a61db6bef4807\", \"verifiedRegularFiles\": 214}\n",
+      "stderr": ""
+    },
+    {
+      "file": "texts-03.tar.gz",
+      "command": [
+        "/opt/codex/runtimes/codex-primary-runtime/dependencies/python/bin/python3",
+        "/workspace/validation/asset-accuracy-publication-20261015/package_evidence.py",
+        "verify",
+        "--output",
+        "/workspace/validation/asset-accuracy-publication-20261015/final-34e802a-01/texts-03.tar.gz",
+        "--expected-sha256",
+        "69de5015d168d7f34139a989bc2e8cc357f38579b9163325cccf7e8b39522bae"
+      ],
+      "outerExitCode": 0,
+      "durationSeconds": 0.201,
+      "stdout": "{\"applicationTestsExecuted\": false, \"bytes\": 6082806, \"gitPushPerformed\": false, \"operation\": \"archive_integrity_verification\", \"sha256\": \"69de5015d168d7f34139a989bc2e8cc357f38579b9163325cccf7e8b39522bae\", \"verifiedRegularFiles\": 901}\n",
+      "stderr": ""
+    },
+    {
+      "file": "texts-04.tar.gz",
+      "command": [
+        "/opt/codex/runtimes/codex-primary-runtime/dependencies/python/bin/python3",
+        "/workspace/validation/asset-accuracy-publication-20261015/package_evidence.py",
+        "verify",
+        "--output",
+        "/workspace/validation/asset-accuracy-publication-20261015/final-34e802a-01/texts-04.tar.gz",
+        "--expected-sha256",
+        "8c29f3a54f7aea87332f74b983a24030c12953d0cd0132e22bed1d988218b77f"
+      ],
+      "outerExitCode": 0,
+      "durationSeconds": 0.158,
+      "stdout": "{\"applicationTestsExecuted\": false, \"bytes\": 6514292, \"gitPushPerformed\": false, \"operation\": \"archive_integrity_verification\", \"sha256\": \"8c29f3a54f7aea87332f74b983a24030c12953d0cd0132e22bed1d988218b77f\", \"verifiedRegularFiles\": 47}\n",
+      "stderr": ""
+    },
+    {
+      "file": "texts-05.tar.gz",
+      "command": [
+        "/opt/codex/runtimes/codex-primary-runtime/dependencies/python/bin/python3",
+        "/workspace/validation/asset-accuracy-publication-20261015/package_evidence.py",
+        "verify",
+        "--output",
+        "/workspace/validation/asset-accuracy-publication-20261015/final-34e802a-01/texts-05.tar.gz",
+        "--expected-sha256",
+        "7f34857c772b3c6901cd41668d960f64d0eb2c39b0295b9e492ab4a922cc86ae"
+      ],
+      "outerExitCode": 0,
+      "durationSeconds": 0.162,
+      "stdout": "{\"applicationTestsExecuted\": false, \"bytes\": 6088387, \"gitPushPerformed\": false, \"operation\": \"archive_integrity_verification\", \"sha256\": \"7f34857c772b3c6901cd41668d960f64d0eb2c39b0295b9e492ab4a922cc86ae\", \"verifiedRegularFiles\": 68}\n",
+      "stderr": ""
+    },
+    {
+      "file": "texts-06.tar.gz",
+      "command": [
+        "/opt/codex/runtimes/codex-primary-runtime/dependencies/python/bin/python3",
+        "/workspace/validation/asset-accuracy-publication-20261015/package_evidence.py",
+        "verify",
+        "--output",
+        "/workspace/validation/asset-accuracy-publication-20261015/final-34e802a-01/texts-06.tar.gz",
+        "--expected-sha256",
+        "04c09f249eaa9b01708de53550f46c8502c713d594a42688901508f04720fafc"
+      ],
+      "outerExitCode": 0,
+      "durationSeconds": 0.144,
+      "stdout": "{\"applicationTestsExecuted\": false, \"bytes\": 5916979, \"gitPushPerformed\": false, \"operation\": \"archive_integrity_verification\", \"sha256\": \"04c09f249eaa9b01708de53550f46c8502c713d594a42688901508f04720fafc\", \"verifiedRegularFiles\": 93}\n",
+      "stderr": ""
+    },
+    {
+      "file": "texts-07.tar.gz",
+      "command": [
+        "/opt/codex/runtimes/codex-primary-runtime/dependencies/python/bin/python3",
+        "/workspace/validation/asset-accuracy-publication-20261015/package_evidence.py",
+        "verify",
+        "--output",
+        "/workspace/validation/asset-accuracy-publication-20261015/final-34e802a-01/texts-07.tar.gz",
+        "--expected-sha256",
+        "0a6ea0dca3f6d853f4c0eeeb9e1a3f220403627deb43e07450015630cf6629c9"
+      ],
+      "outerExitCode": 0,
+      "durationSeconds": 0.079,
+      "stdout": "{\"applicationTestsExecuted\": false, \"bytes\": 1146898, \"gitPushPerformed\": false, \"operation\": \"archive_integrity_verification\", \"sha256\": \"0a6ea0dca3f6d853f4c0eeeb9e1a3f220403627deb43e07450015630cf6629c9\", \"verifiedRegularFiles\": 55}\n",
+      "stderr": ""
+    },
+    {
+      "file": "screenshots-01.tar.gz",
+      "command": [
+        "/opt/codex/runtimes/codex-primary-runtime/dependencies/python/bin/python3",
+        "/workspace/validation/asset-accuracy-publication-20261015/package_evidence.py",
+        "verify",
+        "--output",
+        "/workspace/validation/asset-accuracy-publication-20261015/final-34e802a-01/screenshots-01.tar.gz",
+        "--expected-sha256",
+        "2cdcef5af4a867e76e2d7bec69322319632f06669d26808801fff55cc976e1a3"
+      ],
+      "outerExitCode": 0,
+      "durationSeconds": 0.178,
+      "stdout": "{\"applicationTestsExecuted\": false, \"bytes\": 17851314, \"gitPushPerformed\": false, \"operation\": \"archive_integrity_verification\", \"sha256\": \"2cdcef5af4a867e76e2d7bec69322319632f06669d26808801fff55cc976e1a3\", \"verifiedRegularFiles\": 187}\n",
+      "stderr": ""
+    },
+    {
+      "file": "screenshots-02.tar.gz",
+      "command": [
+        "/opt/codex/runtimes/codex-primary-runtime/dependencies/python/bin/python3",
+        "/workspace/validation/asset-accuracy-publication-20261015/package_evidence.py",
+        "verify",
+        "--output",
+        "/workspace/validation/asset-accuracy-publication-20261015/final-34e802a-01/screenshots-02.tar.gz",
+        "--expected-sha256",
+        "bdf2a69579bf7c9c0909fa11f736d3e283a66becd4427721cebdce715a953f58"
+      ],
+      "outerExitCode": 0,
+      "durationSeconds": 0.14,
+      "stdout": "{\"applicationTestsExecuted\": false, \"bytes\": 11210863, \"gitPushPerformed\": false, \"operation\": \"archive_integrity_verification\", \"sha256\": \"bdf2a69579bf7c9c0909fa11f736d3e283a66becd4427721cebdce715a953f58\", \"verifiedRegularFiles\": 97}\n",
+      "stderr": ""
+    }
+  ],
+  "publicationSetSha256": "0e2cfec2d651c818a5c1aef3eed751d2bf800a5505e5e36739fd3573f80832aa",
+  "applicationTestsExecuted": false,
+  "gitActionsPerformed": false
+}

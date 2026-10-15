@@ -2,6 +2,7 @@
 mod native_collection_resume;
 #[path = "native_collection_resume_transport.rs"]
 mod native_collection_resume_transport;
+include!("native_collection_resume_summary.rs");
 
 const FOFA_BASE_FIELDS: &[&str] = &[
     "host",
@@ -74,6 +75,18 @@ const CANDIDATE_FIELDS: &[&str] = &[
     "discovery_seed_kind",
     "discovery_sources_json",
     "discovery_source_count",
+    "discovery_sources_truncated",
+    "collection_received_at",
+    "collection_binding_sha256",
+    "collection_provider_observed_at",
+    "collection_time_status",
+    "collection_actual_fields_json",
+    "collection_payload_sha256",
+    "collection_request_sha256",
+    "collection_page",
+    "collection_rule_version",
+    "collection_payload_redacted",
+    "collection_payload_hash_semantics",
 ];
 
 #[derive(Clone)]
@@ -311,6 +324,7 @@ fn flatten_fofa(values: &serde_json::Value, fields: &[String]) -> Vec<Record> {
                                 field.clone(),
                                 object
                                     .get(field)
+                                    .filter(|value| !value.is_null())
                                     .map(|value| {
                                         value
                                             .as_str()
@@ -332,6 +346,7 @@ fn flatten_fofa(values: &serde_json::Value, fields: &[String]) -> Vec<Record> {
                                 field.clone(),
                                 array
                                     .get(index)
+                                    .filter(|value| !value.is_null())
                                     .map(|value| {
                                         value
                                             .as_str()
@@ -431,18 +446,25 @@ fn cached_collection_page(
     legacy_directory: &Path,
     endpoint: &reqwest::Url,
     fields: &[String],
-) -> Option<(serde_json::Value, bool)> {
+) -> Result<Option<native_collection_resume::PageEvidence>, String> {
     let signature = format!("{:x}", Sha256::digest(endpoint.as_str().as_bytes()));
-    if let Some(payload) = checkpoint.read_page(&signature, fields) {
-        return Some((payload, false));
+    if let Some(page) = checkpoint.read_page(&signature, fields)? {
+        return Ok(Some(page));
     }
     // 1.1.62 wrote exactly SHA256(the complete authenticated request URL).
     // Recompute it; a legacy page from another key/query/options cannot match.
-    let payload = fs::read(legacy_directory.join(format!("{signature}.json")))
+    let path = legacy_directory.join(format!("{signature}.json"));
+    let payload = fs::read(&path)
         .ok()
         .and_then(|bytes| serde_json::from_slice(&bytes).ok())
-        .filter(native_collection_resume::valid_page)?;
-    Some((payload, true))
+        .filter(native_collection_resume::valid_page);
+    if let Some(payload) = payload {
+        // Legacy raw caches contain no trustworthy receive time. Preserve a
+        // compatibility receipt, then fetch again under the original binding.
+        checkpoint.note_legacy(&signature, fields, &payload)?;
+        checkpoint.sanitize_legacy(&path, &payload)?;
+    }
+    Ok(None)
 }
 
 fn validate_legacy_collection_credentials(
@@ -512,27 +534,36 @@ fn validate_legacy_collection_credentials(
     Ok(())
 }
 
-fn write_collection_csv(path: &Path, fields: &[String], rows: &[Record]) -> Result<(), String> {
-    let parent = path.parent().ok_or("采集结果路径没有父目录")?;
-    let staged = parent.join(format!(".collection-csv-{}.tmp", uuid::Uuid::new_v4()));
-    let result = (|| {
-        write_csv(&staged, fields, rows)?;
-        fs::OpenOptions::new()
-            .write(true)
-            .open(&staged)
-            .and_then(|file| file.sync_all())
-            .map_err(|error| error.to_string())?;
-        fs::rename(&staged, path).map_err(|error| error.to_string())?;
-        #[cfg(unix)]
-        fs::File::open(parent)
-            .and_then(|directory| directory.sync_all())
-            .map_err(|error| error.to_string())?;
-        Ok(())
-    })();
-    if result.is_err() {
-        let _ = fs::remove_file(staged);
+fn write_collection_csv(
+    path: &Path,
+    fields: &[String],
+    rows: &[Record],
+    storage: Option<&crate::jobs::collection_retention::CollectionStorage>,
+) -> Result<(), String> {
+    let mut writer = WriterBuilder::new().from_writer(Vec::new());
+    writer.write_record(fields).map_err(|e| e.to_string())?;
+    for row in rows {
+        writer
+            .write_record(
+                fields
+                    .iter()
+                    .map(|field| row.get(field).map(String::as_str).unwrap_or("")),
+            )
+            .map_err(|e| e.to_string())?;
     }
-    result
+    let bytes = writer.into_inner().map_err(|e| e.to_string())?;
+    if let Some(storage) = storage {
+        storage.write(
+            Path::new(path.file_name().ok_or("采集CSV路径缺少文件名")?),
+            &bytes,
+            crate::jobs::collection_retention::ArtifactKind::Csv,
+            None,
+            chrono::Utc::now().timestamp(),
+        )?;
+        Ok(())
+    } else {
+        native_collection_resume::atomic_write(path, &bytes)
+    }
 }
 
 pub fn collect_fofa(
@@ -552,12 +583,43 @@ pub fn collect_fofa(
     )
 }
 
+pub fn collect_fofa_with_storage(
+    seeds: &Path,
+    output: &Path,
+    options: CollectOptions,
+    cancel: &AtomicBool,
+    storage: &crate::jobs::collection_retention::CollectionStorage,
+    progress: impl FnMut(usize, usize, &str),
+) -> Result<serde_json::Value, String> {
+    collect_fofa_at_impl(
+        seeds,
+        output,
+        options,
+        cancel,
+        "https://fofa.info/api/v1/search/all",
+        Some(storage),
+        progress,
+    )
+}
+
 fn collect_fofa_at(
     seeds: &Path,
     output: &Path,
     options: CollectOptions,
     cancel: &AtomicBool,
     api_url: &str,
+    progress: impl FnMut(usize, usize, &str),
+) -> Result<serde_json::Value, String> {
+    collect_fofa_at_impl(seeds, output, options, cancel, api_url, None, progress)
+}
+
+fn collect_fofa_at_impl(
+    seeds: &Path,
+    output: &Path,
+    options: CollectOptions,
+    cancel: &AtomicBool,
+    api_url: &str,
+    storage: Option<&crate::jobs::collection_retention::CollectionStorage>,
     mut progress: impl FnMut(usize, usize, &str),
 ) -> Result<serde_json::Value, String> {
     if options.key.trim().is_empty() {
@@ -595,12 +657,33 @@ fn collect_fofa_at(
         options.enable_cidr24,
         &options.profile,
     )?;
-    let checkpoint = native_collection_resume::CollectionCheckpoint::open(output, binding)?;
-    checkpoint.write_state(
+    let checkpoint = native_collection_resume::CollectionCheckpoint::open_with_storage(
         output,
-        &json!({"status":"running", "complete":false,
-        "queries":queries.len(), "completed_queries":0, "failed_queries":0}),
+        binding,
+        &options.key,
+        &options.proxy,
+        storage,
     )?;
+    let mut summary = CollectionSummary::pending(
+        &uuid::Uuid::new_v4().to_string(),
+        queries.len(),
+        &requested_fields,
+    );
+    summary.binding_sha256 = checkpoint.binding_sha256().into();
+    summary.query_summaries = queries
+        .iter()
+        .map(|query| QueryCollectionSummary {
+            company: query.company.clone(),
+            category: query.category.clone(),
+            query: query.query.clone(),
+            status: "pending".into(),
+            requested_fields: requested_fields.clone(),
+            field_coverage_complete: true,
+            ..QueryCollectionSummary::default()
+        })
+        .collect();
+    summary.refresh(&checkpoint)?;
+    checkpoint.write_state(output, &summary.state()?)?;
     let safe_fields = [
         "host",
         "link",
@@ -618,25 +701,36 @@ fn collect_fofa_at(
     .map(|value| value.to_string())
     .collect::<Vec<_>>();
     let cache_directory = output.join("native-cache");
-    if options.cache {
-        fs::create_dir_all(&cache_directory).map_err(|error| error.to_string())?;
-    }
-    let mut transport = native_collection_resume_transport::Transport::new(
+    // New pages have one checkpoint copy. The old native-cache namespace is
+    // read only for compatibility, apart from removing echoed credentials.
+    let mut transport = match native_collection_resume_transport::Transport::new(
         &options.key,
         &options.proxy,
         options.timeout,
         options.interval,
-    )?;
+    ) {
+        Ok(transport) => transport,
+        Err(detail) => {
+            for query in &mut summary.query_summaries {
+                query.status = "error".into();
+                query.error_category = Some("transport_config".into());
+                query.field_coverage_complete = false;
+                add_reason(&mut query.coverage_reasons, "transport_config");
+            }
+            summary.refresh(&checkpoint)?;
+            summary.fail("transport_config");
+            checkpoint.write_state(output, &summary.state()?)?;
+            return Err(native_collection_resume_transport::sanitize(
+                &detail,
+                &options.key,
+                &options.proxy,
+            ));
+        }
+    };
     let mut candidates: HashMap<(String, String), Candidate> = HashMap::new();
     let mut logs = Vec::new();
     let mut halted: Option<(&'static str, String)> = None;
-    let mut reused_pages = 0usize;
-    let mut migrated_pages = 0usize;
-    let mut request_attempts = 0usize;
     for (index, query) in queries.iter().enumerate() {
-        if cancel.load(Ordering::Relaxed) {
-            halted = Some(("cancelled", "任务已取消；保留已完成页面供恢复".into()));
-        }
         progress(index, queries.len(), &query.label);
         let effective_size = if query.query.contains("body=") {
             options.page_size.clamp(1, 500)
@@ -644,213 +738,272 @@ fn collect_fofa_at(
             options.page_size.max(1)
         };
         let mut page = 1usize;
-        let mut fetched = 0usize;
-        let mut total_matches = 0usize;
-        let mut status = "ok".to_string();
-        let mut error = String::new();
-        let mut error_category = String::new();
-        let mut query_attempts = 0usize;
-        let mut query_reused = 0usize;
-        let mut limited = false;
+        let mut detail = String::new();
+        let mut q = summary.query_summaries[index].clone();
+        q.status = "running".into();
+        let mut page_hashes = BTreeSet::new();
+        let mut record_hashes = BTreeSet::new();
         loop {
+            q.last_page = page;
             if cancel.load(Ordering::Relaxed) {
                 halted = Some(("cancelled", "任务已取消；保留已完成页面供恢复".into()));
             }
-            let mut endpoint =
-                fofa_endpoint(api_url, &options, query, page, effective_size, &fields)?;
-            let mut cached =
-                cached_collection_page(&checkpoint, &cache_directory, &endpoint, &fields);
-            if cached.is_none() && fields != requested_fields {
-                let original = fofa_endpoint(
-                    api_url,
-                    &options,
-                    query,
-                    page,
-                    effective_size,
-                    &requested_fields,
-                )?;
-                if let Some(payload) = cached_collection_page(
-                    &checkpoint,
-                    &cache_directory,
-                    &original,
-                    &requested_fields,
-                ) {
-                    fields = requested_fields.clone();
-                    endpoint = original;
-                    cached = Some(payload);
+            let result = (|| -> Result<native_collection_resume::PageEvidence, native_collection_resume_transport::Failure> {
+                if checkpoint.retention_report().limit_reached {
+                    return Err(native_collection_resume_transport::Failure::checkpoint(
+                        "receipt_retention_limit: 当前任务已有收据超额；未追加请求或原文".into()));
                 }
-            }
-            if cached.is_none() && fields != safe_fields {
-                let fallback =
-                    fofa_endpoint(api_url, &options, query, page, effective_size, &safe_fields)?;
-                if let Some(payload) =
-                    cached_collection_page(&checkpoint, &cache_directory, &fallback, &safe_fields)
-                {
-                    // A prior 1.1.62 account field downgrade is itself a matching
-                    // request page. Reuse it with its actual column schema.
-                    fields = safe_fields.clone();
-                    endpoint = fallback;
-                    cached = Some(payload);
-                }
-            }
-            let signature = format!("{:x}", Sha256::digest(endpoint.as_str().as_bytes()));
-            let fetched_payload =
-                (|| -> Result<serde_json::Value, native_collection_resume_transport::Failure> {
-                    let (payload, save_checkpoint) = if let Some((payload, legacy)) = cached {
-                        reused_pages += 1;
-                        query_reused += 1;
-                        migrated_pages += usize::from(legacy);
-                        (payload, legacy)
-                    } else {
-                        if let Some((category, detail)) = &halted {
-                            return Err(native_collection_resume_transport::Failure {
-                                category,
-                                detail: detail.clone(),
-                                retryable: false,
-                                stop_collection: true,
-                                attempts: 0,
-                            });
-                        }
-                        match transport.request(&endpoint, cancel, |detail| {
-                            progress(
-                                index,
-                                queries.len(),
-                                &format!("FOFA 自动重试：{}；第 {page} 页；{detail}", query.query),
-                            );
-                        }) {
-                            Ok(receipt) => {
-                                request_attempts += receipt.attempts;
-                                query_attempts += receipt.attempts;
-                                (receipt.payload, true)
-                            }
-                            Err(failure) => {
-                                request_attempts += failure.attempts;
-                                query_attempts += failure.attempts;
-                                return Err(failure);
-                            }
-                        }
-                    };
-                    if native_collection_resume::valid_page(&payload) && save_checkpoint {
-                        checkpoint
-                            .save_page(&signature, &fields, &payload)
-                            .map_err(native_collection_resume_transport::Failure::checkpoint)?;
-                        if options.cache {
-                            native_collection_resume::atomic_write(
-                                &cache_directory.join(format!("{signature}.json")),
-                                &serde_json::to_vec(&payload).map_err(|error| {
-                                    native_collection_resume_transport::Failure::checkpoint(
-                                        error.to_string(),
-                                    )
-                                })?,
-                            )
-                            .map_err(native_collection_resume_transport::Failure::checkpoint)?;
-                        }
+                let mut endpoint = fofa_endpoint(api_url, &options, query, page, effective_size, &fields)
+                    .map_err(native_collection_resume_transport::Failure::checkpoint)?;
+                let mut cached = cached_collection_page(&checkpoint, &cache_directory, &endpoint, &fields)
+                    .map_err(native_collection_resume_transport::Failure::checkpoint)?;
+                if cached.is_none() && fields != requested_fields {
+                    let original = fofa_endpoint(api_url, &options, query, page, effective_size, &requested_fields)
+                        .map_err(native_collection_resume_transport::Failure::checkpoint)?;
+                    if let Some(saved) = cached_collection_page(&checkpoint, &cache_directory, &original, &requested_fields)
+                        .map_err(native_collection_resume_transport::Failure::checkpoint)? {
+                        fields = requested_fields.clone(); endpoint = original; cached = Some(saved);
                     }
-                    Ok(payload)
-                })();
-            let payload = match fetched_payload {
-                Ok(payload) => payload,
+                }
+                if cached.is_none() && fields != safe_fields {
+                    let fallback = fofa_endpoint(api_url, &options, query, page, effective_size, &safe_fields)
+                        .map_err(native_collection_resume_transport::Failure::checkpoint)?;
+                    if let Some(saved) = cached_collection_page(&checkpoint, &cache_directory, &fallback, &safe_fields)
+                        .map_err(native_collection_resume_transport::Failure::checkpoint)? {
+                        fields = safe_fields.clone(); endpoint = fallback; cached = Some(saved);
+                    }
+                }
+                if let Some(saved) = cached { q.reused_pages += 1; return Ok(saved); }
+                if let Some((category, message)) = &halted {
+                    return Err(native_collection_resume_transport::Failure {
+                        category, detail: message.clone(), retryable:false, stop_collection:true, attempts:0,
+                    });
+                }
+                checkpoint.ensure_page_capacity().map_err(native_collection_resume_transport::Failure::checkpoint)?;
+                let receipt = transport.request(&endpoint, cancel, |message| {
+                    progress(index, queries.len(), &format!("FOFA 自动重试：{}；第 {page} 页；{message}", query.query));
+                }).map_err(|failure| { q.request_attempts += failure.attempts; failure })?;
+                q.request_attempts += receipt.attempts;
+                let signature = format!("{:x}", Sha256::digest(endpoint.as_str().as_bytes()));
+                if native_collection_resume::valid_page(&receipt.payload) {
+                    checkpoint.save_page(&signature, &fields, &receipt.payload,
+                        Some(&receipt.received_at), receipt.secrets_redacted, &receipt.redacted_locator_rows)
+                        .map_err(native_collection_resume_transport::Failure::checkpoint)
+                } else {
+                    // Provider error envelopes can trigger a field downgrade;
+                    // they are never checkpointed as successful pages.
+                    Ok(native_collection_resume::PageEvidence {
+                        payload_sha256: format!("{:x}", Sha256::digest(serde_json::to_vec(&receipt.payload)
+                            .map_err(|e| native_collection_resume_transport::Failure::checkpoint(e.to_string()))?)),
+                        payload:receipt.payload,received_at:Some(receipt.received_at),
+                        request_sha256:signature,payload_redacted:receipt.secrets_redacted,redacted_locator_rows:receipt.redacted_locator_rows,
+                    })
+                }
+            })();
+            let receipt = match result {
+                Ok(receipt) => receipt,
                 Err(failure) => {
-                    status = "error".into();
-                    error_category = failure.category.into();
-                    error = failure.detail;
-                    if failure.category != "cancelled" && (query_attempts > 0 || halted.is_none()) {
+                    q.status = "error".into();
+                    q.error_category = Some(failure.category.into());
+                    detail = failure.detail;
+                    add_reason(&mut q.coverage_reasons, failure.category);
+                    if failure.category == "resource_limited" {
+                        q.limited = true;
+                        add_reason(&mut q.coverage_reasons, "retention_limit");
+                    }
+                    if failure.stop_collection {
+                        halted = Some((failure.category, detail.clone()));
+                    }
+                    if failure.category != "cancelled" {
                         progress(
                             index,
                             queries.len(),
                             &format!(
-                                "FOFA 查询失败：{}；第 {page} 页；[{}] {}",
-                                query.query, error_category, error
+                                "FOFA 查询失败：{}；第 {page} 页；[{}] {detail}",
+                                query.query, failure.category
                             ),
                         );
-                    }
-                    if failure.stop_collection {
-                        halted = Some((failure.category, error.clone()));
                     }
                     break;
                 }
             };
-            if payload
-                .get("error")
-                .and_then(|value| value.as_bool())
-                .unwrap_or(false)
-            {
-                status = "error".into();
+            let payload = &receipt.payload;
+            if payload.get("error").and_then(serde_json::Value::as_bool) == Some(true) {
                 let failure = native_collection_resume_transport::provider_failure(
-                    &payload,
+                    payload,
                     &options.key,
                     &options.proxy,
                 );
-                error = failure.detail;
-                error_category = failure.category.into();
-                if native_collection_resume_transport::field_restricted(&error)
+                if native_collection_resume_transport::field_restricted(&failure.detail)
                     && fields != safe_fields
                 {
                     fields = safe_fields.clone();
-                    status = "ok".into();
-                    error.clear();
-                    error_category.clear();
                     progress(
                         index,
                         queries.len(),
-                        "当前字段权限不足，回退基础资产字段后重试",
+                        "当前字段权限不足，回退基础资产字段后重试；字段覆盖将单独标记",
                     );
                     continue;
                 }
+                q.status = "error".into();
+                q.error_category = Some(failure.category.into());
+                detail = failure.detail;
+                add_reason(&mut q.coverage_reasons, failure.category);
                 if failure.stop_collection {
-                    halted = Some((failure.category, error.clone()));
+                    halted = Some((failure.category, detail.clone()));
                 }
                 progress(
                     index,
                     queries.len(),
                     &format!(
-                        "FOFA 查询失败：{}；第 {page} 页；[{}] {}",
-                        query.query, error_category, error
+                        "FOFA 查询失败：{}；第 {page} 页；[{}] {detail}",
+                        query.query, failure.category
                     ),
                 );
                 break;
             }
-            let records = flatten_fofa(
-                payload.get("results").unwrap_or(&serde_json::Value::Null),
-                &fields,
+            if !q.actual_field_sets.contains(&fields) {
+                q.actual_field_sets.push(fields.clone());
+            }
+            if fields != requested_fields {
+                q.field_coverage_complete = false;
+                add_reason(&mut q.coverage_reasons, "field_downgrade");
+            }
+            observe_received(
+                &mut q.received_at_first,
+                &mut q.received_at_last,
+                receipt.received_at.as_deref(),
             );
-            total_matches = payload
+            let raw_rows = payload
+                .get("results")
+                .and_then(serde_json::Value::as_array)
+                .expect("transport and checkpoint require a results array");
+            let raw_count = raw_rows.len();
+            let total = payload
                 .get("size")
-                .and_then(|value| value.as_u64())
-                .unwrap_or(records.len() as u64) as usize;
-            for record in &records {
+                .and_then(serde_json::Value::as_u64)
+                .and_then(|total| usize::try_from(total).ok());
+            if let Some(total) = total {
+                if !q.reported_totals.contains(&total) {
+                    q.reported_totals.push(total);
+                }
+                if q.reported_totals.len() > 1 {
+                    add_reason(&mut q.coverage_reasons, "total_changed");
+                }
+                q.total_matches = Some(total);
+            } else {
+                add_reason(&mut q.coverage_reasons, "unknown_total");
+            }
+            let page_hash = format!(
+                "{:x}",
+                Sha256::digest(serde_json::to_vec(raw_rows).map_err(|e| e.to_string())?)
+            );
+            let repeated = raw_count > 0 && !page_hashes.insert(page_hash);
+            if repeated {
+                add_reason(&mut q.coverage_reasons, "duplicate_page");
+            }
+            for (row_index, raw) in raw_rows.iter().enumerate() {
+                // Count provider rows, not canonical endpoint identities. Two
+                // distinct observations of an endpoint are legitimate; an
+                // identical raw row repeated across pages cannot prove total.
+                let row_hash = format!(
+                    "{:x}",
+                    Sha256::digest(serde_json::to_vec(raw).map_err(|e| e.to_string())?)
+                );
+                if !record_hashes.insert(row_hash) {
+                    add_reason(&mut q.coverage_reasons, "duplicate_record");
+                }
+                let shape_valid = raw.as_object().is_some()
+                    || raw.as_array().is_some_and(|row| row.len() == fields.len());
+                let record = flatten_fofa(&json!([raw]), &fields)
+                    .pop()
+                    .unwrap_or_default();
+                let locator_redacted = receipt.redacted_locator_rows.contains(&row_index);
+                if locator_redacted {
+                    add_reason(&mut q.coverage_reasons, "redacted_locator");
+                }
+                if locator_redacted
+                    || !shape_valid
+                    || !super::asset_identity::valid_network_identity(
+                        &text(&record, &["link"]),
+                        &text(&record, &["host"]),
+                        &text(&record, &["protocol"]),
+                        &text(&record, &["ip"]),
+                        &text(&record, &["port"]),
+                    )
+                {
+                    q.rejected_rows += 1;
+                    add_reason(&mut q.coverage_reasons, "invalid_records");
+                    continue;
+                }
+                q.valid_rows += 1;
                 if query.category == "seed_domain" {
                     let expected =
                         normalize_host(query.label.rsplit(':').next().unwrap_or_default());
-                    let candidate = normalize_host(&text(record, &["host", "link"]));
-                    if !expected.is_empty()
-                        && !candidate.is_empty()
-                        && !host_matches_scope(&candidate, &expected)
-                    {
+                    // Match the actual endpoint first, as identity and probe do.
+                    let candidate = normalize_host(&text(&record, &["link", "host"]));
+                    if !expected.is_empty() && !host_matches_scope(&candidate, &expected) {
+                        q.scope_filtered_rows += 1;
                         continue;
                     }
                 }
-                let asset_key = discovery_identity(record);
+                let asset_key = discovery_identity(&record);
+                let mut incoming = record;
+                for (key, value) in [
+                    ("company", query.company.clone()),
+                    ("discovery_seed_kind", query.seed_kind.into()),
+                    ("asset_key", asset_key.clone()),
+                    ("evidence", query.label.clone()),
+                    ("matched_queries", query.query.clone()),
+                    ("phases", query.phase.clone()),
+                    ("score", query.score.to_string()),
+                    (
+                        "collection_received_at",
+                        receipt.received_at.clone().unwrap_or_default(),
+                    ),
+                    (
+                        "collection_binding_sha256",
+                        checkpoint.binding_sha256().into(),
+                    ),
+                    (
+                        "collection_time_status",
+                        if receipt.received_at.is_some() {
+                            "received"
+                        } else {
+                            "legacy_time_unknown"
+                        }
+                        .into(),
+                    ),
+                    (
+                        "collection_actual_fields_json",
+                        serde_json::to_string(&fields).map_err(|e| e.to_string())?,
+                    ),
+                    ("collection_payload_sha256", receipt.payload_sha256.clone()),
+                    ("collection_request_sha256", receipt.request_sha256.clone()),
+                    ("collection_page", page.to_string()),
+                    ("collection_rule_version", COLLECTION_RULE_VERSION.into()),
+                    (
+                        "collection_payload_redacted",
+                        receipt.payload_redacted.to_string(),
+                    ),
+                    (
+                        "collection_payload_hash_semantics",
+                        native_collection_resume::PAYLOAD_HASH_SEMANTICS.into(),
+                    ),
+                ] {
+                    incoming.insert(key.into(), value);
+                }
+                incoming.insert(
+                    "collection_provider_observed_at".into(),
+                    text(&incoming, &["lastupdatetime"]),
+                );
                 let item = candidates
-                    .entry((query.company.clone(), asset_key.clone()))
+                    .entry((query.company.clone(), asset_key))
                     .or_default();
-                item.row
-                    .entry("company".into())
-                    .or_insert_with(|| query.company.clone());
-                item.row
-                    .entry("discovery_seed_kind".into())
-                    .or_insert_with(|| query.seed_kind.into());
-                item.row.entry("asset_key".into()).or_insert(asset_key);
-                for (field, value) in record {
-                    if !value.is_empty()
-                        && item
-                            .row
-                            .get(field)
-                            .map(|old| old.is_empty())
-                            .unwrap_or(true)
-                    {
-                        item.row.insert(field.clone(), value.clone());
-                    }
+                if item.row.is_empty() {
+                    item.row = incoming;
+                } else {
+                    merge_discovery_evidence(&mut item.row, &incoming);
                 }
                 item.scores
                     .entry(query.category.clone())
@@ -860,26 +1013,50 @@ fn collect_fofa_at(
                 item.phases.insert(query.phase.clone());
                 item.queries.insert(query.query.clone());
             }
-            fetched += records.len();
-            checkpoint.write_state(
-                output,
-                &json!({"status":"running", "complete":false,
-                "queries":queries.len(), "processed_queries":index,
-                "last_query":query.query, "last_page":page,
-                "reused_pages":reused_pages, "migrated_legacy_pages":migrated_pages,
-                "request_attempts":request_attempts}),
-            )?;
-            limited = options.max_pages > 0
-                && page >= options.max_pages
-                && records.len() >= effective_size
-                && fetched < total_matches;
-            if records.len() < effective_size
-                || fetched >= total_matches
-                || (options.max_pages > 0 && page >= options.max_pages)
+            q.fetched_rows += raw_count;
+            if total.is_some_and(|total| q.fetched_rows > total) {
+                add_reason(&mut q.coverage_reasons, "total_mismatch");
+            }
+            let reached_total = total.is_some_and(|total| q.fetched_rows >= total);
+            let short = raw_count < effective_size;
+            if short && total.is_some_and(|total| q.fetched_rows < total) {
+                add_reason(&mut q.coverage_reasons, "short_page");
+            }
+            // A full page with no trustworthy total needs another page, bounded
+            // by both the configured limit and the hard receipt page limit.
+            let needs_more = !short && !reached_total && !repeated;
+            if needs_more
+                && ((options.max_pages > 0 && page >= options.max_pages)
+                    || page >= native_collection_resume::MAX_RECEIPT_PAGES)
             {
+                q.limited = true;
+                add_reason(&mut q.coverage_reasons, "page_limit");
+            }
+            q.complete = true;
+            q.status = "ok".into();
+            q.coverage_complete = total.is_some() && reached_total && q.coverage_reasons.is_empty();
+            summary.query_summaries[index] = q.clone();
+            summary.refresh(&checkpoint)?;
+            // Executing a query is still in progress until its terminal page.
+            summary.status = "running".into();
+            summary.complete = false;
+            summary.coverage_complete = false;
+            summary.candidates = candidates.len();
+            summary.source_candidates = candidates.len();
+            checkpoint.write_state(output, &summary.state()?)?;
+            if !needs_more || q.limited {
                 break;
             }
+            q.complete = false;
+            q.status = "running".into();
             page += 1;
+        }
+        q.coverage_complete = q.complete
+            && q.error_category.is_none()
+            && q.coverage_reasons.is_empty()
+            && q.total_matches.is_some_and(|total| q.fetched_rows >= total);
+        if q.status == "error" {
+            q.complete = false;
         }
         let mut log = Record::new();
         for (key, value) in [
@@ -889,23 +1066,34 @@ fn collect_fofa_at(
             ("label", query.label.clone()),
             ("score", query.score.to_string()),
             ("query", query.query.clone()),
-            ("total_matches", total_matches.to_string()),
-            ("fetched", fetched.to_string()),
-            ("status", status),
-            ("error", error),
-            ("error_category", error_category),
-            ("request_attempts", query_attempts.to_string()),
-            ("reused_pages", query_reused.to_string()),
-            ("last_page", page.to_string()),
             (
-                "partial",
-                (fetched > 0 && fetched < total_matches).to_string(),
+                "total_matches",
+                q.total_matches.map(|n| n.to_string()).unwrap_or_default(),
             ),
-            ("limited", limited.to_string()),
+            ("fetched", q.fetched_rows.to_string()),
+            ("status", q.status.clone()),
+            ("error", detail),
+            (
+                "error_category",
+                q.error_category.clone().unwrap_or_default(),
+            ),
+            ("request_attempts", q.request_attempts.to_string()),
+            ("reused_pages", q.reused_pages.to_string()),
+            ("last_page", q.last_page.to_string()),
+            ("partial", (!q.coverage_complete).to_string()),
+            ("limited", q.limited.to_string()),
         ] {
             log.insert(key.into(), value);
         }
         logs.push(log);
+        summary.query_summaries[index] = q;
+        summary.refresh(&checkpoint)?;
+        summary.status = "running".into();
+        summary.complete = false;
+        summary.coverage_complete = false;
+        summary.candidates = candidates.len();
+        summary.source_candidates = candidates.len();
+        checkpoint.write_state(output, &summary.state()?)?;
     }
     let plan_fields = ["company", "phase", "category", "label", "score", "query"]
         .into_iter()
@@ -927,32 +1115,6 @@ fn collect_fofa_at(
             .collect()
         })
         .collect::<Vec<Record>>();
-    write_collection_csv(&output.join("query_plan.csv"), &plan_fields, &plans)?;
-    write_collection_csv(
-        &output.join("query_log.csv"),
-        &[
-            "company",
-            "phase",
-            "category",
-            "label",
-            "score",
-            "query",
-            "total_matches",
-            "fetched",
-            "status",
-            "error",
-            "error_category",
-            "request_attempts",
-            "reused_pages",
-            "last_page",
-            "partial",
-            "limited",
-        ]
-        .into_iter()
-        .map(str::to_string)
-        .collect::<Vec<_>>(),
-        &logs,
-    )?;
     let mut rows = Vec::new();
     for (_, mut candidate) in candidates {
         let score = candidate.scores.values().sum::<i64>().min(100);
@@ -1002,42 +1164,106 @@ fn collect_fofa_at(
         .iter()
         .map(|field| (*field).to_string())
         .collect::<Vec<_>>();
-    write_collection_csv(&output.join("candidates.csv"), &candidate_fields, &rows)?;
-    write_collection_csv(
-        &output.join("review_candidates.csv"),
-        &candidate_fields,
-        &rows
+    summary.source_candidates = source_candidates;
+    summary.candidates = rows.len();
+    summary.merged_duplicates = source_candidates - rows.len();
+    summary.refresh(&checkpoint)?;
+    let artifacts = (|| -> Result<(), String> {
+        if summary
+            .error_categories
             .iter()
-            .filter(|row| number(row, &["score"]) >= 30)
-            .cloned()
+            .any(|category| category == "resource_limited")
+        {
+            return Err(
+                "resource_limited: 采集存储达到预算；保留已有页面和派生文件，不追加或覆盖输出"
+                    .into(),
+            );
+        }
+
+        write_collection_csv(
+            &output.join("query_plan.csv"),
+            &plan_fields,
+            &plans,
+            storage,
+        )?;
+        write_collection_csv(
+            &output.join("query_log.csv"),
+            &[
+                "company",
+                "phase",
+                "category",
+                "label",
+                "score",
+                "query",
+                "total_matches",
+                "fetched",
+                "status",
+                "error",
+                "error_category",
+                "request_attempts",
+                "reused_pages",
+                "last_page",
+                "partial",
+                "limited",
+            ]
+            .into_iter()
+            .map(str::to_string)
             .collect::<Vec<_>>(),
-    )?;
-    let failed_queries = logs
-        .iter()
-        .filter(|row| text(row, &["status"]) == "error")
-        .count();
-    let truncated_queries = logs
-        .iter()
-        .filter(|row| text(row, &["limited"]) == "true")
-        .count();
+            &logs,
+            storage,
+        )?;
+        write_collection_csv(
+            &output.join("candidates.csv"),
+            &candidate_fields,
+            &rows,
+            storage,
+        )?;
+        write_collection_csv(
+            &output.join("review_candidates.csv"),
+            &candidate_fields,
+            &rows
+                .iter()
+                .filter(|row| number(row, &["score"]) >= 30)
+                .cloned()
+                .collect::<Vec<_>>(),
+            storage,
+        )?;
+        Ok(())
+    })();
+    if let Err(detail) = artifacts {
+        let category = if detail.contains("resource_limited")
+            || detail.starts_with("receipt_retention_limit:")
+        {
+            "resource_limited"
+        } else {
+            "artifact_io"
+        };
+        summary.fail(category);
+        checkpoint.write_state(output, &summary.state()?)?;
+        return Err(detail);
+    }
+    summary.refresh(&checkpoint)?;
     let cancelled = cancel.load(Ordering::Relaxed)
         || halted
             .as_ref()
             .is_some_and(|(category, _)| *category == "cancelled");
-    let complete = failed_queries == 0 && !cancelled;
-    checkpoint.write_state(output, &json!({
-        "status": if cancelled { "cancelled" } else if complete { "completed" } else { "incomplete" },
-        "complete":complete, "coverage_complete":complete && truncated_queries == 0,
-        "queries":queries.len(), "completed_queries":queries.len() - failed_queries,
-        "failed_queries":failed_queries, "truncated_queries":truncated_queries,
-        "source_candidates":source_candidates, "candidates":rows.len(),
-        "reused_pages":reused_pages, "migrated_legacy_pages":migrated_pages,
-        "request_attempts":request_attempts,
-    }))?;
+    if cancelled {
+        summary.complete = false;
+        summary.coverage_complete = false;
+    }
+    summary.status = if cancelled {
+        "cancelled"
+    } else if summary.complete {
+        "completed"
+    } else {
+        "incomplete"
+    }
+    .into();
+    checkpoint.write_state(output, &summary.state()?)?;
     if cancelled {
         return Err("__CANCELLED__".into());
     }
-    if failed_queries > 0 {
+    if summary.failed_queries > 0 {
         let first = logs
             .iter()
             .find(|row| text(row, &["status"]) == "error")
@@ -1050,15 +1276,14 @@ fn collect_fofa_at(
                 )
             })
             .unwrap_or_default();
-        return Err(format!("FOFA {failed_queries}/{} 条查询未完成；已保留 {} 条候选、页面检查点和 query_log.csv，可原地恢复。首条失败：{first}", queries.len(), rows.len()));
+        return Err(format!("FOFA {}/{} 条查询未完成；已保留 {} 条候选、页面检查点和 query_log.csv，可原地恢复。首条失败：{first}",summary.failed_queries,queries.len(),rows.len()));
     }
-    progress(queries.len(), queries.len(), "采集完成");
-    Ok(
-        json!({"queries": queries.len(), "source_candidates": source_candidates,
-        "candidates": rows.len(), "merged_duplicates": source_candidates - rows.len(), "native": true,
-        "complete":true, "coverage_complete":truncated_queries == 0, "truncated_queries":truncated_queries,
-        "reused_pages":reused_pages, "migrated_legacy_pages":migrated_pages, "request_attempts":request_attempts}),
-    )
+    progress(
+        queries.len(),
+        queries.len(),
+        "采集执行完成；覆盖状态见任务摘要",
+    );
+    summary.state()
 }
 
 #[cfg(test)]

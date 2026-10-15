@@ -14,6 +14,12 @@ const activeProjects = computed(() => props.projects.filter(project => project.s
 const projectId = ref(activeProjects.value.find(project => project.id === props.selectedProjectId)?.id ?? activeProjects.value[0]?.id);
 const profileId = ref(props.profiles.find(p => p.isDefault)?.id ?? props.profiles[0]?.id);
 const targetType = ref("auto"); const input = ref(""); const pipeline = ref("full");
+const selectedProfile = computed(() => props.profiles.find(profile => profile.id === profileId.value));
+// Match the backend boolean defaults; a legacy non-boolean does not disable probing.
+const probeEnabled = computed(() => selectedProfile.value?.settings.runProbe !== false);
+const refineEnabled = computed(() => selectedProfile.value?.settings.runRefine !== false || probeEnabled.value);
+const executionPlan = computed(() => [tr("采集", "Collect"), tr("候选入库", "Import candidates"),
+  ...(refineEnabled.value ? [tr("分层", "Refine")] : []), ...(probeEnabled.value ? [tr("探测", "Probe")] : [])].join(" → "));
 const jobName = ref(`资产采集 ${new Date().toLocaleDateString()}`); const targets = ref<Target[]>([]); const busy = ref(false);
 const lines = computed(() => input.value.split(/\r?\n/).map(v => v.trim()).filter(v => v && !v.startsWith("#")));
 
@@ -60,12 +66,17 @@ async function start() {
 <template>
   <div class="query-layout">
     <section class="panel query-builder-panel">
-      <div class="panel-heading"><div><span class="eyebrow">COLLECTION</span><h2>{{tr('创建资产查询','Create asset query')}}</h2><p>{{tr('每行一个公司名、域名、IP或CIDR。公司与域名查询命中同一访问入口时，合并发现证据后探测一次；新任务仍复查历史入口，保留人工结论和已看记录。','One company, domain, IP or CIDR per line. Shared endpoints merge discovery evidence before one probe; new jobs recheck historical endpoints while preserving manual decisions and opened-entry records.')}}</p></div></div>
+      <div class="panel-heading"><div><span class="eyebrow">COLLECTION</span><h2>{{tr('创建资产查询','Create asset query')}}</h2><p>{{tr('每行一个公司名、域名、IP或CIDR。公司与域名命中的同一入口合并发现证据；是否进行存活探测取决于所选配置。来源标签和评分不是归属确认，人工结论和已看记录保持。','One company, domain, IP or CIDR per line. Shared endpoints merge discovery evidence; the selected profile determines whether to probe. Discovery labels and scores are not ownership confirmation. Manual decisions and opened-entry records are preserved.')}}</p></div></div>
       <div class="form-grid two">
         <div class="project-field-with-action"><label class="field"><span>{{tr('归属工作空间','Workspace')}}</span><select v-model="projectId"><option v-for="p in projects.filter(item=>item.status!=='archived')" :key="p.id" :value="p.id">{{ p.name }}</option></select></label><button class="button ghost" type="button" @click="$emit('createProject')"><Plus :size="14" />{{tr('新建','New')}}</button></div>
         <label class="field"><span>{{tr('配置方案','Profile')}}</span><select v-model="profileId"><option v-for="p in profiles" :key="p.id" :value="p.id">{{ p.name }}</option></select></label>
         <label class="field"><span>{{tr('任务名称','Job name')}}</span><input v-model="jobName" /></label>
-        <label class="field"><span>{{tr('任务范围','Pipeline')}}</span><select v-model="pipeline"><option value="full">{{tr('采集 + 分层 + 存活探测（默认）','Collect + refine + probe (default)')}}</option><option value="collect">{{tr('采集后自动存活探测（兼容模式）','Collect then auto-probe (compatible)')}}</option></select></label>
+        <label class="field"><span>{{tr('任务范围','Pipeline')}}</span><select v-model="pipeline"><option value="full">{{tr('采集与处理（默认）','Collect and process (default)')}}</option><option value="collect">{{tr('兼容采集流程','Compatible collection workflow')}}</option></select></label>
+      </div>
+      <div class="query-execution-plan" :data-query-profile="profileId" :data-probe-plan="probeEnabled ? 'enabled' : 'disabled'" role="status">
+        <strong>{{tr('按所选配置执行','Selected profile plan')}}</strong>
+        <span>{{selectedProfile ? executionPlan : tr('请选择配置方案','Select a profile')}}</span>
+        <small v-if="selectedProfile && !probeEnabled">{{tr('本轮不进行存活探测：入库的是来源候选，不代表当前可访问。','This run does not probe availability. Imported source candidates do not prove current accessibility.')}}</small>
       </div>
       <div class="input-toolbar">
         <div class="segmented">
@@ -92,3 +103,8 @@ async function start() {
     </aside>
   </div>
 </template>
+
+<style scoped>
+.query-execution-plan { margin:12px 19px; display:grid; gap:4px; padding:10px 12px; border:1px solid var(--line); border-radius:8px; font-size:11px; line-height:1.6; }
+.query-execution-plan strong { font-size:10px; }.query-execution-plan span,.query-execution-plan small { color:var(--muted); overflow-wrap:anywhere; }
+</style>

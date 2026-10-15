@@ -51,14 +51,14 @@ fn ownership_learn_host_rule(
     action: &str,
     scope: &str,
 ) -> Result<Option<String>, String> {
-    let raw: String = connection
+    let (link, host): (String, String) = connection
         .query_row(
-            "SELECT COALESCE(NULLIF(domain,''),NULLIF(host,''),link) FROM assets WHERE id=?1",
+            "SELECT link,host FROM assets WHERE id=?1",
             [asset_id],
-            |row| row.get(0),
+            |row| Ok((row.get(0)?, row.get(1)?)),
         )
         .unwrap_or_default();
-    let pattern = normalize_ownership_domain(&raw);
+    let pattern = ownership_endpoint_host(&link, &host);
     if pattern.is_empty() || pattern.parse::<std::net::IpAddr>().is_ok() {
         if scope == "subdomains" {
             return Err(format!("{OWNERSHIP_RULE_SCOPE_DENIED}: 资产 #{asset_id} 没有可泛化的域名（IP 或空主机），未写入任何结论"));
@@ -75,7 +75,7 @@ fn ownership_learn_host_rule(
             let profile_shared: Vec<String> = read_ownership_profile(connection, project_id)?.shared_domains;
             let directory_shared: Vec<String> = {
                 let mut statement = connection
-                    .prepare("SELECT normalized_value FROM org_entity_identifiers WHERE kind='shared_domain'")
+                    .prepare("SELECT value FROM org_entity_identifiers WHERE kind='shared_domain'")
                     .map_err(|error| error.to_string())?;
                 let rows = statement
                     .query_map([], |row| row.get::<_, String>(0))
@@ -97,8 +97,8 @@ fn ownership_learn_host_rule(
     };
     connection
         .execute(
-            "INSERT INTO asset_ownership_rules(project_id,rule_type,pattern,action,source) VALUES(?1,?2,?3,?4,'manual_decision') ON CONFLICT(project_id,rule_type,pattern,action) DO UPDATE SET enabled=1,updated_at=datetime('now','localtime')",
-            params![project_id, rule_type, pattern, action],
+            "INSERT INTO asset_ownership_rules(project_id,rule_type,pattern,action,source) VALUES(?1,?2,?3,?4,?5) ON CONFLICT(project_id,rule_type,pattern,action) DO UPDATE SET enabled=1,source=excluded.source,updated_at=datetime('now','localtime')",
+            params![project_id, rule_type, pattern, action, OWNERSHIP_LEARNED_RULE_SOURCE_V2],
         )
         .map_err(|error| error.to_string())?;
     Ok(Some(format!("{rule_type}:{pattern}")))

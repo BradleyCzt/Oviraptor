@@ -4,6 +4,8 @@ use crate::agent_runtime::model::{
     LocalResourcePolicy, ModelError, ResolvedModelProfile, UsageDelta,
 };
 use crate::conversations::{access, tests::Fixture, tools};
+#[path = "asset_statistics_tests.rs"]
+mod asset_statistics_tests;
 fn profile() -> GatewayProfile {
     GatewayProfile::resolve(
         &ResolvedModelProfile {

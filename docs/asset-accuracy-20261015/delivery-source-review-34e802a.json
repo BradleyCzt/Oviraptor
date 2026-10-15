@@ -1,0 +1,2266 @@
+{
+  "schemaVersion": 1,
+  "recordedAtUtc": "2026-10-15T14:08:09.046183+00:00",
+  "purpose": "Final read-only source/module/provenance review; not build, test or merge acceptance.",
+  "sourceHead": "34e802a6f8d4fc093efa1d3ee732daf767d0df44",
+  "directParent": "e5fed60067fc087a0fa322ee35766f624835dd40",
+  "repo": "/workspace/Oviraptor-asset-accuracy-20261015",
+  "branch": "refactor/external-asset-accuracy-20261015",
+  "mainBaseline": "3102693abc135f4a2b986caca851bbc935378f0b",
+  "designBaseline": "6920ec9a4c1f97321d4afb11695c164c1bb79b08",
+  "previousReviews": [
+    {
+      "path": "/workspace/validation/asset-accuracy-20261015/delivery-source-review.json",
+      "sha256": "884b7f33988c4745200ea2a767e6cddd94f698f519cb7c232629a2a8d05b1053",
+      "sourceHead": "5b4a5b61e715160cb1b09fc583cdc5e2eec28811",
+      "preservedUnmodified": true
+    },
+    {
+      "path": "/workspace/validation/asset-accuracy-20261015/delivery-source-review-e5fed600.json",
+      "sha256": "91b91e38c931915fba6b587edc463d8ec697f6dcfdca876cf5a8986d0f7f63aa",
+      "sourceHead": "e5fed60067fc087a0fa322ee35766f624835dd40",
+      "preservedUnmodified": true
+    }
+  ],
+  "sourceReviewOnly": true,
+  "runtimeAcceptance": null,
+  "testsExecutedByThisReview": false,
+  "cargoOrBuildExecutedByThisReview": false,
+  "nodeExecutedByThisReview": false,
+  "repositoryFilesWrittenByThisReview": false,
+  "commitsCreatedByThisReview": false,
+  "networkTargetsOrUserMacAccessedByThisReview": false,
+  "actualDeltaCounts": {
+    "main310": {
+      "allPaths": 48,
+      "sourceAndTestPaths": 46,
+      "docsPaths": 2
+    },
+    "design6920": {
+      "allPaths": 47,
+      "sourceAndTestPaths": 46,
+      "docsPaths": 1
+    }
+  },
+  "sourceAndTestPathCount": 46,
+  "pathCountExplanation": "45 previous source/test paths plus one pre-existing Scanning broker test file now changed. Main310 delta has46 source/test paths +2docs=48; design6920 already has docs, so only one doc changes and total is47.",
+  "docsDelta": {
+    "main310": [
+      {
+        "status": "A",
+        "path": "docs/EXTERNAL_ASSET_ACCURACY_2026-10-15.md"
+      },
+      {
+        "status": "A",
+        "path": "docs/EXTERNAL_ASSET_ACCURACY_AND_PROJECT_ANALYSIS_DESIGN_2026-10-15.md"
+      }
+    ],
+    "design6920": [
+      {
+        "status": "M",
+        "path": "docs/EXTERNAL_ASSET_ACCURACY_AND_PROJECT_ANALYSIS_DESIGN_2026-10-15.md"
+      }
+    ]
+  },
+  "sourceFiles": [
+    {
+      "status": "A",
+      "path": "src-tauri/src/asset_log_retention_tests.rs",
+      "owner": "owned_collection_storage_and_diagnostic_log_retention",
+      "baselineSha256": null,
+      "frozenSha256": "d85d19167b402c43b8675fa5c669aef3b91e91ad757088b3312fe1eae60ded49",
+      "bytes": 7170,
+      "addedLines": 222,
+      "deletedLines": 0,
+      "worktreeMatchesFrozenCommit": true
+    },
+    {
+      "status": "M",
+      "path": "src-tauri/src/asset_logs.rs",
+      "owner": "owned_collection_storage_and_diagnostic_log_retention",
+      "baselineSha256": "93349e45b358954eee962033469c45f91a1e53687bfee4821447d17515bac0ed",
+      "frozenSha256": "a43bd30ce525597ab850378432bc61be4c178438487e9db8486b41bf8164ddaf",
+      "bytes": 11978,
+      "addedLines": 219,
+      "deletedLines": 2,
+      "worktreeMatchesFrozenCommit": true
+    },
+    {
+      "status": "M",
+      "path": "src-tauri/src/assets/model.rs",
+      "owner": "assets_observation_import_and_persistence",
+      "baselineSha256": "4905ab00a64ff4463695bba86320472afc888583a66a4fbbf0165faf1a456701",
+      "frozenSha256": "7d755bf5a44fd72ae37345e10e7a51be8884536fc05f9d8294d4ed1a2aa14509",
+      "bytes": 12683,
+      "addedLines": 45,
+      "deletedLines": 0,
+      "worktreeMatchesFrozenCommit": true
+    },
+    {
+      "status": "A",
+      "path": "src-tauri/src/assets/statistics.rs",
+      "owner": "assets_exact_inventory_read_service",
+      "baselineSha256": null,
+      "frozenSha256": "6fcb0f6db25684469debe73d71e87a8cfdf6f7077add65400ced01cea72b663d",
+      "bytes": 20536,
+      "addedLines": 559,
+      "deletedLines": 0,
+      "worktreeMatchesFrozenCommit": true
+    },
+    {
+      "status": "A",
+      "path": "src-tauri/src/assets/statistics_tests.rs",
+      "owner": "assets_exact_inventory_read_service",
+      "baselineSha256": null,
+      "frozenSha256": "65a03b4fb77def1e6a8c93cc7fc80a610a5f84d33a280b6b8094b0770b9a3d31",
+      "bytes": 24340,
+      "addedLines": 658,
+      "deletedLines": 0,
+      "worktreeMatchesFrozenCommit": true
+    },
+    {
+      "status": "M",
+      "path": "src-tauri/src/commands/asset_ownership.rs",
+      "owner": "assets_identity_provenance_and_ownership",
+      "baselineSha256": "ad3b8ee657c83ef4440ad7fef4436e7608652a3c4162e91d4f30c2615baeade4",
+      "frozenSha256": "643637d7885152efaa544222e8c4f7cfb7ddf94efbcd50e738e18fd0d60d6fdf",
+      "bytes": 47900,
+      "addedLines": 82,
+      "deletedLines": 15,
+      "worktreeMatchesFrozenCommit": true
+    },
+    {
+      "status": "A",
+      "path": "src-tauri/src/commands/asset_ownership_accuracy_tests.rs",
+      "owner": "assets_identity_provenance_and_ownership",
+      "baselineSha256": null,
+      "frozenSha256": "ec20cdb7406aac05d4e00573cab07c57147a3e35b2ce5100be58f07d6922a530",
+      "bytes": 23918,
+      "addedLines": 621,
+      "deletedLines": 0,
+      "worktreeMatchesFrozenCommit": true
+    },
+    {
+      "status": "M",
+      "path": "src-tauri/src/commands/assets.rs",
+      "owner": "assets_observation_import_and_persistence",
+      "baselineSha256": "a7c552c0d498491665f75b24eb6132181c70f5e50b1f1e70eeb205cf2a2667ba",
+      "frozenSha256": "6757ed6c91ce74f2c95bb62250a9d170c76dfacddbf41d00b73034ca3b1fa358",
+      "bytes": 47560,
+      "addedLines": 8,
+      "deletedLines": 3,
+      "worktreeMatchesFrozenCommit": true
+    },
+    {
+      "status": "M",
+      "path": "src-tauri/src/commands/multi_agent/tests/broker.rs",
+      "owner": "scanning_authorization_regression_fixture",
+      "baselineSha256": "3a3666ae08632eb772e2725f0246da99245099b4e44ac8a576a8fbdca2108a3d",
+      "frozenSha256": "5498b8302bb5e66c8a483ea924e19eccff80ae932f968a1e6b63fb73b99387bf",
+      "bytes": 17575,
+      "addedLines": 68,
+      "deletedLines": 1,
+      "worktreeMatchesFrozenCommit": true
+    },
+    {
+      "status": "M",
+      "path": "src-tauri/src/commands/ownership_authorization.rs",
+      "owner": "assets_identity_provenance_and_ownership",
+      "baselineSha256": "d211fa4bc966278673a9ffbb222c3871333b57bf0eafac0ca978a0c6639a1c4c",
+      "frozenSha256": "070ff404e79aaf608370b17ea8323148f9ab5bb19b9880e8264a38ec48e0f86a",
+      "bytes": 13320,
+      "addedLines": 7,
+      "deletedLines": 7,
+      "worktreeMatchesFrozenCommit": true
+    },
+    {
+      "status": "M",
+      "path": "src-tauri/src/commands/ownership_directory.rs",
+      "owner": "assets_identity_provenance_and_ownership",
+      "baselineSha256": "3bdc854979936b2d0d5c878d8d41b1a60188167e350565ff1441fd9d57cea808",
+      "frozenSha256": "f4c36a9be5a6a7d5c54ec9412a4f029ae7a3e443e7c09d2e16d0b48bdbf2ac3f",
+      "bytes": 96495,
+      "addedLines": 42,
+      "deletedLines": 23,
+      "worktreeMatchesFrozenCommit": true
+    },
+    {
+      "status": "M",
+      "path": "src-tauri/src/commands/ownership_review.rs",
+      "owner": "assets_identity_provenance_and_ownership",
+      "baselineSha256": "f140b5f2d3a2d177446bfa908f96e52f4b90f449bedabd898bc2d123ab77982e",
+      "frozenSha256": "fb3ac2a9fb69ed158081177e1dfd05d0f73fb96b0e7bd4717b736384a1c0b9bc",
+      "bytes": 178091,
+      "addedLines": 31,
+      "deletedLines": 18,
+      "worktreeMatchesFrozenCommit": true
+    },
+    {
+      "status": "M",
+      "path": "src-tauri/src/conversations/agent.rs",
+      "owner": "chat_project_scoped_assets_read_adapter",
+      "baselineSha256": "01143632565215ab7188b83bf5432b2202de389b444f977016fdbd63e5cf0dcf",
+      "frozenSha256": "bd49ee8e44126c9a9b6100188cbfcef6a9be87a153012fb1d9a1fe1ccf0013e1",
+      "bytes": 14299,
+      "addedLines": 6,
+      "deletedLines": 2,
+      "worktreeMatchesFrozenCommit": true
+    },
+    {
+      "status": "M",
+      "path": "src-tauri/src/conversations/agent_tests.rs",
+      "owner": "chat_project_scoped_assets_read_adapter",
+      "baselineSha256": "e70c3dbf76ac8cb68e04be7f7b191b1852a82c0fb5db4a69dee3239b47ec46d5",
+      "frozenSha256": "5f5c4cff248e5630ef3438a4c2a212aaf06a7e785f294e9ddcaadd83625fcbbb",
+      "bytes": 18773,
+      "addedLines": 2,
+      "deletedLines": 0,
+      "worktreeMatchesFrozenCommit": true
+    },
+    {
+      "status": "A",
+      "path": "src-tauri/src/conversations/asset_statistics_tests.rs",
+      "owner": "chat_project_scoped_assets_read_adapter",
+      "baselineSha256": null,
+      "frozenSha256": "7eb95364d9c36c2dccc9b99150fd20e676bf447df04b12a2c73fba11eae22480",
+      "bytes": 16666,
+      "addedLines": 442,
+      "deletedLines": 0,
+      "worktreeMatchesFrozenCommit": true
+    },
+    {
+      "status": "M",
+      "path": "src-tauri/src/conversations/reply.rs",
+      "owner": "chat_project_scoped_assets_read_adapter",
+      "baselineSha256": "bb196a8d0831481c1a64a9e19303827e0b8ca23f325278b647cb3fb3c50911d2",
+      "frozenSha256": "c0332d331381afedafa232b5eb695ce2cadfd371944cc4e46f50ea039d84ecab",
+      "bytes": 25704,
+      "addedLines": 2,
+      "deletedLines": 1,
+      "worktreeMatchesFrozenCommit": true
+    },
+    {
+      "status": "M",
+      "path": "src-tauri/src/conversations/tools.rs",
+      "owner": "chat_project_scoped_assets_read_adapter",
+      "baselineSha256": "a196da08e6549f62d2c16db283f55347d018fd8bfe2b5e16db94518687d51d37",
+      "frozenSha256": "51a7399b257a4fafe33b5ea87a0329504430c3553f29780828d7e409d0d0d4f0",
+      "bytes": 16866,
+      "addedLines": 54,
+      "deletedLines": 6,
+      "worktreeMatchesFrozenCommit": true
+    },
+    {
+      "status": "M",
+      "path": "src-tauri/src/db.rs",
+      "owner": "assets_observation_import_and_persistence",
+      "baselineSha256": "1a84832f4af56f9509a3d6a34b00516b74983e972a3ccf185733177ff1f05634",
+      "frozenSha256": "36504d94f1d30bdd1b2f6fc438f110252834c2c9b1a325140397e9758824bcb1",
+      "bytes": 23215,
+      "addedLines": 6,
+      "deletedLines": 0,
+      "worktreeMatchesFrozenCommit": true
+    },
+    {
+      "status": "M",
+      "path": "src-tauri/src/db_schema.rs",
+      "owner": "assets_observation_import_and_persistence",
+      "baselineSha256": "1a32d477c78cac8d299d7bf58eb83351b76d52ec8a8c4566a40c3ab0e7fcf692",
+      "frozenSha256": "ad5ad76cc4b351108a39cf6ccb53232345c27631ff948337ef0cb05c74adaecf",
+      "bytes": 119839,
+      "addedLines": 2,
+      "deletedLines": 0,
+      "worktreeMatchesFrozenCommit": true
+    },
+    {
+      "status": "M",
+      "path": "src-tauri/src/jobs.rs",
+      "owner": "assets_observation_import_and_persistence",
+      "baselineSha256": "1e5eb11c0b2a29503e27002c667c44ac15c2c89fc3555173c3bf3bd5545eaa88",
+      "frozenSha256": "ba953bcc752d1a429c828187774042daa021021d26cd23a26e2cb4be8527b7ce",
+      "bytes": 66696,
+      "addedLines": 206,
+      "deletedLines": 77,
+      "worktreeMatchesFrozenCommit": true
+    },
+    {
+      "status": "M",
+      "path": "src-tauri/src/jobs/asset_identity.rs",
+      "owner": "assets_identity_provenance_and_ownership",
+      "baselineSha256": "4ac5cc2af3b3c5024b1221651dc691d5c78631d9bfba5a2e9ce1d8c765cfa52d",
+      "frozenSha256": "d9882785cd1030ff3066b34ba365a3df91bc89fbcde5817c1f46d79ec296d9c8",
+      "bytes": 9046,
+      "addedLines": 171,
+      "deletedLines": 14,
+      "worktreeMatchesFrozenCommit": true
+    },
+    {
+      "status": "M",
+      "path": "src-tauri/src/jobs/asset_import_tests.rs",
+      "owner": "assets_observation_import_and_persistence",
+      "baselineSha256": "43fa0ddd5ad2bc24de2a66adab2cd923f3d233a6d0c592974edae5e3169bc029",
+      "frozenSha256": "a7bd08d6b7b465a9d5e16ea141a5cec0b38c578629a9301ea270ccf24da516dc",
+      "bytes": 20225,
+      "addedLines": 17,
+      "deletedLines": 2,
+      "worktreeMatchesFrozenCommit": true
+    },
+    {
+      "status": "A",
+      "path": "src-tauri/src/jobs/asset_observation.rs",
+      "owner": "assets_observation_import_and_persistence",
+      "baselineSha256": null,
+      "frozenSha256": "420b247d052336e7ffaa822a70142cd026b64e224f2846cbd27e354c92d2feb4",
+      "bytes": 15949,
+      "addedLines": 431,
+      "deletedLines": 0,
+      "worktreeMatchesFrozenCommit": true
+    },
+    {
+      "status": "A",
+      "path": "src-tauri/src/jobs/asset_observation_tests.rs",
+      "owner": "assets_observation_import_and_persistence",
+      "baselineSha256": null,
+      "frozenSha256": "3df4e4124c1be7e064597cbed24dbacf3522e374354f8931d83779ec3ccc3c0d",
+      "bytes": 21194,
+      "addedLines": 669,
+      "deletedLines": 0,
+      "worktreeMatchesFrozenCommit": true
+    },
+    {
+      "status": "A",
+      "path": "src-tauri/src/jobs/collection_retention.rs",
+      "owner": "owned_collection_storage_and_diagnostic_log_retention",
+      "baselineSha256": null,
+      "frozenSha256": "2ca68d8f026b02c613021eed4c20840a38b639f94e7cc0d8b01c06137710c917",
+      "bytes": 35669,
+      "addedLines": 905,
+      "deletedLines": 0,
+      "worktreeMatchesFrozenCommit": true
+    },
+    {
+      "status": "A",
+      "path": "src-tauri/src/jobs/collection_retention_tests.rs",
+      "owner": "owned_collection_storage_and_diagnostic_log_retention",
+      "baselineSha256": null,
+      "frozenSha256": "9e214f820b0d4e6bfd9ee21dbdb46feba190fdf14fdb212dacec048ee5a6e2a4",
+      "bytes": 16865,
+      "addedLines": 503,
+      "deletedLines": 0,
+      "worktreeMatchesFrozenCommit": true
+    },
+    {
+      "status": "A",
+      "path": "src-tauri/src/jobs/collection_summary.rs",
+      "owner": "assets_observation_import_and_persistence",
+      "baselineSha256": null,
+      "frozenSha256": "44b789815f88fbea47a22fc3f7c1f6f5eb51b785663ef50e3d15ed20ff60bfe6",
+      "bytes": 17011,
+      "addedLines": 422,
+      "deletedLines": 0,
+      "worktreeMatchesFrozenCommit": true
+    },
+    {
+      "status": "M",
+      "path": "src-tauri/src/jobs/native_collection_resume.rs",
+      "owner": "assets_collection_receipts_and_coverage",
+      "baselineSha256": "8bf2f4ab122fa82e6c0fefdcef0377f4cde453e4eff73deaac27e0dfe4238117",
+      "frozenSha256": "5c4378357629d015c0e8dd9c23af0097b38f6bf83b756f9367775fa2dc0cc0dc",
+      "bytes": 26462,
+      "addedLines": 519,
+      "deletedLines": 45,
+      "worktreeMatchesFrozenCommit": true
+    },
+    {
+      "status": "A",
+      "path": "src-tauri/src/jobs/native_collection_resume_summary.rs",
+      "owner": "assets_collection_receipts_and_coverage",
+      "baselineSha256": null,
+      "frozenSha256": "2b22c3aee72a34a5675de74c787abee7b64ec9b1e9ada14a73b5f0260c5a12ff",
+      "bytes": 8732,
+      "addedLines": 240,
+      "deletedLines": 0,
+      "worktreeMatchesFrozenCommit": true
+    },
+    {
+      "status": "M",
+      "path": "src-tauri/src/jobs/native_collection_resume_tests.rs",
+      "owner": "assets_collection_receipts_and_coverage",
+      "baselineSha256": "71b241929a8113ee0f6ad858f199bcf9bf3d536fabe8cd05f601de70132a8e9b",
+      "frozenSha256": "07a2ee4029a47712bb1301db34b0dc6202cea9d35ea8500636eeb5bc5e19ea13",
+      "bytes": 65071,
+      "addedLines": 882,
+      "deletedLines": 15,
+      "worktreeMatchesFrozenCommit": true
+    },
+    {
+      "status": "M",
+      "path": "src-tauri/src/jobs/native_collection_resume_transport.rs",
+      "owner": "assets_collection_receipts_and_coverage",
+      "baselineSha256": "d875db9ef3710263b89b4e96e10c8eb834f65bba98eb31dd12421ad5ebc48e22",
+      "frozenSha256": "ccde5b76f19d446f51ca22edd974dacc023db87e49777351cde88668807b23bc",
+      "bytes": 18290,
+      "addedLines": 162,
+      "deletedLines": 5,
+      "worktreeMatchesFrozenCommit": true
+    },
+    {
+      "status": "M",
+      "path": "src-tauri/src/jobs/native_discovery.rs",
+      "owner": "assets_identity_provenance_and_ownership",
+      "baselineSha256": "f8f37a17f562982965b45118756e1774f0f7625006983ec4be43db72582db4a3",
+      "frozenSha256": "551eb96593b0f8834361ce0253d15db3d446dc1cd6be191a41130c017d459872",
+      "bytes": 13546,
+      "addedLines": 192,
+      "deletedLines": 37,
+      "worktreeMatchesFrozenCommit": true
+    },
+    {
+      "status": "M",
+      "path": "src-tauri/src/jobs/native_discovery_tests.rs",
+      "owner": "assets_identity_provenance_and_ownership",
+      "baselineSha256": "0c450fed2362f0696e092b7fddab8983da7024ebec03ef48068614bec787065b",
+      "frozenSha256": "e16f7bbc9b77eac58d373d86fac33840af281c624e7b790cbb4bebb515f3b4cc",
+      "bytes": 23818,
+      "addedLines": 230,
+      "deletedLines": 4,
+      "worktreeMatchesFrozenCommit": true
+    },
+    {
+      "status": "M",
+      "path": "src-tauri/src/jobs/native_fofa.rs",
+      "owner": "assets_collection_receipts_and_coverage",
+      "baselineSha256": "75e0aa390d740d805e7e163f1ed5aa92eee649ff310aef7067e9113c037f6b35",
+      "frozenSha256": "39d2e7dc46fd3048fb3308a5a4ab9ce6620f408a0561539d37169b94695dbf53",
+      "bytes": 47077,
+      "addedLines": 509,
+      "deletedLines": 284,
+      "worktreeMatchesFrozenCommit": true
+    },
+    {
+      "status": "M",
+      "path": "src-tauri/src/jobs/native_workers.rs",
+      "owner": "assets_derived_inventory_adapter",
+      "baselineSha256": "bfff95aec702d63a0b76fbd7efde3416b6e93e362dc005621f44987ac8c2879d",
+      "frozenSha256": "527ed6f812178388ed264b299bceff1a6f1a00b24e474009c38f031e81788cdb",
+      "bytes": 32650,
+      "addedLines": 101,
+      "deletedLines": 14,
+      "worktreeMatchesFrozenCommit": true
+    },
+    {
+      "status": "A",
+      "path": "src/features/assets/collectionPresentation.ts",
+      "owner": "assets_frontend_and_synthetic_ui_test_support",
+      "baselineSha256": null,
+      "frozenSha256": "fc26ae94fbff4292308ccf6d04c00f3bb7c1e88c1216d90eee65e7e8bc7c2f44",
+      "bytes": 5624,
+      "addedLines": 78,
+      "deletedLines": 0,
+      "worktreeMatchesFrozenCommit": true
+    },
+    {
+      "status": "A",
+      "path": "src/features/assets/components/AssetObservation.vue",
+      "owner": "assets_frontend_and_synthetic_ui_test_support",
+      "baselineSha256": null,
+      "frozenSha256": "321ebdc234dec73f84264705c04e425494111b361cb4df8bd3df090db849027e",
+      "bytes": 4244,
+      "addedLines": 50,
+      "deletedLines": 0,
+      "worktreeMatchesFrozenCommit": true
+    },
+    {
+      "status": "M",
+      "path": "src/features/assets/components/AssetWorkspace.vue",
+      "owner": "assets_frontend_and_synthetic_ui_test_support",
+      "baselineSha256": "1220922e28925ed85cb1440d15b9fff79fdebfe2ce3bf696a4607e0cd2e24224",
+      "frozenSha256": "ffed5e347051f405c9464332b0297125548dfa1a0cc78398b431a0880f2dcd6f",
+      "bytes": 61754,
+      "addedLines": 71,
+      "deletedLines": 33,
+      "worktreeMatchesFrozenCommit": true
+    },
+    {
+      "status": "A",
+      "path": "src/features/assets/components/CollectionRunSummary.vue",
+      "owner": "assets_frontend_and_synthetic_ui_test_support",
+      "baselineSha256": null,
+      "frozenSha256": "e1a8a6a567c802cd756b71cacbc98cd73e676a9cb99bcecb14367caf84211845",
+      "bytes": 6737,
+      "addedLines": 65,
+      "deletedLines": 0,
+      "worktreeMatchesFrozenCommit": true
+    },
+    {
+      "status": "M",
+      "path": "src/features/assets/components/QueryPanel.vue",
+      "owner": "assets_frontend_and_synthetic_ui_test_support",
+      "baselineSha256": "247e2c7225f5674c9402ead6761f74c1f8b866d14e7f2e03d8958121b84f8c95",
+      "frozenSha256": "80e4d5f79f8479480c3abf142a4733549e06c331637e9e598be6c3c0f6cae5f5",
+      "bytes": 9248,
+      "addedLines": 18,
+      "deletedLines": 2,
+      "worktreeMatchesFrozenCommit": true
+    },
+    {
+      "status": "A",
+      "path": "src/features/assets/observationPresentation.ts",
+      "owner": "assets_frontend_and_synthetic_ui_test_support",
+      "baselineSha256": null,
+      "frozenSha256": "ac1713845943c977faeb9f4e3ee5871a21851d3ffb0b6d4cf5629c93d17fc158",
+      "bytes": 2160,
+      "addedLines": 36,
+      "deletedLines": 0,
+      "worktreeMatchesFrozenCommit": true
+    },
+    {
+      "status": "M",
+      "path": "src/features/assets/types.ts",
+      "owner": "assets_frontend_and_synthetic_ui_test_support",
+      "baselineSha256": "8db375d47c08924604e24753780287ee66e91766c8bbf4ef6d83db667f431287",
+      "frozenSha256": "2a52b8c01af2ce0da6d08fd7423fe152c51853fb16f9318b3c4b03ca930b0a3a",
+      "bytes": 7120,
+      "addedLines": 40,
+      "deletedLines": 0,
+      "worktreeMatchesFrozenCommit": true
+    },
+    {
+      "status": "M",
+      "path": "src/features/assets/workspace/AssetsPluginWorkspace.vue",
+      "owner": "assets_frontend_and_synthetic_ui_test_support",
+      "baselineSha256": "1fe07c54a9cb2b7b6f7ac3d0a72338c6d6e903674127fb64ec439714d361b5dc",
+      "frozenSha256": "7755969a65c01d9b15208a4a4a60430ad3f223702d7174f13af7abb733100bf2",
+      "bytes": 25930,
+      "addedLines": 20,
+      "deletedLines": 5,
+      "worktreeMatchesFrozenCommit": true
+    },
+    {
+      "status": "M",
+      "path": "src/features/conversations/ConversationToolActivity.vue",
+      "owner": "chat_saved_tool_activity_presentation",
+      "baselineSha256": "178ec7bba019e4d3daee84e8e75c59bb08f193e8d1672648445f053018bdd6d6",
+      "frozenSha256": "b2de5251a35a8b5a49b5ea77176a13a042b3723e51d7001ed8c400f8a0e61a2f",
+      "bytes": 3820,
+      "addedLines": 1,
+      "deletedLines": 0,
+      "worktreeMatchesFrozenCommit": true
+    },
+    {
+      "status": "A",
+      "path": "tools/asset_accuracy_ui_harness.cjs",
+      "owner": "assets_frontend_and_synthetic_ui_test_support",
+      "baselineSha256": null,
+      "frozenSha256": "d33530de868ade94ce5a163a645863a5ca62314192d39e855b109ec4a363e5ac",
+      "bytes": 10293,
+      "addedLines": 179,
+      "deletedLines": 0,
+      "worktreeMatchesFrozenCommit": true
+    },
+    {
+      "status": "A",
+      "path": "tools/test_asset_accuracy_ui.cjs",
+      "owner": "assets_frontend_and_synthetic_ui_test_support",
+      "baselineSha256": null,
+      "frozenSha256": "afe1d82c1665a596ff08e0ef0d5e9227a8a82b8faf4644ee0d306ff9e33f2170",
+      "bytes": 48878,
+      "addedLines": 730,
+      "deletedLines": 0,
+      "worktreeMatchesFrozenCommit": true
+    }
+  ],
+  "filesCanonicalJsonSha256": "97f3e073a2ad621e7ad2a62d6652bc3ea37a64e9fe7d89a205d2d33f8e4201cd",
+  "testOnlyFollowup": {
+    "commit": "34e802a6f8d4fc093efa1d3ee732daf767d0df44",
+    "exactChangedPaths": [
+      "src-tauri/src/commands/multi_agent/tests/broker.rs"
+    ],
+    "addedLines": 68,
+    "deletedLines": 1,
+    "changedTestName": "scanning::agent_tests::broker_checks_role_capability_revocation_expiry_and_fencing",
+    "previousSha256": "3a3666ae08632eb772e2725f0246da99245099b4e44ac8a576a8fbdca2108a3d",
+    "currentSha256": "5498b8302bb5e66c8a483ea924e19eccff80ae932f968a1e6b63fb73b99387bf",
+    "originalAssertionCount": 15,
+    "currentAssertionCount": 27,
+    "allOriginal15AssertionsPreservedByteForByte": true,
+    "originalAssertionSha256": [
+      "4d8e02eb3395c689171d19cb00580194fa7cbad28b2b43d525061eab544c80a6",
+      "4d8e02eb3395c689171d19cb00580194fa7cbad28b2b43d525061eab544c80a6",
+      "e666992b0eb56c4f7f2737533d599063c5d95b723c00fdf4ee3e27d6e7e340f3",
+      "d91d78158613042fcc5b9396dcc1de601bb63c33d52fa3da54115a5138fbfe2f",
+      "d91d78158613042fcc5b9396dcc1de601bb63c33d52fa3da54115a5138fbfe2f",
+      "e666992b0eb56c4f7f2737533d599063c5d95b723c00fdf4ee3e27d6e7e340f3",
+      "4d8e02eb3395c689171d19cb00580194fa7cbad28b2b43d525061eab544c80a6",
+      "39868eabfc3686224676aa7b3be0d181d6ea8c2cc32992073749d3dd247935d9",
+      "d8f9be38c842ce0e71a44a6d5bee3aa3ef7f5b8023f5b164d4f253f465167ccf",
+      "4d7c0aa3b14af2138cf4b87461979dac1988adb9d31340ad6e9292a3e4cfcd6e",
+      "116ee5cf521da4c9cacb40be47aff844045fb611b658f972e4c2f8b78281ed3e",
+      "4511e81ce59b49fe69d59847f1478bc6018260716569263ea2f5f94b9f051c03",
+      "daeda05e2f70f334d917d73a564dca80c752f4a0617a4b91a4346a2ea5ea85d1",
+      "4511e81ce59b49fe69d59847f1478bc6018260716569263ea2f5f94b9f051c03",
+      "4511e81ce59b49fe69d59847f1478bc6018260716569263ea2f5f94b9f051c03"
+    ],
+    "allOtherTestsSuffixByteExact": true,
+    "otherTestsSuffixBytes": 8319,
+    "otherTestsSuffixSha256": "fffe30cfe53de00fb106855f6651614e8c375fc85f40bb54f01ff21db38b9f06",
+    "testPrefixByteExact": true,
+    "cfgTestScanningIncludeChain": [
+      {
+        "path": "src-tauri/src/scanning.rs",
+        "sha256": "bddc7984c728d3b653d2162fb5397cac76f43115de57f0b9baeccea347ab6dee",
+        "needle": "include!(\"commands/agent_tests.rs\");",
+        "line": 257
+      },
+      {
+        "path": "src-tauri/src/commands/agent_tests.rs",
+        "sha256": "27a7996ceecfbd340428e819faf9a6eef8930362ed7d019f05197fd35835875f",
+        "needle": "#[cfg(test)]\nmod agent_tests {",
+        "line": 1
+      },
+      {
+        "path": "src-tauri/src/commands/agent_tests.rs",
+        "sha256": "27a7996ceecfbd340428e819faf9a6eef8930362ed7d019f05197fd35835875f",
+        "needle": "include!(\"agent_tests_multi_agent.rs\");",
+        "line": 110
+      },
+      {
+        "path": "src-tauri/src/commands/agent_tests_multi_agent.rs",
+        "sha256": "4fed12855b7e3bbaa59ecb63251753f311e5d34f4dbcf4df9136898b6e3f6418",
+        "needle": "include!(\"multi_agent/tests/broker.rs\");",
+        "line": 46
+      }
+    ],
+    "fiveCriticalProductionPaths": [
+      {
+        "path": "src-tauri/src/agent_runtime/multi_agent/scheduler/heartbeat.rs",
+        "sha256": "07767442c7192dea4080f159ab9972ff91220735c8bf838ad5d19c11bb7e3c0e",
+        "byteIdenticalToE5AndMain310": true
+      },
+      {
+        "path": "src-tauri/src/agent_runtime/multi_agent/scheduler.rs",
+        "sha256": "ea5cd1af677b4c9467dc649700ef17bb49ab0c77795b98dcdbc4e2f058b5c7b3",
+        "byteIdenticalToE5AndMain310": true
+      },
+      {
+        "path": "src-tauri/src/agent_runtime/multi_agent/attempts.rs",
+        "sha256": "9c73d4ca1851fccf38d52cf728235256335c22d5aceeee5508a0cedde853c689",
+        "byteIdenticalToE5AndMain310": true
+      },
+      {
+        "path": "src-tauri/src/agent_runtime/multi_agent/lease.rs",
+        "sha256": "fe1cac3acc21823f30f93354e1e1c7751e43cb624dba91cb3cf18b1cfc3bab21",
+        "byteIdenticalToE5AndMain310": true
+      },
+      {
+        "path": "src-tauri/src/commands/agent_tools_dispatch.rs",
+        "sha256": "f07002370629f6c1448df11648224272de10a105e13b3f98bad846c73387d0f9",
+        "byteIdenticalToE5AndMain310": true
+      }
+    ],
+    "allOtherGitTreePathsUnchangedSinceE5": true,
+    "productionSourceUnchanged": true,
+    "contract": "The positive fixture sets one still-live +120-second expiry atomically before real production renewal, checks matching deadlines in four tables and original fences, and strengthens revoked/real-past-expiry rejection snapshots. The original15 assertions remain. Production lease duration, fencing and authorization are untouched.",
+    "causalityLimit": "The old full failed this case, while261 old-code repetitions were green. Removing the fixture timing/rounding hazard is not claimed as a uniquely reproduced full-run cause or new runtime acceptance."
+  },
+  "ownership": {
+    "primaryOwnerFileCounts": {
+      "assets_collection_receipts_and_coverage": 5,
+      "assets_observation_import_and_persistence": 9,
+      "assets_identity_provenance_and_ownership": 8,
+      "owned_collection_storage_and_diagnostic_log_retention": 4,
+      "assets_derived_inventory_adapter": 1,
+      "assets_exact_inventory_read_service": 2,
+      "chat_project_scoped_assets_read_adapter": 5,
+      "assets_frontend_and_synthetic_ui_test_support": 10,
+      "chat_saved_tool_activity_presentation": 1,
+      "scanning_authorization_regression_fixture": 1
+    },
+    "groups": {
+      "assets_collection_receipts_and_coverage": [
+        "src-tauri/src/jobs/native_fofa.rs",
+        "src-tauri/src/jobs/native_collection_resume.rs",
+        "src-tauri/src/jobs/native_collection_resume_summary.rs",
+        "src-tauri/src/jobs/native_collection_resume_transport.rs",
+        "src-tauri/src/jobs/native_collection_resume_tests.rs"
+      ],
+      "assets_observation_import_and_persistence": [
+        "src-tauri/src/assets/model.rs",
+        "src-tauri/src/commands/assets.rs",
+        "src-tauri/src/db.rs",
+        "src-tauri/src/db_schema.rs",
+        "src-tauri/src/jobs.rs",
+        "src-tauri/src/jobs/asset_import_tests.rs",
+        "src-tauri/src/jobs/asset_observation.rs",
+        "src-tauri/src/jobs/asset_observation_tests.rs",
+        "src-tauri/src/jobs/collection_summary.rs"
+      ],
+      "assets_identity_provenance_and_ownership": [
+        "src-tauri/src/commands/asset_ownership.rs",
+        "src-tauri/src/commands/asset_ownership_accuracy_tests.rs",
+        "src-tauri/src/commands/ownership_authorization.rs",
+        "src-tauri/src/commands/ownership_directory.rs",
+        "src-tauri/src/commands/ownership_review.rs",
+        "src-tauri/src/jobs/asset_identity.rs",
+        "src-tauri/src/jobs/native_discovery.rs",
+        "src-tauri/src/jobs/native_discovery_tests.rs"
+      ],
+      "owned_collection_storage_and_diagnostic_log_retention": [
+        "src-tauri/src/asset_log_retention_tests.rs",
+        "src-tauri/src/asset_logs.rs",
+        "src-tauri/src/jobs/collection_retention.rs",
+        "src-tauri/src/jobs/collection_retention_tests.rs"
+      ],
+      "assets_derived_inventory_adapter": [
+        "src-tauri/src/jobs/native_workers.rs"
+      ],
+      "assets_exact_inventory_read_service": [
+        "src-tauri/src/assets/statistics.rs",
+        "src-tauri/src/assets/statistics_tests.rs"
+      ],
+      "chat_project_scoped_assets_read_adapter": [
+        "src-tauri/src/conversations/agent.rs",
+        "src-tauri/src/conversations/agent_tests.rs",
+        "src-tauri/src/conversations/asset_statistics_tests.rs",
+        "src-tauri/src/conversations/reply.rs",
+        "src-tauri/src/conversations/tools.rs"
+      ],
+      "assets_frontend_and_synthetic_ui_test_support": [
+        "src/features/assets/collectionPresentation.ts",
+        "src/features/assets/components/AssetObservation.vue",
+        "src/features/assets/components/AssetWorkspace.vue",
+        "src/features/assets/components/CollectionRunSummary.vue",
+        "src/features/assets/components/QueryPanel.vue",
+        "src/features/assets/observationPresentation.ts",
+        "src/features/assets/types.ts",
+        "src/features/assets/workspace/AssetsPluginWorkspace.vue",
+        "tools/asset_accuracy_ui_harness.cjs",
+        "tools/test_asset_accuracy_ui.cjs"
+      ],
+      "chat_saved_tool_activity_presentation": [
+        "src/features/conversations/ConversationToolActivity.vue"
+      ],
+      "scanning_authorization_regression_fixture": [
+        "src-tauri/src/commands/multi_agent/tests/broker.rs"
+      ]
+    },
+    "eachPathAssignedExactlyOnce": true,
+    "all46Accounted": true,
+    "commonSharedProductionPathsChanged": []
+  },
+  "moduleDeliveryTable": [
+    {
+      "owner": "assets_collection_receipts_and_coverage",
+      "module": "Assets：来源采集与覆盖证明",
+      "pathCount": 5,
+      "paths": [
+        "src-tauri/src/jobs/native_fofa.rs",
+        "src-tauri/src/jobs/native_collection_resume.rs",
+        "src-tauri/src/jobs/native_collection_resume_summary.rs",
+        "src-tauri/src/jobs/native_collection_resume_transport.rs",
+        "src-tauri/src/jobs/native_collection_resume_tests.rs"
+      ],
+      "responsibility": "既有 FOFA collector、收据恢复、严格分页/字段/拒收证明、原接收时间与 typed summary。",
+      "dependenciesAndBoundary": "jobs lifecycle 调用；使用 Assets identity/provenance 和 owned storage；向 import/UI 输出事实，不授予 probe/scan 权限。"
+    },
+    {
+      "owner": "assets_observation_import_and_persistence",
+      "module": "Assets：观测导入与项目事实",
+      "pathCount": 9,
+      "paths": [
+        "src-tauri/src/assets/model.rs",
+        "src-tauri/src/commands/assets.rs",
+        "src-tauri/src/db.rs",
+        "src-tauri/src/db_schema.rs",
+        "src-tauri/src/jobs.rs",
+        "src-tauri/src/jobs/asset_import_tests.rs",
+        "src-tauri/src/jobs/asset_observation.rs",
+        "src-tauri/src/jobs/asset_observation_tests.rs",
+        "src-tauri/src/jobs/collection_summary.rs"
+      ],
+      "responsibility": "保存来源/探测原时间、整份观察 winner、项目 collection binding 和摘要；保留旧记录及人工决定。",
+      "dependenciesAndBoundary": "由 jobs 编排；依赖 SQLite 与 Assets DTO；schema 是持久化适配，不把业务移入 common。"
+    },
+    {
+      "owner": "assets_identity_provenance_and_ownership",
+      "module": "Assets：身份、来源与归属",
+      "pathCount": 8,
+      "paths": [
+        "src-tauri/src/commands/asset_ownership.rs",
+        "src-tauri/src/commands/asset_ownership_accuracy_tests.rs",
+        "src-tauri/src/commands/ownership_authorization.rs",
+        "src-tauri/src/commands/ownership_directory.rs",
+        "src-tauri/src/commands/ownership_review.rs",
+        "src-tauri/src/jobs/asset_identity.rs",
+        "src-tauri/src/jobs/native_discovery.rs",
+        "src-tauri/src/jobs/native_discovery_tests.rs"
+      ],
+      "responsibility": "网络实体身份与访问候选分离、非 Web 协议区分、精确 host 与来源冲突、人工归属/授权保护。",
+      "dependenciesAndBoundary": "供 collector/import/refinement 复用；归属不自动产生执行授权。"
+    },
+    {
+      "owner": "owned_collection_storage_and_diagnostic_log_retention",
+      "module": "基础设施：有主存储与诊断日志",
+      "pathCount": 4,
+      "paths": [
+        "src-tauri/src/asset_log_retention_tests.rs",
+        "src-tauri/src/asset_logs.rs",
+        "src-tauri/src/jobs/collection_retention.rs",
+        "src-tauri/src/jobs/collection_retention_tests.rs"
+      ],
+      "responsibility": "显式 owned collection 目录内有锁准入、逻辑字节/页数/TTL/tombstone；诊断日志独立预算。",
+      "dependenciesAndBoundary": "依赖 DB-验证 project/run identity 和文件/SQLite 机制；不清理任意用户目录，不包含 analysis pin 业务。"
+    },
+    {
+      "owner": "assets_derived_inventory_adapter",
+      "module": "Assets：派生 inventory 适配",
+      "pathCount": 1,
+      "paths": [
+        "src-tauri/src/jobs/native_workers.rs"
+      ],
+      "responsibility": "既有 workers 组合身份去重及派生 CSV，复用同一 owned storage。",
+      "dependenciesAndBoundary": "原 collector/观察链的派生出口；不是第二套采集器。"
+    },
+    {
+      "owner": "assets_exact_inventory_read_service",
+      "module": "Assets：精确项目库存读取",
+      "pathCount": 2,
+      "paths": [
+        "src-tauri/src/assets/statistics.rs",
+        "src-tauri/src/assets/statistics_tests.rs"
+      ],
+      "responsibility": "同读快照下的精确成员总数/状态分布与严格筛选分页，独立原始 URL 与展示组口径。",
+      "dependenciesAndBoundary": "复用资产查询合同与 SQLite；由 Chat 的受权窄适配调用。"
+    },
+    {
+      "owner": "chat_project_scoped_assets_read_adapter",
+      "module": "Chat：同项目受权只读适配",
+      "pathCount": 5,
+      "paths": [
+        "src-tauri/src/conversations/agent.rs",
+        "src-tauri/src/conversations/agent_tests.rs",
+        "src-tauri/src/conversations/asset_statistics_tests.rs",
+        "src-tauri/src/conversations/reply.rs",
+        "src-tauri/src/conversations/tools.rs"
+      ],
+      "responsibility": "精确统计/搜索接入原工具循环，保留 project、consent、provider、agent 与输出预算门禁。",
+      "dependenciesAndBoundary": "依赖 Assets 窄读取服务；不直接写资产、不新增自动扫描、不重写通用 Agent。"
+    },
+    {
+      "owner": "assets_frontend_and_synthetic_ui_test_support",
+      "module": "Assets 前端：真实性呈现与合成测试",
+      "pathCount": 10,
+      "paths": [
+        "src/features/assets/collectionPresentation.ts",
+        "src/features/assets/components/AssetObservation.vue",
+        "src/features/assets/components/AssetWorkspace.vue",
+        "src/features/assets/components/CollectionRunSummary.vue",
+        "src/features/assets/components/QueryPanel.vue",
+        "src/features/assets/observationPresentation.ts",
+        "src/features/assets/types.ts",
+        "src/features/assets/workspace/AssetsPluginWorkspace.vue",
+        "tools/asset_accuracy_ui_harness.cjs",
+        "tools/test_asset_accuracy_ui.cjs"
+      ],
+      "responsibility": "执行/覆盖、保留/导入/探测、观测时间、旧快照/失败/零和不同计数分母分别呈现。",
+      "dependenciesAndBoundary": "消费 Assets DTO/API；harness 仅测试支持，不是生产数据源。"
+    },
+    {
+      "owner": "chat_saved_tool_activity_presentation",
+      "module": "Chat 前端：工具活动",
+      "pathCount": 1,
+      "paths": [
+        "src/features/conversations/ConversationToolActivity.vue"
+      ],
+      "responsibility": "为已保存精确统计工具活动提供标签，不从样本推导库存数量。",
+      "dependenciesAndBoundary": "消费 Chat 已保存工具活动，依赖原 conversation UI。"
+    },
+    {
+      "owner": "scanning_authorization_regression_fixture",
+      "module": "Scanning：授权与租约回归夹具",
+      "pathCount": 1,
+      "paths": [
+        "src-tauri/src/commands/multi_agent/tests/broker.rs"
+      ],
+      "responsibility": "在已有 cfg(test) broker 用例中原子准备仍有效租约；校验续租四表同期限、epoch/fence不变和撤销/真实过期零写拒绝。",
+      "dependenciesAndBoundary": "调用原 scheduler heartbeat/attempt/lease/tool authorization；五生产文件及其余源码不变，不增加权限或重写Agent。"
+    }
+  ],
+  "testDeclarations": {
+    "rustAddedFunctions": 103,
+    "rustRemovedFunctions": 0,
+    "rustCurrentFunctionsInChangedFiles": 198,
+    "rustRows": [
+      {
+        "path": "src-tauri/src/asset_log_retention_tests.rs",
+        "baselineCount": 0,
+        "currentCount": 6,
+        "addedDeclarations": [
+          {
+            "name": "log_retention_caps_repetition_only_after_limit_with_durable_visible_notice",
+            "line": 23
+          },
+          {
+            "name": "log_retention_global_cap_counts_across_projects_but_not_project_notice_leak",
+            "line": 55
+          },
+          {
+            "name": "log_retention_ages_diagnostic_rows_without_deleting_manual_audit_or_guessing_invalid_date",
+            "line": 100
+          },
+          {
+            "name": "log_retention_default_real_per_run_limit_keeps_exactly_five_thousand_rows",
+            "line": 132
+          },
+          {
+            "name": "log_retention_failed_commit_rolls_back_trimming_and_counter_changes",
+            "line": 149
+          },
+          {
+            "name": "log_retention_global_counter_includes_unattributed_legacy_rows_and_survives_run_deletion",
+            "line": 189
+          }
+        ],
+        "removedNames": [],
+        "allNamesIdenticalToE5": true
+      },
+      {
+        "path": "src-tauri/src/assets/statistics_tests.rs",
+        "baselineCount": 0,
+        "currentCount": 11,
+        "addedDeclarations": [
+          {
+            "name": "inventory_statistics_counts_exact_sparse_members_and_unknowns_without_join_inflation",
+            "line": 121
+          },
+          {
+            "name": "inventory_statistics_empty_project_is_known_zero_but_missing_project_is_error",
+            "line": 167
+          },
+          {
+            "name": "inventory_statistics_and_search_match_real_asset_list_member_filter_not_tab_summary",
+            "line": 191
+          },
+          {
+            "name": "inventory_search_uses_all_eight_list_like_fields_and_preserves_wildcards",
+            "line": 260
+          },
+          {
+            "name": "inventory_search_keyset_cursor_is_stable_complete_and_bound_to_project_filters_order",
+            "line": 307
+          },
+          {
+            "name": "inventory_service_rejects_unrecognized_filters_limits_and_project_override",
+            "line": 395
+          },
+          {
+            "name": "inventory_read_snapshot_keeps_count_dimensions_and_page_coherent_during_other_writer",
+            "line": 435
+          },
+          {
+            "name": "inventory_http_status_classes_are_strict_and_safe_search_projection_is_bounded",
+            "line": 477
+          },
+          {
+            "name": "inventory_search_twenty_unicode_or_control_rows_fit_complete_json_without_skipping_cursor",
+            "line": 537
+          },
+          {
+            "name": "inventory_search_redacts_complete_url_userinfo_before_scalar_clipping",
+            "line": 586
+          },
+          {
+            "name": "inventory_search_small_project_cursor_survives_final_redaction_and_reads_next_exact_member",
+            "line": 609
+          }
+        ],
+        "removedNames": [],
+        "allNamesIdenticalToE5": true
+      },
+      {
+        "path": "src-tauri/src/commands/asset_ownership.rs",
+        "baselineCount": 9,
+        "currentCount": 9,
+        "addedDeclarations": [],
+        "removedNames": [],
+        "allNamesIdenticalToE5": true
+      },
+      {
+        "path": "src-tauri/src/commands/asset_ownership_accuracy_tests.rs",
+        "baselineCount": 0,
+        "currentCount": 11,
+        "addedDeclarations": [
+          {
+            "name": "ownership_endpoint_host_preserves_dns_labels_and_parses_authority",
+            "line": 61
+          },
+          {
+            "name": "assessment_exact_host_does_not_alias_www_and_preserves_manual_or_recycled_assets",
+            "line": 102
+          },
+          {
+            "name": "assessment_source_domain_cannot_replace_endpoint_or_supply_missing_endpoint_evidence",
+            "line": 151
+          },
+          {
+            "name": "actual_group_analysis_keeps_source_domain_conflict_out_of_consistent_confirmation_lane",
+            "line": 190
+          },
+          {
+            "name": "manual_confirmation_learns_actual_www_endpoint_and_never_authorizes",
+            "line": 215
+          },
+          {
+            "name": "old_domain_priority_algorithm_snapshot_is_stale_and_cannot_be_carried_incrementally",
+            "line": 256
+          },
+          {
+            "name": "historical_raw_www_directory_keys_are_reused_without_deleting_or_colliding_with_new_apex",
+            "line": 319
+          },
+          {
+            "name": "directory_duplicate_raw_host_aliases_do_not_invent_multiple_entities_and_shared_v2_still_blocks_generalization",
+            "line": 393
+          },
+          {
+            "name": "directory_ignored_unique_key_collision_is_an_error_and_rolls_back_the_whole_save",
+            "line": 441
+          },
+          {
+            "name": "legacy_learned_patterns_are_not_guessed_or_promoted_but_explicit_reconfirmation_versions_the_rule",
+            "line": 480
+          },
+          {
+            "name": "shared_ip_and_network_organization_never_transfer_ownership_confirmation_or_authorization",
+            "line": 567
+          }
+        ],
+        "removedNames": [],
+        "allNamesIdenticalToE5": true
+      },
+      {
+        "path": "src-tauri/src/commands/multi_agent/tests/broker.rs",
+        "baselineCount": 5,
+        "currentCount": 5,
+        "addedDeclarations": [],
+        "removedNames": [],
+        "allNamesIdenticalToE5": true
+      },
+      {
+        "path": "src-tauri/src/commands/ownership_directory.rs",
+        "baselineCount": 7,
+        "currentCount": 7,
+        "addedDeclarations": [],
+        "removedNames": [],
+        "allNamesIdenticalToE5": true
+      },
+      {
+        "path": "src-tauri/src/commands/ownership_review.rs",
+        "baselineCount": 16,
+        "currentCount": 16,
+        "addedDeclarations": [],
+        "removedNames": [],
+        "allNamesIdenticalToE5": true
+      },
+      {
+        "path": "src-tauri/src/conversations/agent_tests.rs",
+        "baselineCount": 13,
+        "currentCount": 13,
+        "addedDeclarations": [],
+        "removedNames": [],
+        "allNamesIdenticalToE5": true
+      },
+      {
+        "path": "src-tauri/src/conversations/asset_statistics_tests.rs",
+        "baselineCount": 0,
+        "currentCount": 9,
+        "addedDeclarations": [
+          {
+            "name": "chinese_quantity_question_gets_exact_scoped_statistics_and_unknown_buckets_in_real_dispatch",
+            "line": 75
+          },
+          {
+            "name": "quantity_question_can_use_search_exact_total_instead_of_guessing_from_twenty_sparse_ids",
+            "line": 119
+          },
+          {
+            "name": "real_dispatch_search_cursor_keeps_scope_and_filter_totals_and_never_discloses_recycled_rows",
+            "line": 147
+          },
+          {
+            "name": "statistics_follow_assets_grant_provider_and_agent_gates_and_do_not_leak_into_project_context",
+            "line": 267
+          },
+          {
+            "name": "stats_reject_cross_project_sql_unknown_filters_and_stale_transaction_authority",
+            "line": 294
+          },
+          {
+            "name": "revoked_statistics_access_after_paid_response_stops_before_dispatch_or_followup_model_call",
+            "line": 320
+          },
+          {
+            "name": "statistics_read_failure_reaches_model_as_unknown_error_without_fabricated_zero_counts",
+            "line": 339
+          },
+          {
+            "name": "metadata_redaction_precedes_truncation_when_url_userinfo_boundary_is_beyond_the_limit",
+            "line": 378
+          },
+          {
+            "name": "twenty_unicode_and_json_escaped_rows_fit_complete_tool_json_and_cursor_does_not_skip_members",
+            "line": 389
+          }
+        ],
+        "removedNames": [],
+        "allNamesIdenticalToE5": true
+      },
+      {
+        "path": "src-tauri/src/jobs.rs",
+        "baselineCount": 1,
+        "currentCount": 1,
+        "addedDeclarations": [],
+        "removedNames": [],
+        "allNamesIdenticalToE5": true
+      },
+      {
+        "path": "src-tauri/src/jobs/asset_identity.rs",
+        "baselineCount": 2,
+        "currentCount": 4,
+        "addedDeclarations": [
+          {
+            "name": "known_non_web_services_keep_protocol_and_ports_outside_probe_guesses",
+            "line": 213
+          },
+          {
+            "name": "network_identity_admission_requires_an_authority_without_credentials",
+            "line": 246
+          }
+        ],
+        "removedNames": [],
+        "allNamesIdenticalToE5": true
+      },
+      {
+        "path": "src-tauri/src/jobs/asset_import_tests.rs",
+        "baselineCount": 10,
+        "currentCount": 10,
+        "addedDeclarations": [],
+        "removedNames": [],
+        "allNamesIdenticalToE5": true
+      },
+      {
+        "path": "src-tauri/src/jobs/asset_observation_tests.rs",
+        "baselineCount": 0,
+        "currentCount": 14,
+        "addedDeclarations": [
+          {
+            "name": "replay_preserves_source_project_and_positive_probe_times_without_new_change_event",
+            "line": 47
+          },
+          {
+            "name": "older_and_unzoned_source_receipts_cannot_replace_precise_network_facts",
+            "line": 99
+          },
+          {
+            "name": "older_or_unknown_probe_cannot_erase_precise_response_proof_or_auto_trash_current_asset",
+            "line": 141
+          },
+          {
+            "name": "negative_positive_negative_probes_only_advance_alive_from_actual_positive_clock",
+            "line": 196
+          },
+          {
+            "name": "late_positive_and_tcp_alive_record_original_alive_time_without_replacing_current_negative",
+            "line": 254
+          },
+          {
+            "name": "new_source_ip_marks_retained_probe_history_and_new_negative_probe_clears_it",
+            "line": 302
+          },
+          {
+            "name": "source_after_probe_on_same_ip_is_unverified_and_literal_probe_ip_is_explicit",
+            "line": 363
+          },
+          {
+            "name": "unknown_legacy_csv_keeps_compatibility_without_minting_observation_clocks",
+            "line": 381
+          },
+          {
+            "name": "equal_receipt_allows_refine_and_equal_probe_allows_optimizer_classification",
+            "line": 401
+          },
+          {
+            "name": "equal_clock_conflicts_choose_the_same_whole_source_and_probe_in_either_import_order",
+            "line": 451
+          },
+          {
+            "name": "colliding_legacy_raw_key_keeps_distinct_protocols_and_the_original_manual_row",
+            "line": 507
+          },
+          {
+            "name": "opaque_asset_key_without_valid_network_identity_is_rejected_before_writes",
+            "line": 562
+          },
+          {
+            "name": "provenance_budget_and_truncation_are_sticky_even_on_stale_observations",
+            "line": 579
+          },
+          {
+            "name": "collection_binding_is_project_local_and_probe_or_unknown_csv_cannot_replace_it",
+            "line": 608
+          }
+        ],
+        "removedNames": [],
+        "allNamesIdenticalToE5": true
+      },
+      {
+        "path": "src-tauri/src/jobs/collection_retention_tests.rs",
+        "baselineCount": 0,
+        "currentCount": 18,
+        "addedDeclarations": [
+          {
+            "name": "collection_retention_defaults_bound_only_explicit_owned_collection_scope",
+            "line": 46
+          },
+          {
+            "name": "collection_retention_rejects_payload_before_touching_existing_file",
+            "line": 64
+          },
+          {
+            "name": "collection_retention_page_admission_refuses_next_request_and_write",
+            "line": 90
+          },
+          {
+            "name": "collection_retention_project_and_global_admission_include_other_run_files",
+            "line": 110
+          },
+          {
+            "name": "collection_retention_expired_closed_raw_has_durable_tombstone_but_metadata_remains",
+            "line": 150
+          },
+          {
+            "name": "collection_retention_active_writer_and_checkpoint_lease_prevent_expiry",
+            "line": 178
+          },
+          {
+            "name": "collection_retention_pin_unknown_age_changed_hash_and_unknown_files_are_preserved",
+            "line": 196
+          },
+          {
+            "name": "collection_retention_unknown_legacy_run_is_not_adopted_or_cleaned_by_sweep",
+            "line": 226
+          },
+          {
+            "name": "collection_retention_rejected_new_owner_cannot_publish_metadata_over_budget",
+            "line": 248
+          },
+          {
+            "name": "collection_retention_removal_recovers_tombstoned_raw_after_crash",
+            "line": 266
+          },
+          {
+            "name": "collection_retention_explicit_remove_checks_hash_pin_and_records_summary",
+            "line": 292
+          },
+          {
+            "name": "collection_retention_refuses_traversal_other_run_and_duplicate_writer",
+            "line": 308
+          },
+          {
+            "name": "collection_retention_finish_after_payload_limit_keeps_durable_close_marker",
+            "line": 334
+          },
+          {
+            "name": "collection_retention_never_follows_symlink_payload_or_owned_root",
+            "line": 360
+          },
+          {
+            "name": "collection_retention_new_csv_and_inventory_use_storage_clock_without_inventing_observation_time",
+            "line": 380
+          },
+          {
+            "name": "collection_retention_abandoned_writer_recovers_exact_publication_and_conservative_close_clock",
+            "line": 415
+          },
+          {
+            "name": "collection_retention_crashed_overwrite_with_different_payload_is_never_guessed_or_removed",
+            "line": 446
+          },
+          {
+            "name": "collection_retention_gc_control_peak_is_admitted_before_tombstone_or_unlink",
+            "line": 470
+          }
+        ],
+        "removedNames": [],
+        "allNamesIdenticalToE5": true
+      },
+      {
+        "path": "src-tauri/src/jobs/collection_summary.rs",
+        "baselineCount": 0,
+        "currentCount": 8,
+        "addedDeclarations": [
+          {
+            "name": "partial_coverage_is_independent_of_successful_execution_and_persists",
+            "line": 203
+          },
+          {
+            "name": "malformed_or_failed_receipts_never_claim_coverage_or_imported_assets",
+            "line": 224
+          },
+          {
+            "name": "retention_view_uses_registered_scope_and_global_removal_counters_without_breaking_old_receipts",
+            "line": 237
+          },
+          {
+            "name": "probe_counts_require_actual_complete_stage_receipts",
+            "line": 265
+          },
+          {
+            "name": "coverage_requires_a_complete_nonempty_consistent_query_proof",
+            "line": 290
+          },
+          {
+            "name": "failed_collection_receipt_preserves_partial_counts_without_claiming_import",
+            "line": 331
+          },
+          {
+            "name": "historical_runs_gain_unknown_summary_without_reinterpreting_state",
+            "line": 365
+          },
+          {
+            "name": "historical_membership_scope_migration_is_unknown_and_preserves_manual_state",
+            "line": 395
+          }
+        ],
+        "removedNames": [],
+        "allNamesIdenticalToE5": true
+      },
+      {
+        "path": "src-tauri/src/jobs/native_collection_resume_tests.rs",
+        "baselineCount": 17,
+        "currentCount": 35,
+        "addedDeclarations": [
+          {
+            "name": "actual_collection_resume_short_page_cannot_prove_remaining_results_were_collected",
+            "line": 900
+          },
+          {
+            "name": "actual_collection_resume_unknown_total_keeps_fetching_full_pages_without_claiming_coverage",
+            "line": 923
+          },
+          {
+            "name": "actual_collection_resume_changed_total_remains_unproven_even_after_reaching_latest_count",
+            "line": 954
+          },
+          {
+            "name": "actual_collection_resume_empty_record_shapes_are_counted_and_never_become_candidates",
+            "line": 971
+          },
+          {
+            "name": "actual_collection_resume_explicit_zero_total_empty_result_is_a_complete_empty_query",
+            "line": 993
+          },
+          {
+            "name": "actual_collection_resume_field_fallback_records_actual_columns_and_incomplete_field_coverage",
+            "line": 1012
+          },
+          {
+            "name": "actual_collection_resume_replays_original_receipt_time_and_provider_observation_verbatim",
+            "line": 1050
+          },
+          {
+            "name": "actual_collection_resume_refetches_v1_pages_without_inventing_their_receipt_time",
+            "line": 1110
+          },
+          {
+            "name": "actual_collection_resume_success_payload_echoes_never_persist_keys_or_proxy_credentials",
+            "line": 1173
+          },
+          {
+            "name": "actual_collection_resume_failed_legacy_refetch_preserves_unknown_time_and_typed_failure",
+            "line": 1260
+          },
+          {
+            "name": "actual_collection_resume_duplicate_pages_stop_without_claiming_coverage",
+            "line": 1385
+          },
+          {
+            "name": "actual_collection_resume_changed_binding_is_bound_to_every_candidate_and_state",
+            "line": 1401
+          },
+          {
+            "name": "actual_collection_resume_short_secrets_are_redacted_when_embedded_and_encoded",
+            "line": 1422
+          },
+          {
+            "name": "actual_collection_resume_current_run_byte_budget_is_reported_before_another_request",
+            "line": 1449
+          },
+          {
+            "name": "actual_collection_resume_expired_receive_time_refetches_without_forging_observation",
+            "line": 1487
+          },
+          {
+            "name": "actual_collection_resume_owned_storage_registers_all_artifacts_and_refuses_extra_http",
+            "line": 1511
+          },
+          {
+            "name": "actual_collection_resume_redacted_locators_never_become_rewritten_probe_targets",
+            "line": 1625
+          },
+          {
+            "name": "actual_collection_resume_partial_page_overlap_is_not_proven_by_raw_row_count",
+            "line": 1682
+          }
+        ],
+        "removedNames": [],
+        "allNamesIdenticalToE5": true
+      },
+      {
+        "path": "src-tauri/src/jobs/native_discovery_tests.rs",
+        "baselineCount": 8,
+        "currentCount": 13,
+        "addedDeclarations": [
+          {
+            "name": "known_service_protocols_on_one_host_port_are_not_discovery_duplicates",
+            "line": 466
+          },
+          {
+            "name": "discovery_merge_chooses_receipt_order_keeps_provider_literal_and_matching_receipts",
+            "line": 495
+          },
+          {
+            "name": "discovery_history_has_explicit_count_and_byte_limits_including_single_oversized_source",
+            "line": 550
+          },
+          {
+            "name": "discovery_newer_whole_snapshot_drops_missing_old_fields_without_refilling_them",
+            "line": 572
+          },
+          {
+            "name": "discovery_equal_time_winner_and_receipt_are_identical_in_both_orders_and_on_reentry",
+            "line": 613
+          }
+        ],
+        "removedNames": [],
+        "allNamesIdenticalToE5": true
+      },
+      {
+        "path": "src-tauri/src/jobs/native_workers.rs",
+        "baselineCount": 7,
+        "currentCount": 8,
+        "addedDeclarations": [
+          {
+            "name": "native_url_inventory_preserves_distinct_services_and_registers_every_export",
+            "line": 648
+          }
+        ],
+        "removedNames": [],
+        "allNamesIdenticalToE5": true
+      }
+    ],
+    "allCurrentRustTestNamesMatchE5": true,
+    "nodePath": "tools/test_asset_accuracy_ui.cjs",
+    "nodeSha256": "afe1d82c1665a596ff08e0ef0d5e9227a8a82b8faf4644ee0d306ff9e33f2170",
+    "nodeTestCallSiteDeclarations": 58,
+    "nodeLoopedDeclarations": 6,
+    "nodeSourceByteIdenticalToE5": true,
+    "nodeExpandedRuntimeCount": null,
+    "method": "Read-only Rust test declaration comparison; existing e5 Node AST declaration result is inherited only after exact file hash equality. No tests or Node were executed. Declarations and loops are not runtime case/pass counts.",
+    "passedCount": null,
+    "failedCount": null,
+    "ignoredCount": null
+  },
+  "provenance": {
+    "commitObjects": [
+      {
+        "role": "main_accuracy_baseline",
+        "requestedCommit": "3102693abc135f4a2b986caca851bbc935378f0b",
+        "objectExistsLocally": true,
+        "resolvedCommit": "3102693abc135f4a2b986caca851bbc935378f0b",
+        "ancestorOfFrozenSource": true,
+        "requiredPreservedAncestor": true
+      },
+      {
+        "role": "design_before_implementation",
+        "requestedCommit": "6920ec9a4c1f97321d4afb11695c164c1bb79b08",
+        "objectExistsLocally": true,
+        "resolvedCommit": "6920ec9a4c1f97321d4afb11695c164c1bb79b08",
+        "ancestorOfFrozenSource": true,
+        "requiredPreservedAncestor": true
+      },
+      {
+        "role": "original_cloud_wip",
+        "requestedCommit": "d61454cdf73c52d190d3d4a26d6733356a6495af",
+        "objectExistsLocally": true,
+        "resolvedCommit": "d61454cdf73c52d190d3d4a26d6733356a6495af",
+        "ancestorOfFrozenSource": true,
+        "requiredPreservedAncestor": true
+      },
+      {
+        "role": "original_local_base",
+        "requestedCommit": "8fddee2321b313a8a6372d0895dd4c1f533ba57c",
+        "objectExistsLocally": true,
+        "resolvedCommit": "8fddee2321b313a8a6372d0895dd4c1f533ba57c",
+        "ancestorOfFrozenSource": true,
+        "requiredPreservedAncestor": true
+      },
+      {
+        "role": "cloud_pre_local_code",
+        "requestedCommit": "525f1283adae79a13bcf0e07cf50772841911fb0",
+        "objectExistsLocally": true,
+        "resolvedCommit": "525f1283adae79a13bcf0e07cf50772841911fb0",
+        "ancestorOfFrozenSource": true,
+        "requiredPreservedAncestor": true
+      },
+      {
+        "role": "local_candidate_code",
+        "requestedCommit": "b2492bb94ce7aca1b102ffefc7b047dee819a2fe",
+        "objectExistsLocally": true,
+        "resolvedCommit": "b2492bb94ce7aca1b102ffefc7b047dee819a2fe",
+        "ancestorOfFrozenSource": true,
+        "requiredPreservedAncestor": true
+      },
+      {
+        "role": "local_candidate_handoff",
+        "requestedCommit": "1df794453310247d2aca94214de24e5898cfb097",
+        "objectExistsLocally": true,
+        "resolvedCommit": "1df794453310247d2aca94214de24e5898cfb097",
+        "ancestorOfFrozenSource": true,
+        "requiredPreservedAncestor": true
+      },
+      {
+        "role": "history_preserving_local_integration_merge",
+        "requestedCommit": "677ad23873d241507395e146aa51a565f95b2d10",
+        "objectExistsLocally": true,
+        "resolvedCommit": "677ad23873d241507395e146aa51a565f95b2d10",
+        "ancestorOfFrozenSource": true,
+        "requiredPreservedAncestor": true
+      },
+      {
+        "role": "previous_integrated_validation_code",
+        "requestedCommit": "24179702c9d163e1d21bf9a23c4528589355166a",
+        "objectExistsLocally": true,
+        "resolvedCommit": "24179702c9d163e1d21bf9a23c4528589355166a",
+        "ancestorOfFrozenSource": true,
+        "requiredPreservedAncestor": true
+      },
+      {
+        "role": "previous_integration_docs",
+        "requestedCommit": "27518776214c2c02eceb7a40dce4e7cf80f92320",
+        "objectExistsLocally": true,
+        "resolvedCommit": "27518776214c2c02eceb7a40dce4e7cf80f92320",
+        "ancestorOfFrozenSource": true,
+        "requiredPreservedAncestor": true
+      },
+      {
+        "role": "filtered_bundle_root_not_a_common_ancestor",
+        "requestedCommit": "0d0f995a2b7312c28589c1d952ae33ffcbe045db",
+        "objectExistsLocally": false,
+        "resolvedCommit": null,
+        "ancestorOfFrozenSource": null,
+        "requiredPreservedAncestor": false
+      }
+    ],
+    "localIntegrationMergeParents": [
+      "0d1ba51483f2379551446ab5a05fd61f21c7a01c",
+      "1df794453310247d2aca94214de24e5898cfb097"
+    ],
+    "localCandidateHistoryPreservedByMerge": true,
+    "filteredBundleRootMerged": false,
+    "filteredRootObjectPresentLocally": false,
+    "branchRefCaveat": "The original WIP and candidate local branch refs are not present in this checkout; their verified commit objects remain ancestors. origin/main is a local tracking ref, not a new network fetch.",
+    "historicalPackage": {
+      "filename": "Oviraptor-local-source-8fddee2.tar.gz",
+      "bytes": 10844046,
+      "sha256": "fc6448afee2399a988679ff64db8d95a2c5b7439e78ecd0bed05d94535fa24af",
+      "originalLocalBase": "8fddee2321b313a8a6372d0895dd4c1f533ba57c",
+      "candidateCode": "b2492bb94ce7aca1b102ffefc7b047dee819a2fe",
+      "source": "Committed historical candidate/integration handoff documentation; no package was fetched or opened in this review.",
+      "newDownloadAttemptsByThisReview": 0,
+      "excludedLocalTestsAndFixturesRemainHistoricalComparisonLimit": true,
+      "evidence": [
+        {
+          "path": "docs/LOCAL_INCREMENTAL_CANDIDATE_HANDOFF_2026-10-15.md",
+          "sourceSha256": "247b82630341fc70da63242b10447213272006ae2e84e52ce3d43dd2d776e7f6"
+        },
+        {
+          "path": "docs/LOCAL_INCREMENTAL_INTEGRATION_2026-10-15.md",
+          "sourceSha256": "8b7ea52a9de71cfa2ce07ccf05b77047934c80315caa98136601c632470f4e5f"
+        }
+      ]
+    }
+  },
+  "committedChainSinceMain310": [
+    {
+      "commit": "8cb45eb215516303c35902b0ee61e36a91161f91",
+      "parents": [
+        "3102693abc135f4a2b986caca851bbc935378f0b"
+      ],
+      "subject": "docs: record external asset accuracy gaps and bounded implementation plan",
+      "changedPathCount": 1,
+      "businessPathCount": 0,
+      "docsOnly": true,
+      "paths": [
+        "docs/EXTERNAL_ASSET_ACCURACY_2026-10-15.md"
+      ]
+    },
+    {
+      "commit": "6920ec9a4c1f97321d4afb11695c164c1bb79b08",
+      "parents": [
+        "8cb45eb215516303c35902b0ee61e36a91161f91"
+      ],
+      "subject": "docs: specify external asset accuracy and project analysis boundaries before implementation",
+      "changedPathCount": 2,
+      "businessPathCount": 0,
+      "docsOnly": true,
+      "paths": [
+        "docs/EXTERNAL_ASSET_ACCURACY_2026-10-15.md",
+        "docs/EXTERNAL_ASSET_ACCURACY_AND_PROJECT_ANALYSIS_DESIGN_2026-10-15.md"
+      ]
+    },
+    {
+      "commit": "3ab0b40ebec9f33cef99a4314d4d748f7bd6d108",
+      "parents": [
+        "6920ec9a4c1f97321d4afb11695c164c1bb79b08"
+      ],
+      "subject": "fix(assets): preserve coverage, identity and original observation evidence",
+      "changedPathCount": 27,
+      "businessPathCount": 27,
+      "docsOnly": false,
+      "paths": [
+        "src-tauri/src/asset_log_retention_tests.rs",
+        "src-tauri/src/asset_logs.rs",
+        "src-tauri/src/assets/model.rs",
+        "src-tauri/src/commands/asset_ownership.rs",
+        "src-tauri/src/commands/asset_ownership_accuracy_tests.rs",
+        "src-tauri/src/commands/assets.rs",
+        "src-tauri/src/commands/ownership_authorization.rs",
+        "src-tauri/src/commands/ownership_directory.rs",
+        "src-tauri/src/commands/ownership_review.rs",
+        "src-tauri/src/db.rs",
+        "src-tauri/src/db_schema.rs",
+        "src-tauri/src/jobs.rs",
+        "src-tauri/src/jobs/asset_identity.rs",
+        "src-tauri/src/jobs/asset_import_tests.rs",
+        "src-tauri/src/jobs/asset_observation.rs",
+        "src-tauri/src/jobs/asset_observation_tests.rs",
+        "src-tauri/src/jobs/collection_retention.rs",
+        "src-tauri/src/jobs/collection_retention_tests.rs",
+        "src-tauri/src/jobs/collection_summary.rs",
+        "src-tauri/src/jobs/native_collection_resume.rs",
+        "src-tauri/src/jobs/native_collection_resume_summary.rs",
+        "src-tauri/src/jobs/native_collection_resume_tests.rs",
+        "src-tauri/src/jobs/native_collection_resume_transport.rs",
+        "src-tauri/src/jobs/native_discovery.rs",
+        "src-tauri/src/jobs/native_discovery_tests.rs",
+        "src-tauri/src/jobs/native_fofa.rs",
+        "src-tauri/src/jobs/native_workers.rs"
+      ]
+    },
+    {
+      "commit": "45d5434077bae0d44e6df4d1e16e94081fb54eed",
+      "parents": [
+        "3ab0b40ebec9f33cef99a4314d4d748f7bd6d108"
+      ],
+      "subject": "fix(assets-ui): show collection coverage and historical observation limits",
+      "changedPathCount": 10,
+      "businessPathCount": 10,
+      "docsOnly": false,
+      "paths": [
+        "src/features/assets/collectionPresentation.ts",
+        "src/features/assets/components/AssetObservation.vue",
+        "src/features/assets/components/AssetWorkspace.vue",
+        "src/features/assets/components/CollectionRunSummary.vue",
+        "src/features/assets/components/QueryPanel.vue",
+        "src/features/assets/observationPresentation.ts",
+        "src/features/assets/types.ts",
+        "src/features/assets/workspace/AssetsPluginWorkspace.vue",
+        "tools/asset_accuracy_ui_harness.cjs",
+        "tools/test_asset_accuracy_ui.cjs"
+      ]
+    },
+    {
+      "commit": "d9e2dfb4bdc165ff0c8dfce0005628a1fc21ceaa",
+      "parents": [
+        "45d5434077bae0d44e6df4d1e16e94081fb54eed"
+      ],
+      "subject": "docs: specify exact project asset statistics and scoped chat reads",
+      "changedPathCount": 1,
+      "businessPathCount": 0,
+      "docsOnly": true,
+      "paths": [
+        "docs/EXTERNAL_ASSET_ACCURACY_AND_PROJECT_ANALYSIS_DESIGN_2026-10-15.md"
+      ]
+    },
+    {
+      "commit": "7ff60de67a88b48b5f8566ec9722f9af1c3c8bb4",
+      "parents": [
+        "d9e2dfb4bdc165ff0c8dfce0005628a1fc21ceaa"
+      ],
+      "subject": "docs: preserve deleted asset read boundaries for chat statistics",
+      "changedPathCount": 1,
+      "businessPathCount": 0,
+      "docsOnly": true,
+      "paths": [
+        "docs/EXTERNAL_ASSET_ACCURACY_AND_PROJECT_ANALYSIS_DESIGN_2026-10-15.md"
+      ]
+    },
+    {
+      "commit": "639838552d211321a50e440b350d6ce6c01b6222",
+      "parents": [
+        "7ff60de67a88b48b5f8566ec9722f9af1c3c8bb4"
+      ],
+      "subject": "fix(chat): read exact scoped asset statistics and search totals",
+      "changedPathCount": 9,
+      "businessPathCount": 9,
+      "docsOnly": false,
+      "paths": [
+        "src-tauri/src/assets/model.rs",
+        "src-tauri/src/assets/statistics.rs",
+        "src-tauri/src/assets/statistics_tests.rs",
+        "src-tauri/src/commands/assets.rs",
+        "src-tauri/src/conversations/agent.rs",
+        "src-tauri/src/conversations/agent_tests.rs",
+        "src-tauri/src/conversations/asset_statistics_tests.rs",
+        "src-tauri/src/conversations/reply.rs",
+        "src-tauri/src/conversations/tools.rs"
+      ]
+    },
+    {
+      "commit": "5b4a5b61e715160cb1b09fc583cdc5e2eec28811",
+      "parents": [
+        "639838552d211321a50e440b350d6ce6c01b6222"
+      ],
+      "subject": "fix(assets-ui): distinguish exact counts, stale snapshots and unknown states",
+      "changedPathCount": 4,
+      "businessPathCount": 4,
+      "docsOnly": false,
+      "paths": [
+        "src/features/assets/components/AssetWorkspace.vue",
+        "src/features/assets/types.ts",
+        "src/features/conversations/ConversationToolActivity.vue",
+        "tools/test_asset_accuracy_ui.cjs"
+      ]
+    },
+    {
+      "commit": "e5fed60067fc087a0fa322ee35766f624835dd40",
+      "parents": [
+        "5b4a5b61e715160cb1b09fc583cdc5e2eec28811"
+      ],
+      "subject": "test(assets): align fixtures with exact ownership and query receipts",
+      "changedPathCount": 3,
+      "businessPathCount": 3,
+      "docsOnly": false,
+      "testOnly": true,
+      "paths": [
+        "src-tauri/src/commands/asset_ownership_accuracy_tests.rs",
+        "src-tauri/src/commands/ownership_review.rs",
+        "src-tauri/src/jobs/native_discovery_tests.rs"
+      ]
+    },
+    {
+      "commit": "34e802a6f8d4fc093efa1d3ee732daf767d0df44",
+      "parents": [
+        "e5fed60067fc087a0fa322ee35766f624835dd40"
+      ],
+      "subject": "test(scanning): prepare live broker leases atomically before renewal",
+      "changedPathCount": 1,
+      "businessPathCount": 1,
+      "testOnly": true,
+      "paths": [
+        "src-tauri/src/commands/multi_agent/tests/broker.rs"
+      ]
+    }
+  ],
+  "configurationAndWipPreservation": {
+    "cloudWipAncestorPresent": true,
+    "localIntegratedSourceAncestorPresent": true,
+    "configurationResetPerformedByThisReview": false,
+    "configurationAndAccessFilesByteIdentity": [
+      {
+        "path": "src-tauri/src/configuration/model.rs",
+        "frozenSha256": "4983852cab095570051ed00b40230e869d24ce8584e7d4eff93df4cba5b757c6",
+        "byteIdenticalToMain310AndDesign6920": true
+      },
+      {
+        "path": "src-tauri/src/model_configuration.rs",
+        "frozenSha256": "2608bc7cc18276e13c9cbf78ffe504467600209719e4aa371b01691cbd98348a",
+        "byteIdenticalToMain310AndDesign6920": true
+      },
+      {
+        "path": "src-tauri/src/commands/runtime_config.rs",
+        "frozenSha256": "b481014870d3529044f3d183935cfcf6689b133aafb3c9c552c5a8fbd91fe289",
+        "byteIdenticalToMain310AndDesign6920": true
+      },
+      {
+        "path": "src-tauri/src/jobs/native_config.rs",
+        "frozenSha256": "8cc3dcbd7ac3762a9b476c6fdaa473562adf873aa3f4b770c02c69792468fd81",
+        "byteIdenticalToMain310AndDesign6920": true
+      },
+      {
+        "path": "src-tauri/src/conversations/access.rs",
+        "frozenSha256": "9d408a89d1d4b3f5010aa1e6d70ffae99d42d73d005c30209f6ef178a6277446",
+        "byteIdenticalToMain310AndDesign6920": true
+      },
+      {
+        "path": "src-tauri/src/conversations/access/consent.rs",
+        "frozenSha256": "a7ef55e24cd0525e2662aed0a6b757c305152621be6760a3f4b95983c3bf3e85",
+        "byteIdenticalToMain310AndDesign6920": true
+      },
+      {
+        "path": "src/App.vue",
+        "frozenSha256": "c292c16c5c1de6e4d6e452f5c01a24bcbf1f7f773d486b3f4f3d42d103b7a00d",
+        "byteIdenticalToMain310AndDesign6920": true
+      }
+    ],
+    "retainedJobFallbackDefaults": [
+      {
+        "expression": "setting_i64(&settings, \"pageSize\", 500)",
+        "sameInMain310Design6920AndFrozen": true
+      },
+      {
+        "expression": "setting_i64(&settings, \"maxPages\", 0)",
+        "sameInMain310Design6920AndFrozen": true
+      },
+      {
+        "expression": "setting_bool(&settings, \"runProbe\", true)",
+        "sameInMain310Design6920AndFrozen": true
+      },
+      {
+        "expression": "setting_bool(&settings, \"runRefine\", true)",
+        "sameInMain310Design6920AndFrozen": true
+      },
+      {
+        "expression": "setting_bool(&settings, \"allowPrivate\", false)",
+        "sameInMain310Design6920AndFrozen": true
+      },
+      {
+        "expression": "setting_bool(&settings, \"strictTls\", false)",
+        "sameInMain310Design6920AndFrozen": true
+      },
+      {
+        "expression": "setting_bool(&settings, \"schemeFallback\", true)",
+        "sameInMain310Design6920AndFrozen": true
+      }
+    ],
+    "basis": "The accuracy branch starts from main310 containing preserved cloud WIP and local-integration ancestry. This delta does not restore main defaults over the original WIP or read/write user configuration."
+  },
+  "remainingBoundaries": [
+    {
+      "code": "legacy_unknown_observation_csv_compatibility",
+      "boundary": "Historical CSV rows without a provable observation clock retain compatibility updates; they do not gain now as source/probe observation time. This cannot recreate a missing historical clock.",
+      "evidence": [
+        {
+          "path": "src-tauri/src/jobs/asset_observation.rs",
+          "frozenSha256": "420b247d052336e7ffaa822a70142cd026b64e224f2846cbd27e354c92d2feb4",
+          "anchors": [
+            {
+              "needle": "Historical CSVs without a provable clock",
+              "matches": [
+                {
+                  "line": 187,
+                  "text": "// Historical CSVs without a provable clock keep their old compatibility"
+                }
+              ]
+            },
+            {
+              "needle": "No caller supplies `now`",
+              "matches": [
+                {
+                  "line": 154,
+                  "text": "/// initialize/advance an observation clock. No caller supplies `now` here."
+                }
+              ]
+            },
+            {
+              "needle": "_ => (true, true)",
+              "matches": [
+                {
+                  "line": 189,
+                  "text": "_ => (true, true),"
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "code": "irreversible_historical_information_loss",
+      "boundary": "Services already merged with fields discarded and legacy rules whose original www labels were lost cannot be reconstructed losslessly. New identity/rule checks preserve evidence and require review; they do not claim to restore missing originals.",
+      "evidence": [
+        {
+          "path": "docs/EXTERNAL_ASSET_ACCURACY_AND_PROJECT_ANALYSIS_DESIGN_2026-10-15.md",
+          "frozenSha256": "798be7d03eb3e248d04cea33ca14b98fc0a1f4f0ec3d92129cbb6e14e6057100",
+          "anchors": [
+            {
+              "needle": "不能从已经误合并",
+              "matches": [
+                {
+                  "line": 154,
+                  "text": "历史兼容：优先从旧行原字段重新计算身份，同协议同入口继续复用 asset_id；若 company+raw_key 已存在但对应不同 canonical，必须分配稳定不冲突的新 key，不能 ON CONFLICT 覆盖原服务。不能从已经误合并且丢失的历史字段凭空恢复所有实体；该部分应标记待核对，不批量拆分、删除或重置人工状态。"
+                }
+              ]
+            },
+            {
+              "needle": "旧 learned rule 若 pattern 已丢失 www",
+              "matches": [
+                {
+                  "line": 259,
+                  "text": "旧 learned rule 若 pattern 已丢失 www 且无原始依据，不能猜回原意。保留历史记录，将不能核实的 legacy 派生规则隔离出新的自动强支持，给人工复核路径；不将算法缓存失效等同于撤销人工作出的授权。"
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "code": "owned_storage_logical_byte_scope",
+      "boundary": "Budgets count logical file lengths plus admitted temporary/control peaks only inside explicit application-owned collection scope; they are not an all-disk quota, filesystem allocation measurement, or budget over every unknown legacy run and user directory. Unmanaged runs/unknown files remain explicit. Global/project/run caps do not authorize general cleanup.",
+      "defaults": {
+        "globalBytes": 2147483648,
+        "projectBytes": 1073741824,
+        "runBytes": 536870912,
+        "pages": 4096,
+        "ageSeconds": 604800
+      },
+      "evidence": [
+        {
+          "path": "src-tauri/src/jobs/collection_retention.rs",
+          "frozenSha256": "2ca68d8f026b02c613021eed4c20840a38b639f94e7cc0d8b01c06137710c917",
+          "anchors": [
+            {
+              "needle": "owned_collection_files_and_control_metadata_only",
+              "matches": [
+                {
+                  "line": 95,
+                  "text": "json!({\"schemaVersion\":1,\"scope\":\"owned_collection_files_and_control_metadata_only\","
+                }
+              ]
+            },
+            {
+              "needle": "unmanaged_runs",
+              "matches": [
+                {
+                  "line": 89,
+                  "text": "pub unmanaged_runs: usize,"
+                },
+                {
+                  "line": 99,
+                  "text": "\"unmanagedRuns\":self.unmanaged_runs,\"unknownFiles\":self.unknown_files,\"historyTruncated\":self.history_truncated,"
+                },
+                {
+                  "line": 560,
+                  "text": "report.unmanaged_runs = fs::read_dir(&self.root)"
+                }
+              ]
+            },
+            {
+              "needle": "row.bytes",
+              "matches": [
+                {
+                  "line": 494,
+                  "text": "entries.insert(path.to_string_lossy().into_owned(),json!({\"kind\":kind.name(),\"hash\":file_hash(&row.path)?,\"bytes\":row.bytes,\"receivedAt\":null,\"storedAt\":null,\"phase\":\"available\",\"pinned\":false}));"
+                }
+              ]
+            },
+            {
+              "needle": "fn prune_locked",
+              "matches": [
+                {
+                  "line": 648,
+                  "text": "fn prune_locked(&self, now: i64) -> Result<(), String> {"
+                }
+              ]
+            },
+            {
+              "needle": "analysisSnapshotPinsIntegrated",
+              "matches": [
+                {
+                  "line": 100,
+                  "text": "\"analysisSnapshotPinsIntegrated\":false})"
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "code": "diagnostic_row_retention_is_not_database_file_shrink",
+      "boundary": "Diagnostic log rows have 5000/run,100000/global,30-day limits and durable removal counters. Manual/ownership audit tables are excluded. No VACUUM or promise of immediate SQLite/WAL file shrink is part of this implementation.",
+      "evidence": [
+        {
+          "path": "src-tauri/src/asset_logs.rs",
+          "frozenSha256": "a43bd30ce525597ab850378432bc61be4c178438487e9db8486b41bf8164ddaf",
+          "anchors": [
+            {
+              "needle": "Diagnostic retention only",
+              "matches": [
+                {
+                  "line": 5,
+                  "text": "/// Diagnostic retention only. Asset events and ownership/manual audit tables"
+                }
+              ]
+            },
+            {
+              "needle": "per_run: 5000",
+              "matches": [
+                {
+                  "line": 34,
+                  "text": "per_run: 5000,"
+                }
+              ]
+            },
+            {
+              "needle": "global: 100000",
+              "matches": [
+                {
+                  "line": 35,
+                  "text": "global: 100000,"
+                }
+              ]
+            },
+            {
+              "needle": "days: 30",
+              "matches": [
+                {
+                  "line": 36,
+                  "text": "days: 30,"
+                }
+              ]
+            },
+            {
+              "needle": "manualAuditTablesPruned",
+              "matches": [
+                {
+                  "line": 180,
+                  "text": "\"perRunLimit\":5000,\"globalLimit\":100000,\"ageDays\":30,\"manualAuditTablesPruned\":false}),"
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "code": "no_analysis_snapshot_pin_business",
+      "boundary": "Low-level storage pin flags do not implement structured analysis snapshots, approval lifetime or pin business. The report explicitly marks analysisSnapshotPinsIntegrated=false.",
+      "evidence": [
+        {
+          "path": "src-tauri/src/jobs/collection_retention.rs",
+          "frozenSha256": "2ca68d8f026b02c613021eed4c20840a38b639f94e7cc0d8b01c06137710c917",
+          "anchors": [
+            {
+              "needle": "analysisSnapshotPinsIntegrated",
+              "matches": [
+                {
+                  "line": 100,
+                  "text": "\"analysisSnapshotPinsIntegrated\":false})"
+                }
+              ]
+            },
+            {
+              "needle": "Low-level retention reference only",
+              "matches": [
+                {
+                  "line": 877,
+                  "text": "/// Low-level retention reference only; no analysis approval/pin lifecycle is"
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "code": "no_live_provider_model_or_desktop_acceptance_in_this_review",
+      "boundary": "This source review executes no application tests and contacts no real provider, model, target or desktop runtime. Current build/Node/native results must be joined separately by root; source declarations, historical results and mocks do not establish live-provider or user-desktop acceptance.",
+      "evidence": [
+        {
+          "path": "docs/EXTERNAL_ASSET_ACCURACY_AND_PROJECT_ANALYSIS_DESIGN_2026-10-15.md",
+          "frozenSha256": "798be7d03eb3e248d04cea33ca14b98fc0a1f4f0ec3d92129cbb6e14e6057100",
+          "anchors": [
+            {
+              "needle": "只用临时数据和fake gateway",
+              "matches": [
+                {
+                  "line": 302,
+                  "text": "验收必须实际执行：临时SQLite服务与工具dispatch、fake模型中文数量问题/下一轮工具数据/最终保存；超过20条、稀疏ID、空项目、跨项目及游标、回收与人工/归属排除、重复关联、未知状态、完整同分母分布；搜索count/page同filter、与资产列表对应raw/member口径及SFC失败/零/旧快照。拒绝资产权限、provider consent、agent关闭、读取中撤权与endpoint变更仍须保留。只用临时数据和fake gateway，不访问真实provider、模型或目标。"
+                }
+              ]
+            },
+            {
+              "needle": "现有主动probe的范围/重定向准入",
+              "matches": [
+                {
+                  "line": 448,
+                  "text": "6. 现有主动probe的范围/重定向准入，以及模型配置层fallback保留独立审查；本轮不暗改默认值或将其描述为已闭合。"
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "code": "active_probe_and_redirect_scope_not_closed_by_this_round",
+      "boundary": "Active probe defaults and existing literal private-address/redirect behavior are retained, not upgraded into a project target allowlist or per-hop authorization proof. The native probe implementation is unchanged from both accuracy baselines.",
+      "nativeProbeByteIdenticalToBothBaselines": true,
+      "evidence": [
+        {
+          "path": "src-tauri/src/jobs/native_probe.rs",
+          "frozenSha256": "1e155189216e18d3fa1dd68dab78a16f889823be00a89711f4412fdf743f20b9",
+          "anchors": [
+            {
+              "needle": "if !options.allow_private && non_public_literal",
+              "matches": [
+                {
+                  "line": 525,
+                  "text": "if !options.allow_private && non_public_literal(&input_url) {"
+                }
+              ]
+            },
+            {
+              "needle": "Policy::limited(5)",
+              "matches": [
+                {
+                  "line": 901,
+                  "text": ".redirect(reqwest::redirect::Policy::limited(5))"
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "historicalRuntimeEvidence": {
+    "interruptedFull01": {
+      "result": "/workspace/validation/asset-accuracy-20261015/statistics-native-full-01-result.json",
+      "resultSha256": "cf5fb651a9d77da14aac211a2cc8375befeac3e20bb758f1e6146794d46cfecb",
+      "sourceHead": "e5fed60067fc087a0fa322ee35766f624835dd40",
+      "accepted": false,
+      "wrapperCommandExitCode": 143,
+      "durationSeconds": 211.33,
+      "observedCaseCounts": {
+        "passed": 1551,
+        "failed": 1,
+        "ignored": 7,
+        "observedTotal": 1559
+      },
+      "summary": null,
+      "completeRustFooter": false,
+      "failedCaseNames": [
+        "scanning::agent_tests::broker_checks_role_capability_revocation_expiry_and_fencing"
+      ],
+      "inputComparisons": {
+        "nativeInputs": {
+          "before": 1839,
+          "after": 1839,
+          "added": [],
+          "removed": [],
+          "changed": []
+        },
+        "auditInputs": {
+          "before": 2265,
+          "after": 2265,
+          "added": [],
+          "removed": [],
+          "changed": []
+        },
+        "trackedInputs": {
+          "before": 2632,
+          "after": 2632,
+          "added": [],
+          "removed": [],
+          "changed": []
+        },
+        "untrackedInputs": {
+          "before": 0,
+          "after": 0,
+          "added": [],
+          "removed": [],
+          "changed": []
+        },
+        "files": {
+          "before": 2636,
+          "after": 2636,
+          "added": [],
+          "removed": [],
+          "changed": []
+        }
+      },
+      "limit": "1559 is observed case rows, not1559 passes; no complete suite footer or acceptance."
+    },
+    "brokerDiagnostics": [
+      {
+        "result": "/workspace/validation/asset-accuracy-20261015/statistics-native-diagnose-broker-01-result.json",
+        "resultSha256": "de593345a036226d2d690ad46be147c4a1633348a62653cb4119e090a0963520",
+        "sourceHead": "e5fed60067fc087a0fa322ee35766f624835dd40",
+        "commandExitCode": 0,
+        "durationSeconds": 0.343,
+        "log": "/workspace/validation/asset-accuracy-20261015/statistics-native-diagnose-broker-01.log",
+        "logSha256": "2daa657f71784f6c751bb6254345d6a7a9fceac8af34a2ca9adb2701662df66c",
+        "executionCount": 1,
+        "eachLeafHashAndSinglePassFooterVerified": true
+      },
+      {
+        "result": "/workspace/validation/asset-accuracy-20261015/statistics-native-diagnose-broker-repeat-01-result.json",
+        "resultSha256": "d079f3f93ad9188b106e1981709acf56455a0ca3e77943325a1af4c00430d444",
+        "sourceHead": "e5fed60067fc087a0fa322ee35766f624835dd40",
+        "commandExitCode": 0,
+        "durationSeconds": 37.03,
+        "log": "/workspace/validation/asset-accuracy-20261015/statistics-native-diagnose-broker-repeat-01.log",
+        "logSha256": "f301a6d7270472dfd16ab280c5708650f819f951ca468a41e710b8f1ade8d8ee",
+        "executionCount": 100,
+        "eachLeafHashAndSinglePassFooterVerified": true
+      },
+      {
+        "result": "/workspace/validation/asset-accuracy-20261015/statistics-native-diagnose-broker-parallel-01-result.json",
+        "resultSha256": "fb7c13da1170eca94030ed0e323a8c603e1aed560290e1512ea87778abdf44ce",
+        "sourceHead": "e5fed60067fc087a0fa322ee35766f624835dd40",
+        "commandExitCode": 0,
+        "durationSeconds": 18.893,
+        "log": "/workspace/validation/asset-accuracy-20261015/statistics-native-diagnose-broker-parallel-01.log",
+        "logSha256": "97532c3349f46a1a85161076a22f66f06be86569e858d8a157e76729580c3157",
+        "executionCount": 160,
+        "eachLeafHashAndSinglePassFooterVerified": true
+      }
+    ],
+    "diagnosticExecutions": 261,
+    "diagnosticDistinctCaseCount": 1,
+    "diagnosticReproducedFailure": false,
+    "limit": "261 green repetitions of one case on e5 do not replace the interrupted full or accept34. Current frozen runtime results remain for root to evaluate."
+  },
+  "mergeAuthorizationAndPublicationStage": {
+    "userAuthorizedNormalPrMergeAfterFinalTests": true,
+    "authorizationSource": "Latest explicit user authorization reported by parent in this task.",
+    "draftPrNumber": 7,
+    "draftPrState": "Created per parent; no remote query by this review.",
+    "mainCurrentLocalTrackingCommit": "3102693abc135f4a2b986caca851bbc935378f0b",
+    "trackingRefIsNotFreshNetworkRead": true,
+    "finalMergeExecuted": false,
+    "mergeStatusSource": "Parent reports merge not executed; current local origin/main remains310.",
+    "historicalNoMergeStatements": "Earlier no-merge descriptions are historical stage facts, not a permanent restriction overriding current user authorization.",
+    "mergeOrPushPerformedByThisAgent": false
+  },
+  "checks": {
+    "cleanFreezeBeforeAndAfter": true,
+    "oneDirectFollowupCommit": true,
+    "exactOneTestFileDeltaPlus68Minus1": true,
+    "allOriginal15AssertionsPreserved": true,
+    "allOtherTestSuffixBytesPreserved": true,
+    "fiveCriticalProductionFilesUnchanged": true,
+    "allOtherSourcePathsUnchangedFromE5": true,
+    "sameMainAndDesignSourcePathSet46": true,
+    "mainTotal48DesignTotal47": true,
+    "all46OwnerPathsUnique": true,
+    "all103NewDeclarationsAndAllOldNamesPreserved": true,
+    "originalWipAndLocalIntegratedSourceAncestorsRetained": true,
+    "noRuntimeAcceptanceClaimed": true
+  },
+  "publication": "Normal PR merge after final actual acceptance is authorized. DraftPR7/main310/unmerged are stage facts reported by parent and local tracking. This receipt binds frozen code34 only; runtime validation, final docs, remote readback and merge belong to later receipts."
+}

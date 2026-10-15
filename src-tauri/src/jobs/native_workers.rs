@@ -175,6 +175,22 @@ include!("native_probe.rs");
 include!("native_fofa.rs");
 
 pub fn merge_url_inventory(input: &Path, output: &Path) -> Result<serde_json::Value, String> {
+    merge_url_inventory_inner(input, output, None)
+}
+
+pub fn merge_url_inventory_with_storage(
+    input: &Path,
+    output: &Path,
+    storage: &crate::jobs::collection_retention::CollectionStorage,
+) -> Result<serde_json::Value, String> {
+    merge_url_inventory_inner(input, output, Some(storage))
+}
+
+fn merge_url_inventory_inner(
+    input: &Path,
+    output: &Path,
+    storage: Option<&crate::jobs::collection_retention::CollectionStorage>,
+) -> Result<serde_json::Value, String> {
     let (_, rows) = read_csv(input)?;
     let mut best = HashMap::<String, Record>::new();
     for mut row in rows {
@@ -182,6 +198,7 @@ pub fn merge_url_inventory(input: &Path, output: &Path) -> Result<serde_json::Va
         if raw.is_empty() {
             continue;
         }
+        let identity = discovery_identity(&row);
         let mut url = build_probe_url(&row).unwrap_or_else(|| {
             if raw.contains("://") {
                 raw
@@ -215,20 +232,29 @@ pub fn merge_url_inventory(input: &Path, output: &Path) -> Result<serde_json::Va
             "pending"
         };
         row.insert("normalized_url".into(), url.clone());
+        row.insert("inventory_identity".into(), identity.clone());
         row.insert("inventory_bucket".into(), bucket.into());
         let replace = best
-            .get(&url)
+            .get(&identity)
             .map(|old| number(&row, &["score"]) > number(old, &["score"]))
             .unwrap_or(true);
         if replace {
-            best.insert(url, row);
+            best.insert(identity, row);
         }
     }
     let mut merged = best.into_values().collect::<Vec<_>>();
     merged.sort_by(|left, right| {
-        text(left, &["normalized_url"]).cmp(&text(right, &["normalized_url"]))
+        text(left, &["normalized_url"])
+            .cmp(&text(right, &["normalized_url"]))
+            .then_with(|| {
+                text(left, &["inventory_identity"]).cmp(&text(right, &["inventory_identity"]))
+            })
     });
-    let mut fields = vec!["normalized_url".into(), "inventory_bucket".into()];
+    let mut fields = vec![
+        "normalized_url".into(),
+        "inventory_identity".into(),
+        "inventory_bucket".into(),
+    ];
     for row in &merged {
         for field in row.keys() {
             if !fields.contains(field) {
@@ -236,7 +262,7 @@ pub fn merge_url_inventory(input: &Path, output: &Path) -> Result<serde_json::Va
             }
         }
     }
-    write_csv(output, &fields, &merged)?;
+    write_collection_csv(output, &fields, &merged, storage)?;
     let parent = output.parent().unwrap_or_else(|| Path::new("."));
     for (bucket, name) in [
         ("confirmed", "confirmed_urls.txt"),
@@ -249,15 +275,22 @@ pub fn merge_url_inventory(input: &Path, output: &Path) -> Result<serde_json::Va
             .map(|row| text(row, &["normalized_url"]))
             .collect::<Vec<_>>()
             .join("\n");
-        fs::write(
-            parent.join(name),
-            if values.is_empty() {
-                values
-            } else {
-                format!("{values}\n")
-            },
-        )
-        .map_err(|error| error.to_string())?;
+        let content = if values.is_empty() {
+            values
+        } else {
+            format!("{values}\n")
+        };
+        if let Some(storage) = storage {
+            storage.write(
+                Path::new(name),
+                content.as_bytes(),
+                crate::jobs::collection_retention::ArtifactKind::Inventory,
+                None,
+                chrono::Utc::now().timestamp(),
+            )?;
+        } else {
+            native_collection_resume::atomic_write(&parent.join(name), content.as_bytes())?;
+        }
     }
     Ok(
         json!({"input": merged.len(), "unique": merged.len(), "confirmed": merged.iter().filter(|row| text(row, &["inventory_bucket"]) == "confirmed").count(), "pending": merged.iter().filter(|row| text(row, &["inventory_bucket"]) == "pending").count(), "rejected": merged.iter().filter(|row| text(row, &["inventory_bucket"]) == "rejected").count()}),
@@ -609,6 +642,60 @@ mod tests {
             .unwrap()
             .contains("https://example.com"));
         let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn native_url_inventory_preserves_distinct_services_and_registers_every_export() {
+        use crate::jobs::collection_retention::{ArtifactKind, CollectionStorage, Limits};
+        let temporary =
+            std::env::temp_dir().join(format!("oviraptor-inventory-retention-{}", Uuid::new_v4()));
+        fs::create_dir_all(temporary.join("run-1")).unwrap();
+        let root = temporary.canonicalize().unwrap();
+        let output = root.join("run-1/collection");
+        let storage =
+            CollectionStorage::open(&root, &output, 1, 1, 1000, Limits::default()).unwrap();
+        let input = output.join("candidates.csv");
+        storage.write(Path::new("candidates.csv"),
+            b"host,protocol,port,score\nservice.example,ssh,443,10\nservice.example,redis,443,20\n",
+            ArtifactKind::Csv, None, 1000).unwrap();
+        let summary =
+            merge_url_inventory_with_storage(&input, &output.join("url_inventory.csv"), &storage)
+                .unwrap();
+        assert_eq!(summary["unique"], 2);
+        let (_, rows) = read_csv(&output.join("url_inventory.csv")).unwrap();
+        assert_eq!(
+            rows.iter()
+                .map(|row| text(row, &["inventory_identity"]))
+                .collect::<HashSet<_>>()
+                .len(),
+            2
+        );
+        assert!(rows
+            .iter()
+            .any(|row| text(row, &["inventory_identity"]).starts_with("service:ssh|")));
+        assert!(rows
+            .iter()
+            .any(|row| text(row, &["inventory_identity"]).starts_with("service:redis|")));
+        let owner: serde_json::Value = serde_json::from_slice(
+            &fs::read(output.join(".collection-retention-v1.json")).unwrap(),
+        )
+        .unwrap();
+        for name in [
+            "candidates.csv",
+            "url_inventory.csv",
+            "confirmed_urls.txt",
+            "pending_urls.txt",
+            "rejected_urls.txt",
+        ] {
+            assert!(
+                owner["entries"].get(name).is_some(),
+                "unregistered export: {name}"
+            );
+        }
+        assert_eq!(storage.report().unwrap().unknown_files, 0);
+        storage.finish(1000).unwrap();
+        drop(storage);
+        fs::remove_dir_all(root).unwrap();
     }
 
     #[test]

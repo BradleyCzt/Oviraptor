@@ -1,0 +1,70 @@
+{
+  "sourceHead": "34e802a6f8d4fc093efa1d3ee732daf767d0df44",
+  "scope": "All98 Node plus independently reported realChromium16 and28 sets. No aggregate unique44 claim; native validation separate.",
+  "acceptedAllListedSets": true,
+  "sets": [
+    {
+      "name": "all98Node",
+      "index": "/workspace/validation/asset-accuracy-20261015/stats-certified-node-01/evidence-index.json",
+      "sha256": "c327ab423c799057ef609420c90f4f82a07bc20e407c88f7a51cbd763dff8c58",
+      "actualCounts": {
+        "tests": 1662,
+        "suites": 0,
+        "pass": 1650,
+        "fail": 0,
+        "cancelled": 0,
+        "skipped": 12,
+        "todo": 0,
+        "duration_ms": 162284.801447
+      },
+      "durationSeconds": 162.339
+    },
+    {
+      "name": "accuracyBrowser16",
+      "index": "/workspace/validation/asset-accuracy-20261015/browser/stats-certified-01/evidence-index.json",
+      "sha256": "2f6ed5708a232aa52f62256cb7507de903977f7332822afda81796408256406f",
+      "actualCounts": {
+        "tests": 16,
+        "pass": 16,
+        "fail": 0
+      },
+      "durationSeconds": 28.852
+    },
+    {
+      "name": "legacyBaselineBrowser28",
+      "index": "/workspace/validation/asset-accuracy-20261015/browser/legacy28-certified-01/evidence-index.json",
+      "sha256": "f95cda168f70281d5fd3380be04f6c3b548f55aa5822ec9787c5cdb1fc0c5fcb",
+      "actualCounts": {
+        "passed": 28,
+        "failed": 0,
+        "runtimeErrors": 0,
+        "blockedRequests": 0,
+        "unknownIpc": 0,
+        "externalFetch": 0
+      },
+      "durationSeconds": 65.136
+    }
+  ],
+  "sourceHeadCleanBeforeAndAfterAllRuns": true,
+  "fullSourcePathSetsAndHashesStable": true,
+  "all409BoundBuildInputsByteMatchedBeforeDistReuse": true,
+  "allDistPathSetsAndHashesUnchanged": true,
+  "NodeBaseline1588Plus74AndSkip12CountersExact": true,
+  "old97NodeTestSourcesByteIdenticalTo2417970": true,
+  "legacy28Only3ApprovedPresentationChangesReversibleToOldRunner": true,
+  "allOldRecordsPreserved": true,
+  "priorE5CompleteAuthority": {
+    "path": "/workspace/validation/asset-accuracy-20261015/stats-frozen-complete-regression-index.json",
+    "sha256": "c56bf61a89cdf263d8259caef838453d733807a3848ac48238a34ef65c66fc55"
+  },
+  "originalLegacy28Failure": {
+    "index": "/workspace/validation/asset-accuracy-20261015/browser/legacy28-frozen-01/evidence-index.json",
+    "sha256": "aefb2351bfd2cd680031073d277956436c1029f259008850490058cb2bf8e7dd",
+    "counts": {
+      "passed": 25,
+      "failed": 3
+    },
+    "classification": "three old UI presentation labels/footer contracts; retained before approved literal updates"
+  },
+  "noRepositorySourceOrDistWritesDuringValidation": true
+}

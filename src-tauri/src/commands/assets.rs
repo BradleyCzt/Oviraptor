@@ -10,6 +10,9 @@ use serde_json::Value as JsonValue;
 use std::collections::HashSet;
 use tauri::State;
 
+#[path = "../assets/statistics.rs"]
+pub(crate) mod statistics;
+
 #[path = "asset_response_groups.rs"]
 mod response_groups;
 use response_groups::{
@@ -558,7 +561,7 @@ fn list_assets_on_read_snapshot(
     };
     let sentinel_exists = "EXISTS (SELECT 1 FROM sentinel_targets st WHERE st.project_id=pa.project_id AND (st.asset_id=a.id OR (st.asset_id IS NULL AND st.url=COALESCE(NULLIF(a.link,''),a.host))))";
     let summary_sql = format!(
-        "SELECT COUNT(*),COALESCE(SUM(CASE WHEN COALESCE(pa.decision,'') IN ('','pending') THEN 1 ELSE 0 END),0),COALESCE(SUM(CASE WHEN pa.decision='uncertain' THEN 1 ELSE 0 END),0),COALESCE(SUM(CASE WHEN pa.decision='confirmed' THEN 1 ELSE 0 END),0),COALESCE(SUM(CASE WHEN pa.decision='rejected' THEN 1 ELSE 0 END),0),COALESCE(SUM(CASE WHEN pa.decision='not_applicable' THEN 1 ELSE 0 END),0),COALESCE(SUM(CASE WHEN {sentinel_exists} THEN 1 ELSE 0 END),0) FROM assets a JOIN project_assets pa ON pa.asset_id=a.id JOIN projects p ON p.id=pa.project_id LEFT JOIN asset_ownership_decisions o ON o.project_id=pa.project_id AND o.asset_id=a.id WHERE {summary_filter}"
+        "SELECT COUNT(*),COALESCE(SUM(CASE WHEN COALESCE(pa.decision,'') IN ('','pending') THEN 1 ELSE 0 END),0),COALESCE(SUM(CASE WHEN pa.decision='uncertain' THEN 1 ELSE 0 END),0),COALESCE(SUM(CASE WHEN pa.decision='confirmed' THEN 1 ELSE 0 END),0),COALESCE(SUM(CASE WHEN pa.decision='rejected' THEN 1 ELSE 0 END),0),COALESCE(SUM(CASE WHEN pa.decision='not_applicable' THEN 1 ELSE 0 END),0),COALESCE(SUM(CASE WHEN {sentinel_exists} THEN 1 ELSE 0 END),0),COALESCE(SUM(CASE WHEN COALESCE(pa.decision,'') NOT IN ('','pending','uncertain','confirmed','rejected','not_applicable') THEN 1 ELSE 0 END),0) FROM assets a JOIN project_assets pa ON pa.asset_id=a.id JOIN projects p ON p.id=pa.project_id LEFT JOIN asset_ownership_decisions o ON o.project_id=pa.project_id AND o.asset_id=a.id WHERE {summary_filter}"
     );
     let summary = connection
         .query_row(
@@ -573,6 +576,7 @@ fn list_assets_on_read_snapshot(
                     rejected: row.get(4)?,
                     not_applicable: row.get(5)?,
                     sent_to_agent: row.get(6)?,
+                    unknown: row.get(7)?,
                 })
             },
         )
@@ -879,9 +883,9 @@ pub async fn list_runs(
 ) -> Result<Vec<JobRun>, String> {
     let connection = db::open(&state.db_path)?;
     let sql = if project_id.is_some() {
-        "SELECT r.id,r.project_id,r.profile_id,p.name,r.name,r.pipeline,r.status,r.stage,r.progress,r.processed,r.total,r.output_dir,r.error,r.started_at,r.finished_at,r.created_at FROM runs r JOIN projects p ON p.id=r.project_id WHERE r.project_id=?1 ORDER BY r.id DESC LIMIT ?2"
+        "SELECT r.id,r.project_id,r.profile_id,p.name,r.name,r.pipeline,r.status,r.stage,r.progress,r.processed,r.total,r.output_dir,r.error,r.started_at,r.finished_at,r.created_at,r.collection_summary_json FROM runs r JOIN projects p ON p.id=r.project_id WHERE r.project_id=?1 ORDER BY r.id DESC LIMIT ?2"
     } else {
-        "SELECT r.id,r.project_id,r.profile_id,p.name,r.name,r.pipeline,r.status,r.stage,r.progress,r.processed,r.total,r.output_dir,r.error,r.started_at,r.finished_at,r.created_at FROM runs r JOIN projects p ON p.id=r.project_id ORDER BY r.id DESC LIMIT ?1"
+        "SELECT r.id,r.project_id,r.profile_id,p.name,r.name,r.pipeline,r.status,r.stage,r.progress,r.processed,r.total,r.output_dir,r.error,r.started_at,r.finished_at,r.created_at,r.collection_summary_json FROM runs r JOIN projects p ON p.id=r.project_id ORDER BY r.id DESC LIMIT ?1"
     };
     let mut statement = connection.prepare(sql).map_err(|error| error.to_string())?;
     let mapper = |row: &Row<'_>| {
@@ -902,6 +906,7 @@ pub async fn list_runs(
             started_at: row.get(13)?,
             finished_at: row.get(14)?,
             created_at: row.get(15)?,
+            collection_summary: serde_json::from_str(&row.get::<_, String>(16)?).ok(),
         })
     };
     let rows = if let Some(id) = project_id {

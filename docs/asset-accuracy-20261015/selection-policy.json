@@ -1,0 +1,49 @@
+{
+  "version": 1,
+  "sourceRoot": "/workspace/validation/asset-accuracy-20261015",
+  "archiveRoot": "asset-accuracy-20261015",
+  "repositoryTarget": "docs/asset-accuracy-20261015",
+  "selection": "Include every regular file recursively unless an explicit exclusion below applies. Historical failures, raw logs, exact commands, before/after inputs, selection and ignored-case ledgers, review provenance, screenshots and helper source are retained except the exact conservatively excluded paused-WIP patch.",
+  "exclude": [
+    {
+      "rule": "exact_path_paused-wip/source-wip.patch",
+      "reason": "potential_url_userinfo: coordinator-approved conservative publication exclusion. Original cloud patch is untouched; ledger retains full-file SHA256, bytes, path and reason. Reviewable source commits remain in Git."
+    },
+    {
+      "rule": "any_path_component_is___pycache__",
+      "reason": "Generated Python bytecode cache; helper source remains included."
+    },
+    {
+      "rule": "suffix_is_pyc_or_pyo",
+      "reason": "Generated Python bytecode; helper source remains included."
+    },
+    {
+      "rule": "retained_directory_and_basename_starts_oviraptor_lib-",
+      "reason": "Retained native executable, not a test record. The associated retention proof stays included."
+    },
+    {
+      "rule": "paused-wip_source_archive",
+      "reason": "Redundant source payload archive/bundle. Paused-WIP manifests, source patch and frozen-input records stay included."
+    },
+    {
+      "rule": "nonregular_or_symlink",
+      "reason": "Never follow or archive symbolic links, devices, FIFOs, sockets or hard-link tar entries."
+    },
+    {
+      "rule": "compiled_binary_suffix_or_magic",
+      "reason": "Compiled ELF/PE/Mach-O/archive/object metadata is a cache/artifact, not evidence source. Ledger retains path/hash/bytes; PNG screenshots are not excluded."
+    }
+  ],
+  "privacy": {
+    "mode": "Offline candidate detection only. Reports contain category/path/line/file SHA256, never matched values or surrounding text. Heuristics cannot prove absence of secrets, inspect pixels, or replace review of synthetic fixtures.",
+    "finalization": "Final selected files must have zero detector candidates. A positive scan blocks packing even with a review attachment. Any conservative publication exclusion must be explicitly approved by the coordinator and recorded with original path/SHA256/bytes/reason; the cloud source is never edited or silently redacted.",
+    "screenshots": "Selected local synthetic QA PNGs are included as requested. They are not proof of native Tauri, real-provider or user-data execution; pixel privacy requires the existing local visual review or a separate reviewer attestation."
+  },
+  "consistency": "Require the selected file set and identity/size/mtime/ctime to stay unchanged across capture. Re-read and hash every selected byte during archive construction, then check the source tree again. Active writers cause failure; incomplete output is removed.",
+  "claims": "Packaging performs no application tests, provider calls, Git commits or pushes. Historical build/list records must never be relabeled runtime passes. Runtime claims remain solely in their original evidence records.",
+  "limits": {
+    "maximumArchiveBytes": 20971520,
+    "maximumIndividualEvidenceBytes": 67108864
+  },
+  "archiveSplitting": "Prefer one archive under 20 MiB. If larger, split texts.tar.gz and screenshots.tar.gz. If a category still exceeds 20 MiB, split it into independently checksummed category-01/category-02 archives using conservative 18 MiB raw-byte chunks. Every selected source file is covered exactly once across the publication set."
+}
