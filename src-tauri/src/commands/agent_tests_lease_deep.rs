@@ -26,13 +26,93 @@ fn lease_deep_full_review_signed_expiry_paid_hook_and_readonly_replay() {
     assert!(super::tests::application_table_snapshot(&db)==changed);
 }
 
+// Classify only the three original financial advisories. The faulted
+// lease-expired publication is deliberately excluded from this successful set.
+fn lease_deep_financial_assessment_count(
+    db: &rusqlite::Connection,
+    root: &str,
+    wires: &[String],
+) -> usize {
+    if db.is_autocommit() {
+        let snapshot = db.unchecked_transaction().unwrap();
+        return lease_deep_financial_assessment_count(&snapshot, root, wires);
+    }
+    let phases = followup_original_root_phase_counts(db, root, wires);
+    assert_eq!(phases.get("budget-consumption"), Some(&2));
+    assert_eq!(phases.get("http-budget-consumption"), Some(&1));
+    let advisories: Vec<(String, String, String)> = db.prepare(
+        "SELECT q.call_id,q.fact_json,p.fact_json FROM agent_root_tick_receipts q JOIN agent_root_tick_receipts p ON p.root_run_id=q.root_run_id AND p.call_id=q.call_id AND p.phase='publication' WHERE q.root_run_id=?1 AND q.phase='request' AND json_extract(q.fact_json,'$.request.basis.phase') IN ('budget-consumption','http-budget-consumption') ORDER BY q.round"
+    ).unwrap().query_map([root], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?))).unwrap()
+        .collect::<rusqlite::Result<_>>().unwrap();
+    assert_eq!(advisories.len(), 3);
+    let mut original_web_calls = std::collections::HashSet::new();
+    for (call, request, publication) in &advisories {
+        let request: JsonValue = serde_json::from_str(request).unwrap();
+        let phase = request["request"]["basis"]["phase"].as_str().unwrap();
+        let fact = &request["request"]["basis"]["changedFact"]["semantic"];
+        assert_eq!(fact["rootRunId"], root);
+        assert_eq!(fact["advisoryOnly"], true);
+        assert_eq!(fact["executionGrant"], false);
+        assert_eq!(fact["additionalScopeGranted"], false);
+        assert_eq!(fact["targetRequestsGranted"], 0);
+        let fee: (i64, i64) = db.query_row(
+            "SELECT count(*),coalesce(sum(amount),0) FROM agent_budget_entries WHERE root_run_id=?1 AND assignment_id='' AND source_id=?2 AND dimension='model_requests' AND kind='consume'",
+            params![root, call], |row| Ok((row.get(0)?, row.get(1)?)),
+        ).unwrap();
+        assert_eq!(fee, (1, 1));
+        if phase == "budget-consumption" {
+            let web_call = fact["callId"].as_str().unwrap();
+            assert!(original_web_calls.insert(web_call.to_string()));
+            let received: i64 = db.query_row(
+                "SELECT count(*) FROM agent_web_model_journal WHERE root_run_id=?1 AND call_id=?2 AND child_run_id=?3 AND phase='received'",
+                params![root, web_call, fact["childRunId"].as_str().unwrap()], |row| row.get(0),
+            ).unwrap();
+            assert_eq!(received, 1);
+            let source = format!("web-model:{}:{}:{}:receipt:{}",
+                fact["assignmentId"].as_str().unwrap(), fact["round"].as_i64().unwrap(),
+                fact["requestHash"].as_str().unwrap(), fact["responseHash"].as_str().unwrap());
+            let web_fee: (i64, i64) = db.query_row(
+                "SELECT count(*),coalesce(sum(amount),0) FROM agent_budget_entries WHERE root_run_id=?1 AND assignment_id=?2 AND lease_attempt_id=?3 AND source_id=?4 AND dimension='model_requests' AND kind='consume'",
+                params![root, fact["assignmentId"].as_str().unwrap(), fact["workerAttemptId"].as_str().unwrap(), source],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            ).unwrap();
+            assert_eq!(web_fee, (1, 1));
+        } else {
+            assert_eq!(phase, "http-budget-consumption");
+            assert_eq!(fact["targetRequests"], 1);
+            let received: i64 = db.query_row(
+                "SELECT count(*) FROM agent_http_budget_receipts WHERE root_run_id=?1 AND receipt_id=?2 AND source_id=?3 AND run_id=?4",
+                params![root, fact["receiptId"].as_str().unwrap(), fact["sourceId"].as_str().unwrap(), fact["childRunId"].as_str().unwrap()],
+                |row| row.get(0),
+            ).unwrap();
+            assert_eq!(received, 1);
+            let target_fee: Vec<(String, i64)> = db.prepare(
+                "SELECT kind,amount FROM agent_budget_entries WHERE root_run_id=?1 AND assignment_id=?2 AND lease_attempt_id=?3 AND source_id=?4 AND dimension='target_requests' ORDER BY rowid"
+            ).unwrap().query_map(params![root, fact["assignmentId"].as_str().unwrap(), fact["workerAttemptId"].as_str().unwrap(), fact["sourceId"].as_str().unwrap()],
+                |row| Ok((row.get(0)?, row.get(1)?))).unwrap().collect::<rusqlite::Result<_>>().unwrap();
+            assert_eq!(target_fee, vec![("reserve".into(), 1), ("forfeit".into(), 1), ("reconcile".into(), 1)]);
+        }
+        let publication: JsonValue = serde_json::from_str(publication).unwrap();
+        let projected = crate::agent_runtime::multi_agent::budget::root::model::tick::Tick::project_publication(
+            db, root, publication["eventSequence"].as_i64().unwrap(),
+        ).unwrap();
+        assert_eq!(projected.record["summary"]["suggestions"], json!([
+            if phase == "budget-consumption" { "assess:budget_consumption" } else { "assess:http_budget_consumption" }
+        ]));
+        assert!(projected.record.get("localTools").is_none());
+    }
+    assert_eq!(original_web_calls.len(), 2);
+    advisories.len()
+}
+
 #[test]
 fn lease_deep_ack_drift_during_actual_root_sdk_keeps_known_bill_without_publication_or_resend() {
     EXPIRE_RECEIVED_DEEP_ONCE.with(|flag| flag.set(true));
     let _fixture = followup_fixture_with_review_audit(FollowupLeaseFault::AckDrift, |context, session, db, calls, targets, outcome| {
         use crate::agent_runtime::multi_agent::budget;
         assert!(outcome.detail().contains("review_gap_investigation_failed:"), "{}", outcome.detail());
-        assert_eq!(calls.lock().unwrap().len(), 13);
+        let financial_calls = lease_deep_financial_assessment_count(db, &session.lease.root_run_id, &calls.lock().unwrap());
+        assert_eq!(calls.lock().unwrap().len() - financial_calls, 13);
         assert_eq!(targets.lock().unwrap().len(), 1);
         let root = &session.lease.root_run_id;
         let child = db.query_row(
@@ -81,7 +161,7 @@ fn lease_deep_ack_drift_during_actual_root_sdk_keeps_known_bill_without_publicat
         let paid = super::tests::application_table_snapshot(db);
         assert!(multi_agent_investigate_review_gap(context, session, &candidate, revision, &missing).is_err());
         assert!(native_coordinator_lease_expiry_feedback(context, &session.lease, &child).is_err());
-        assert_eq!(calls.lock().unwrap().len(), 13);
+        assert_eq!(calls.lock().unwrap().len() - financial_calls, 13);
         assert_eq!(targets.lock().unwrap().len(), 1);
         assert_eq!(client_delivery_rows(db, "agent_budget_entries"), fees);
         assert_eq!(super::tests::application_table_snapshot(db), paid);
@@ -139,7 +219,8 @@ fn lease_deep_publication_recovery(fault: FollowupLeaseFault) {
                 "{}",
                 outcome.detail()
             );
-            assert_eq!(calls.lock().unwrap().len(), 13);
+            let financial_calls = lease_deep_financial_assessment_count(db, &session.lease.root_run_id, &calls.lock().unwrap());
+            assert_eq!(calls.lock().unwrap().len() - financial_calls, 13);
             assert_eq!(targets.lock().unwrap().len(), 1);
             let root = &session.lease.root_run_id;
             let child = db.query_row(
@@ -215,7 +296,7 @@ fn lease_deep_publication_recovery(fault: FollowupLeaseFault) {
                 context, session, &candidate, revision, &missing
             )
             .is_err());
-            assert_eq!(calls.lock().unwrap().len(), 13);
+            assert_eq!(calls.lock().unwrap().len() - financial_calls, 13);
             assert_eq!(targets.lock().unwrap().len(), 1);
             assert_eq!(super::tests::application_table_snapshot(db), paid);
             assert_eq!(lease_deep_publication_counts(db, root, &call), (0, 0, 0, 0));
@@ -241,7 +322,7 @@ fn lease_deep_publication_recovery(fault: FollowupLeaseFault) {
                     .consumed,
                 root_cost
             );
-            assert_eq!(calls.lock().unwrap().len(), 13);
+            assert_eq!(calls.lock().unwrap().len() - financial_calls, 13);
             assert_eq!(targets.lock().unwrap().len(), 1);
             let published = super::tests::application_table_snapshot(db);
             let replay =
@@ -249,7 +330,7 @@ fn lease_deep_publication_recovery(fault: FollowupLeaseFault) {
             assert!(replay.replayed);
             assert_eq!(replay.event_sequence, recovered.event_sequence);
             assert_eq!(super::tests::application_table_snapshot(db), published);
-            assert_eq!(calls.lock().unwrap().len(), 13);
+            assert_eq!(calls.lock().unwrap().len() - financial_calls, 13);
             let proposals: i64 = db.query_row(
             "SELECT count(*) FROM agent_root_tick_receipts WHERE root_run_id=?1 AND phase='request' AND json_extract(fact_json,'$.request.basis.phase')='investigator-proposal'", [root], |row| row.get(0),
         ).unwrap();
@@ -259,7 +340,7 @@ fn lease_deep_publication_recovery(fault: FollowupLeaseFault) {
             // lease SDK. Only that new Root call may add one paid model request.
             multi_agent_investigate_review_gap(context, session, &candidate, revision, &missing)
                 .unwrap();
-            assert_eq!(calls.lock().unwrap().len(), 14);
+            assert_eq!(calls.lock().unwrap().len() - financial_calls, 14);
             assert_eq!(targets.lock().unwrap().len(), 1);
             let proposal_requests: i64 = db.query_row(
             "SELECT count(*) FROM agent_root_tick_receipts WHERE root_run_id=?1 AND phase='request' AND json_extract(fact_json,'$.request.basis.phase')='investigator-proposal'", [root], |row| row.get(0),
@@ -298,7 +379,7 @@ fn lease_deep_publication_recovery(fault: FollowupLeaseFault) {
             let complete = super::tests::application_table_snapshot(db);
             multi_agent_investigate_review_gap(context, session, &candidate, revision, &missing)
                 .unwrap();
-            assert_eq!(calls.lock().unwrap().len(), 14);
+            assert_eq!(calls.lock().unwrap().len() - financial_calls, 14);
             assert_eq!(targets.lock().unwrap().len(), 1);
             assert_eq!(super::tests::application_table_snapshot(db), complete);
         },
