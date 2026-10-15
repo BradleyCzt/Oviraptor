@@ -80,12 +80,12 @@ fn protection_paid_financial_assessment_count(
 ) -> usize {
     let added = protection_assert_original_finish_phase_delta(f, db, before);
     assert_eq!(added, 2);
-    let financial: usize = db.query_row(
+    let financial: i64 = db.query_row(
         "SELECT count(*) FROM agent_root_tick_receipts WHERE root_run_id=?1 AND phase='request' AND json_extract(fact_json,'$.request.basis.phase')='http-budget-consumption'",
         [&f.actor.root_run_id], |row| row.get(0),
     ).unwrap();
     assert_eq!(financial, 1);
-    financial
+    usize::try_from(financial).expect("the exact one original financial advisory fits usize")
 }
 
 fn protection_paid_root_calls(f: &ProtectionOriginalFixture) -> usize {
