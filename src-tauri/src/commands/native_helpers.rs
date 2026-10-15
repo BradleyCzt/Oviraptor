@@ -194,12 +194,43 @@ mod native_helper_tests {
 
     #[test]
     fn resolve_helper_node_prefers_modern_over_usr_local_v16() {
-        let runtime = std::ffi::OsString::from("/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin");
+        #[cfg(unix)]
+        let directory = std::env::temp_dir().join(format!("oviraptor-node-resolver-{}", Uuid::new_v4()));
+        #[cfg(unix)]
+        let (runtime, legacy, modern) = {
+            use std::os::unix::fs::PermissionsExt;
+            let legacy_dir = directory.join("usr local bin");
+            let modern_dir = directory.join("homebrew bin");
+            fs::create_dir_all(&legacy_dir).unwrap();
+            fs::create_dir_all(&modern_dir).unwrap();
+            let legacy = legacy_dir.join("node");
+            let modern = modern_dir.join("node");
+            for (path, version) in [(&legacy, "v16.0.0"), (&modern, "v22.0.0")] {
+                fs::write(
+                    path,
+                    format!("#!/bin/sh\n[ \"$#\" -eq 1 ] && [ \"$1\" = \"-v\" ] || exit 64\nprintf '%s\\n' '{version}'\n"),
+                ).unwrap();
+                fs::set_permissions(path, fs::Permissions::from_mode(0o700)).unwrap();
+            }
+            // Put the old executable first, as the former GUI PATH did.
+            let runtime = std::env::join_paths([&legacy_dir, &modern_dir]).unwrap();
+            (runtime, legacy, modern)
+        };
+        #[cfg(not(unix))]
+        let runtime = {
+            // Native Windows executables cannot be replaced by POSIX scripts;
+            // keep the real resolver/version check using the application's PATH.
+            let home = std::env::var_os("USERPROFILE")
+                .map(PathBuf::from)
+                .unwrap_or_else(std::env::temp_dir);
+            sentinel_runtime_path(&home)
+        };
         let chosen = resolve_helper_node(&runtime).expect("modern node");
         let version = std::process::Command::new(&chosen)
             .arg("-v")
             .output()
             .expect("node -v");
+        assert!(version.status.success(), "node -v failed for {}", chosen.display());
         let text = String::from_utf8_lossy(&version.stdout);
         let major = text
             .trim()
@@ -208,15 +239,17 @@ mod native_helper_tests {
             .next()
             .and_then(|v| v.parse::<u32>().ok())
             .unwrap_or(0);
-        assert!(major >= 18, "expected Node 18+, got {text} from {}", chosen.display());
-        if std::path::Path::new("/opt/homebrew/bin/node").is_file()
-            && std::path::Path::new("/usr/local/bin/node").is_file()
+        let minimum_major = if cfg!(unix) { 22 } else { 18 };
+        assert!(major >= minimum_major, "expected Node {minimum_major}+, got {text} from {}", chosen.display());
+        #[cfg(unix)]
         {
-            assert_eq!(
-                chosen,
-                std::path::PathBuf::from("/opt/homebrew/bin/node"),
-                "Homebrew Node must win over /usr/local Node 16"
-            );
+            assert_ne!(chosen, legacy, "Node 16 must not win over modern Node");
+            // The resolver also considers explicit overrides and installed paths;
+            // a newer host Node may legitimately beat the v22 fixture.
+            if chosen == modern {
+                assert_eq!(text.trim(), "v22.0.0");
+            }
+            fs::remove_dir_all(directory).unwrap();
         }
     }
 

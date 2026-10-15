@@ -386,6 +386,13 @@ fn q3_a_crash_after_a_closed_item_does_not_fetch_it_again() {
             "second origin",
         )],
     )]));
+    // Work items are claimed by work_key, whose shared prefix is followed by
+    // origin. Ephemeral port allocation does not preserve fixture creation order.
+    let (closed, abandoned) = if closed.origin < abandoned.origin {
+        (closed, abandoned)
+    } else {
+        (abandoned, closed)
+    };
     seed_scope(&connection, PROJECT, &format!("{}/", closed.origin), true);
     seed_scope(
         &connection,

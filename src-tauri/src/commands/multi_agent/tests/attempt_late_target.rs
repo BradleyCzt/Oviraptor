@@ -43,10 +43,16 @@ fn real_http_transport_fixture(
         contract::{AgentLane, AgentRole},
         multi_agent::scheduler,
     };
+    // The ordinary draft creator removes a trailing slash from a single URL.
+    // Bind its original Root and context to that same target; the wire request
+    // below retains the caller's full URL, including its path and query.
+    let canonical_target = target.trim().trim_matches(|character| {
+        matches!(character, '"' | '\'' | '<' | '>' | '，' | '。')
+    }).trim_end_matches('/');
     let (root, path, run_id, lease) = multi_agent_task_root_for_target_protocol(
-        "http-real-transport", 60_000, 20, target, false,
+        "http-real-transport", 60_000, 20, canonical_target, false,
     );
-    let mut context = test_context(&path, target, vec![AgentIdentity::anonymous()]);
+    let mut context = test_context(&path, canonical_target, vec![AgentIdentity::anonymous()]);
     context.scan_id = lease.scan_id.clone();
     context.external_surface = true;
     context.run = Some(AgentRunLedger { db_path: path.clone(), run_id });
