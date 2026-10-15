@@ -8,7 +8,7 @@ fn budget_clock_target_transport_contract(kind:&str) {
     }));
     let target=format!("http://127.0.0.1:{port}");
     let (root,context,mut runtime,request,lease,child,control)=match kind {
-        "http"=>{let (root,context,runtime,request)=http_journal_fixture(&target,0);
+        "http"=>{let (root,context,runtime,request)=real_http_transport_fixture(&target,0);
             (root,context,Some(runtime),Some(request),None,None,None)},
         "public"=>{let (root,mut context,lease)=public_surface_fixture(&target);let child=public_surface_child(&mut context,&lease);
             (root,context,None,None,Some(lease),Some(child),None)},

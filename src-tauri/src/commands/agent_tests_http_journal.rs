@@ -55,17 +55,18 @@ fn http_journal_claim_without_send_stays_charged_and_never_replays() {
 
 #[test]
 fn http_journal_claim_faults_rollback_and_never_send() {
-    for trigger in [
-        "CREATE TRIGGER fail_claim BEFORE INSERT ON agent_http_request_claims BEGIN SELECT RAISE(IGNORE); END;",
-        "CREATE TRIGGER fail_claim BEFORE INSERT ON agent_http_request_claims BEGIN SELECT RAISE(ABORT,'injected'); END;",
-        "CREATE TRIGGER fail_claim AFTER INSERT ON agent_http_request_claims BEGIN DELETE FROM agent_http_request_claims WHERE ordinal=NEW.ordinal; END;",
+    for (trigger, reason) in [
+        ("CREATE TRIGGER fail_claim BEFORE INSERT ON agent_http_request_claims BEGIN SELECT RAISE(IGNORE); END;", "http_journal_claim_verification_failed"),
+        ("CREATE TRIGGER fail_claim BEFORE INSERT ON agent_http_request_claims BEGIN SELECT RAISE(ABORT,'injected'); END;", "http_journal_claim_write_failed"),
+        ("CREATE TRIGGER fail_claim AFTER INSERT ON agent_http_request_claims BEGIN DELETE FROM agent_http_request_claims WHERE ordinal=NEW.ordinal; END;", "http_journal_claim_verification_failed"),
     ] {
         let (port,seen,stop) = spawn_endpoint(std::sync::Arc::new(|_| (200,"text/plain","hello".into())));
-        let (_root,context,mut runtime,request)=http_journal_fixture(&format!("http://127.0.0.1:{port}/"),0);
+        let (_root,context,mut runtime,request)=real_http_transport_fixture(&format!("http://127.0.0.1:{port}/"),0);
         let connection=db::open(&context.db_path).unwrap();
         connection.execute_batch(trigger).unwrap();
         let error=agent_http_exchange(&context,&mut runtime,&request).unwrap_err();
         assert_eq!(error["code"],"evidence_write_failed");
+        assert_eq!(error["error"],reason,"must reach the injected claim failure");
         assert_eq!(runtime.target_requests,0);
         for table in ["agent_http_request_claims","agent_http_budget_origins"] {
             let n:i64=connection.query_row(&format!("SELECT COUNT(*) FROM {table}"),[],|r|r.get(0)).unwrap();
