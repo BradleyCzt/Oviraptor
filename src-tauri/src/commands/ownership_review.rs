@@ -2861,7 +2861,7 @@ mod ownership_review_o2_tests {
         assert!(
             run.versions
                 .algorithm_version
-                .contains("o2-review-groups-v1")
+                .starts_with("o2-review-groups-v2-endpoint-host;")
                 && run.versions.algorithm_version.contains("psl-")
         );
         assert!(
@@ -3096,7 +3096,7 @@ mod ownership_review_o2_tests {
                 g(8).boundary_kind.as_str(),
                 g(8).boundary_value.as_str()
             ),
-            ("conflict", "exact_host", "10086.cn")
+            ("conflict", "exact_host", "www.10086.cn")
         );
         // CIDR 公司字段：网络线索，反证组，不当法人。
         assert_eq!(

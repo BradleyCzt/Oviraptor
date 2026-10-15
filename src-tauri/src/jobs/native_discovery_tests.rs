@@ -361,9 +361,48 @@ fn actual_collection_unions_company_and_domain_queries_without_losing_path_case(
     assert_eq!(summary["candidates"], 3);
     let (_, rows) = read_csv(&output.join("candidates.csv")).unwrap();
     assert_eq!(rows.len(), 3);
+    let expected_queries = BTreeSet::from([
+        "title=\"集团有限公司\"",
+        "body=\"集团有限公司\"",
+        "cert.subject.org=\"集团有限公司\"",
+        "host=\"example.com\"",
+        "domain=\"example.com\"",
+        "cert.domain=\"example.com\"",
+    ]);
+    let expected_sources = BTreeSet::from([
+        ("company", "集团有限公司"),
+        ("domain", "example.com"),
+    ]);
     for row in &rows {
         assert_eq!(text(row, &["company"]), "集团有限公司");
-        assert_eq!(discovery_sources(row).len(), 2);
+        let sources = discovery_sources(row);
+        // Two logical seed sources still coalesce each URL once; all six
+        // distinct query receipts survive instead of being collapsed to two.
+        assert_eq!(discovery_source_count(&sources), 2);
+        assert_eq!(text(row, &["discovery_source_count"]), "2");
+        assert_eq!(sources.len(), 6);
+        assert_eq!(
+            sources.iter().map(|source| (source["kind"].as_str().unwrap(), source["label"].as_str().unwrap())).collect::<BTreeSet<_>>(),
+            expected_sources
+        );
+        for (kind, label) in &expected_sources {
+            assert_eq!(sources.iter().filter(|source| source["kind"] == *kind && source["label"] == *label).count(), 3);
+        }
+        assert_eq!(
+            sources.iter().map(|source| source["matchedQueries"].as_str().unwrap()).collect::<BTreeSet<_>>(),
+            expected_queries
+        );
+        assert_eq!(text(row, &["matched_queries"]).split(" | ").collect::<BTreeSet<_>>(), expected_queries);
+        let request_hashes = sources.iter().map(|source| source["requestSha256"].as_str().unwrap()).collect::<BTreeSet<_>>();
+        assert_eq!(request_hashes.len(), 6);
+        assert!(request_hashes.iter().all(|hash| hash.len() == 64 && hash.bytes().all(|byte| byte.is_ascii_hexdigit())));
+        for source in &sources {
+            assert_eq!(source["page"], "1");
+            assert_eq!(source["timeStatus"], "received");
+            assert!(chrono::DateTime::parse_from_rfc3339(source["receivedAt"].as_str().unwrap()).is_ok());
+            assert_eq!(source["link"].as_str().unwrap(), text(row, &["link"]));
+        }
+        assert_eq!(text(row, &["discovery_sources_truncated"]), "false");
         assert!(text(row, &["evidence"]).contains("标题全称:集团有限公司"));
         assert!(text(row, &["evidence"]).contains("精确主机:example.com"));
     }

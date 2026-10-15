@@ -324,7 +324,7 @@ fn historical_raw_www_directory_keys_are_reused_without_deleting_or_colliding_wi
         "https://www.same.example/",
         "same.example",
     );
-    f.connection.execute_batch("INSERT INTO org_entities(id,entity_kind,legal_name,normalized_name) VALUES(700,'group','Directory Group','DirectoryGroup'),(701,'group','Other Group','OtherGroup'); INSERT INTO org_entity_identifiers(id,entity_id,kind,value,normalized_value) VALUES(700,700,'official_domain','www.same.example','same.example'),(701,700,'official_domain','www.split.example','split.example'); INSERT INTO asset_ownership_decisions(project_id,asset_id,status,confidence,source,authorization_status,exposure_eligible,reason) VALUES(91,1,'confirmed',100,'manual','allowed',1,'original approval')").unwrap();
+    f.connection.execute_batch("INSERT INTO org_directory_state(id,version) VALUES(1,1); INSERT INTO org_entities(id,entity_kind,legal_name,normalized_name,directory_version) VALUES(700,'group','Directory Group','DirectoryGroup',1),(701,'group','Other Group','OtherGroup',1); INSERT INTO org_entity_identifiers(id,entity_id,kind,value,normalized_value,directory_version) VALUES(700,700,'official_domain','www.same.example','same.example',1),(701,700,'official_domain','www.split.example','split.example',1); INSERT INTO asset_ownership_decisions(project_id,asset_id,status,confidence,source,authorization_status,exposure_eligible,reason) VALUES(91,1,'confirmed',100,'manual','allowed',1,'original approval')").unwrap();
     for _ in 0..2 {
         let saved = save_identifiers(
             &mut f.connection,
@@ -405,7 +405,7 @@ fn directory_duplicate_raw_host_aliases_do_not_invent_multiple_entities_and_shar
         "https://tenant.shared.example/",
         "shared.example",
     );
-    f.connection.execute_batch("INSERT INTO org_entities(id,entity_kind,legal_name,normalized_name) VALUES(700,'group','Directory Group','DirectoryGroup'); INSERT INTO org_entity_identifiers(entity_id,kind,value,normalized_value) VALUES(700,'official_domain','www.same.example','same.example'),(700,'official_domain','www.same.example','host-v2:www.same.example');").unwrap();
+    f.connection.execute_batch("INSERT INTO org_directory_state(id,version) VALUES(1,1); INSERT INTO org_entities(id,entity_kind,legal_name,normalized_name,directory_version) VALUES(700,'group','Directory Group','DirectoryGroup',1); INSERT INTO org_entity_identifiers(entity_id,kind,value,normalized_value,directory_version) VALUES(700,'official_domain','www.same.example','same.example',1),(700,'official_domain','www.same.example','host-v2:www.same.example',1);").unwrap();
     let saved = save_identifiers(
         &mut f.connection,
         vec![identifier(700, "shared_domain", "tenant.shared.example")],
@@ -440,7 +440,7 @@ fn directory_duplicate_raw_host_aliases_do_not_invent_multiple_entities_and_shar
 #[test]
 fn directory_ignored_unique_key_collision_is_an_error_and_rolls_back_the_whole_save() {
     let mut f = Fixture::new();
-    f.connection.execute_batch("INSERT INTO org_entities(id,entity_kind,legal_name,normalized_name) VALUES(700,'group','Directory Group','DirectoryGroup'); INSERT INTO org_entity_identifiers(entity_id,kind,value,normalized_value) VALUES(700,'official_domain','unrelated.example','host-v2:new.example');").unwrap();
+    f.connection.execute_batch("INSERT INTO org_directory_state(id,version) VALUES(1,1); INSERT INTO org_entities(id,entity_kind,legal_name,normalized_name,directory_version) VALUES(700,'group','Directory Group','DirectoryGroup',1); INSERT INTO org_entity_identifiers(entity_id,kind,value,normalized_value,directory_version) VALUES(700,'official_domain','unrelated.example','host-v2:new.example',1);").unwrap();
     let version = org_directory_version(&f.connection).unwrap();
     let changes: i64 = f
         .connection
