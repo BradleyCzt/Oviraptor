@@ -45,6 +45,7 @@ fn coordinator_wired_supervision_triggers_still_classify() {
         ("authorization-output", "child_output_envelope"),
         ("external-surface-output", "child_output_envelope"),
         ("business-logic-output", "child_output_envelope"),
+        ("business-logic-input", "business_logic_input"),
         ("mapper-output", "child_output_envelope"),
         ("client-side-output", "child_output_envelope"),
         ("identity-session-output", "child_output_envelope"),
@@ -61,14 +62,24 @@ fn coordinator_wired_supervision_triggers_still_classify() {
         };
         let trigger = NativeCoordinatorTrigger::classify(&frame).unwrap();
         assert_eq!(trigger.name(), name, "{kind}");
+        if kind == "business-logic-input" {
+            assert!(matches!(trigger, NativeCoordinatorTrigger::BusinessLogicInput));
+            assert_eq!(frame.step(), "dispatch:business_logic");
+        }
     }
 }
 
 #[test]
 fn supervision_trigger_inventory_covers_wired_and_not_ready_kinds() {
-    // Original eleven plus SDK/HTTP consumption, capability and Authorization output.
-    assert_eq!(NATIVE_WIRED_SUPERVISION_FRAME_KINDS.len(), 17);
-    assert_eq!(NATIVE_NOT_READY_SUPERVISION_FRAME_KINDS.len(), 1);
+    assert_eq!(NATIVE_WIRED_SUPERVISION_FRAME_KINDS, &[
+        "new-evidence", "lease-expired", "protection-changed", "human-directive",
+        "budget-allocation", "budget-consumption", "http-budget-consumption",
+        "capability-changed", "authorization-output", "external-surface-output",
+        "business-logic-output", "business-logic-input", "mapper-output",
+        "client-side-output", "identity-session-output", "reviewer-decision",
+        "investigator-proposal", "input-parser-output",
+    ]);
+    assert_eq!(NATIVE_NOT_READY_SUPERVISION_FRAME_KINDS, &["human-recovery"]);
     // U52: inventories must stay disjoint so admission cannot be ambiguous.
     for kind in NATIVE_WIRED_SUPERVISION_FRAME_KINDS {
         assert!(
@@ -121,6 +132,7 @@ fn supervision_frame_admission_matches_wired_and_not_ready_inventories() {
         "authorization-output",
         "external-surface-output",
         "business-logic-output",
+        "business-logic-input",
         "mapper-output",
         "client-side-output",
         "identity-session-output",
