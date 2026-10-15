@@ -60,15 +60,15 @@ export function useConversationAccess(deps: {
   async function mutate(action: (input: ConversationScope, value: ConversationAccess) => Promise<ConversationAccess>): Promise<boolean> {
     const input = scope.value, previous = access.value;
     if (!input || !previous || busy.value || loading.value || !deps.writable()) return false;
-    const generation = epoch;
-    saving.value = true; error.value = ""; request++;
+    const generation = epoch, mutation = ++request;
+    saving.value = true; error.value = "";
     try {
       const value = await action({ ...input }, previous);
-      if (!current(generation, input)) return false;
+      if (!current(generation, input) || mutation !== request) return false;
       validate(value, input); freshAccess.value = true; access.value = value; disclosureAccepted.value = value.providerDisclosureAccepted; stagedDirectory.value = "";
       return true;
     } catch (failure) {
-      if (current(generation, input)) {
+      if (current(generation, input) && mutation === request) {
         // Reconcile through a read, never replay an uncertain grant automatically.
         await refresh();
         if (current(generation, input)) error.value = String(failure);

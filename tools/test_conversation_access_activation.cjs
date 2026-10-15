@@ -8,13 +8,13 @@ const flush = async () => { for (let i = 0; i < 35; i++) await vue.nextTick(); }
 const deferred = () => { let resolve, reject; const promise = new Promise((yes, no) => { resolve = yes; reject = no; }); return { promise, resolve, reject }; };
 
 async function mount(t) {
-  const server = { recipient: 'recipient-a', skillRevision: 'skills-a', skillEnabled: true };
+  const server = { recipient: 'recipient-a', skillRevision: 'skills-a', skillEnabled: true, readAssets: true };
   const calls = [];
-  let nextAccess, nextSkills, workspace, panel, panelMounts = 0;
+  let nextAccess, nextSkills, nextMutation, workspace, panel, panelMounts = 0;
   const conversation = { id: 'a', projectId: 1, title: 'Synthetic conversation', archived: false, revision: 1,
     messageCount: 0, lastMessagePreview: '', createdAt: 'synthetic', updatedAt: 'synthetic' };
   const access = () => ({ version: 1, projectId: 1, conversationId: 'a', revision: 1,
-    agentEnabled: true, directorySupported: true, readAssets: true, readScans: false,
+    agentEnabled: true, directorySupported: true, readAssets: server.readAssets, readScans: false,
     selectedSkillIds: [1], directories: [], providerIdentity: server.recipient,
     providerLabel: `https://${server.recipient}.invalid`, skillRevision: server.skillRevision,
     skillsRequireReview: server.skillRevision !== 'skills-a' || !server.skillEnabled,
@@ -27,6 +27,9 @@ async function mount(t) {
       replyAvailability: { available: true, code: '', message: '', model: 'Synthetic model' } };
     if (name === 'getConversationAccess') { const hold = nextAccess; nextAccess = undefined; return hold ? hold.promise : access(); }
     if (name === 'listConversationAccessSkills') { const hold = nextSkills; nextSkills = undefined; return hold ? hold.promise : skills(); }
+    if (name === 'setConversationAccess' && nextMutation) {
+      const hold = nextMutation; nextMutation = undefined; server.readAssets = input.readAssets; return hold.promise;
+    }
     throw Error(`Unexpected mutation or IPC: ${String(name)}`);
   } });
   const dependencies = { './api': { conversationApi: api },
@@ -55,7 +58,8 @@ async function mount(t) {
   return { server, props, calls, access, skills,
     get workspace() { return workspace; },
     get panel() { return panel; }, get panelMounts() { return panelMounts; },
-    holdAccess() { return nextAccess = deferred(); }, holdSkills() { return nextSkills = deferred(); } };
+    holdAccess() { return nextAccess = deferred(); }, holdSkills() { return nextSkills = deferred(); },
+    holdMutation() { return nextMutation = deferred(); } };
 }
 const reads = m => m.calls.filter(([name]) => name === 'getConversationAccess');
 const writes = m => m.calls.filter(([name]) => !['listConversations', 'readConversation', 'getConversationAccess', 'listConversationAccessSkills'].includes(name));
@@ -140,4 +144,18 @@ test('failed reactivation leaves saved permissions inoperable until an explicit 
   assert.deepEqual(writes(m), []);
   await m.panel.state.refresh();
   assert.equal(m.panel.state.canRevoke.value, true);
+});
+
+test('an old permission mutation response cannot replace a newer recipient refresh', async t => {
+  const m = await mount(t), hold = m.holdMutation();
+  const oldResponse = { ...m.access(), revision: 2, readAssets: false };
+  const saving = m.panel.state.setTools({ readAssets: false });
+  m.server.recipient = 'recipient-b'; m.props.configurationRevision++; await flush();
+  assert.equal(m.panel.state.access.value.providerIdentity, 'recipient-b');
+  hold.resolve(oldResponse); await saving; await flush();
+  assert.equal(m.panel.state.access.value.providerIdentity, 'recipient-b');
+  assert.equal(m.panel.state.disclosureAccepted.value, false);
+  assert.equal(m.panel.state.access.value.readAssets, false);
+  assert.equal(m.panel.state.saving.value, false);
+  assert.equal(writes(m).length, 1);
 });
