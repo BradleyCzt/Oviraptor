@@ -31,7 +31,7 @@ fn paid_proposal_response(request: &str, invalid: bool) -> String {
     }
     changed_fact_reviewer_response(request, true)
 }
-fn paid_proposal_review(f: &mut RootTickFixture) -> MultiAgentSession {
+fn paid_proposal_review(f: &mut RootTickFixture, request_count: impl Fn() -> usize) -> MultiAgentSession {
     drop(f.parent.take());
     let mut session = multi_agent_prepare(&mut f.context).unwrap();
     stage_agent_finding(
@@ -47,6 +47,7 @@ fn paid_proposal_review(f: &mut RootTickFixture) -> MultiAgentSession {
     let original_web=run_native_agent(&f.context);
     assert!(matches!(original_web,AgentTargetOutcome::BoundedCompleted(_) | AgentTargetOutcome::Incomplete(_)),"{original_web:?}");
     multi_agent_finish_execution(&f.context, &mut session, &original_web).unwrap();
+    coordinator_finished_web_replay_spends_zero(&f.context, &mut session, &original_web, request_count);
     let db=db::open(&f.context.db_path).unwrap();
     let usage:(i64,i64,i64)=db.query_row("SELECT used_tokens,used_cached_tokens,used_requests FROM agent_runs WHERE id=?1",
         [&session.executor.run_id],|r|Ok((r.get(0)?,r.get(1)?,r.get(2)?))).unwrap();
@@ -84,17 +85,19 @@ fn coordinator_actual_closed_paid_proposal_returns_to_root_and_replay_spends_zer
         "paid-proposal-feedback", &format!("http://127.0.0.1:{port}/v1"),
         true,(60_000,20),None,web_mode_fixture("multi","https://authorized.example.test"),Some(1),
     );
-    let session = paid_proposal_review(&mut f);
+    let session = paid_proposal_review(&mut f, || seen.lock().unwrap().len());
     assert_eq!(seen.lock().unwrap().iter().filter(|wire| specialist_original_is_web_sdk(wire)).count(),1,
         "exactly one real original Web request, never a fabricated completion");
     let db = db::open(&f.context.db_path).unwrap();
+    let budget_assessment = coordinator_original_budget_assessment_count(&db, &session.lease.root_run_id, &seen.lock().unwrap(),
+        &["bootstrap", "mapper-output", "budget-allocation", "budget-consumption", "reviewer-decision", "investigator-proposal"]);
     assert_eq!(
-        seen.lock().unwrap().len(),
+        seen.lock().unwrap().len() - budget_assessment,
         9,
-        "five actual Root SDK plus Mapper/Web/Reviewer/Investigator"
+        "original dispatch/review Root SDK plus Mapper/Web/Reviewer/Investigator, excluding the separately proven budget advisory"
     );
     assert_eq!(
-        root_tick_count(&db, &session.lease.root_run_id, "publication"),
+        root_tick_count(&db, &session.lease.root_run_id, "publication") - budget_assessment as i64,
         5
     );
     assert_eq!(
@@ -105,7 +108,7 @@ fn coordinator_actual_closed_paid_proposal_returns_to_root_and_replay_spends_zer
             "model_requests"
         )
         .unwrap()
-        .consumed,
+        .consumed - budget_assessment as i64,
         5
     );
     assert_eq!(
@@ -116,7 +119,7 @@ fn coordinator_actual_closed_paid_proposal_returns_to_root_and_replay_spends_zer
             "model_requests"
         )
         .unwrap()
-        .consumed,
+        .consumed - budget_assessment as i64,
         9
     );
     let assessment: String = db
@@ -137,7 +140,7 @@ fn coordinator_actual_closed_paid_proposal_returns_to_root_and_replay_spends_zer
     let (candidate, revision, missing) = paid_proposal_candidate(&db);
     multi_agent_investigate_review_gap(&f.context, &session, &candidate, revision, &missing)
         .unwrap();
-    assert_eq!(seen.lock().unwrap().len(), 9);
+    assert_eq!(seen.lock().unwrap().len() - budget_assessment, 9);
     web_mode_assert_rows(&db, &physical);
     let requests = seen.lock().unwrap();
     let last = requests.last().unwrap();
@@ -159,7 +162,7 @@ fn coordinator_actual_closed_paid_proposal_returns_to_root_and_replay_spends_zer
     }
     assert_eq!(body["tool_choice"],"auto");
     let original: String = db.query_row(
-        "SELECT fact_json FROM agent_root_tick_receipts WHERE root_run_id=?1 AND round=5 AND phase='request'",
+        "SELECT fact_json FROM agent_root_tick_receipts WHERE root_run_id=?1 AND phase='request' AND json_extract(fact_json,'$.request.basis.phase')='investigator-proposal'",
         [&session.lease.root_run_id], |r| r.get(0),
     ).unwrap();
     let original: JsonValue = serde_json::from_str(&original).unwrap();
@@ -224,17 +227,19 @@ fn coordinator_proposal_paid_worker_mutation_rejects_publication_then_exact_rest
         true,(60_000,20),None,web_mode_fixture("multi","https://authorized.example.test"),Some(1),
     );
     *path.lock().unwrap() = Some(f.context.db_path.clone());
-    let session = paid_proposal_review(&mut f);
+    let session = paid_proposal_review(&mut f, || seen.lock().unwrap().len());
     assert_eq!(seen.lock().unwrap().iter().filter(|wire| specialist_original_is_web_sdk(wire)).count(),1,
         "exactly one real original Web request, never a fabricated completion");
     let db = db::open(&f.context.db_path).unwrap();
+    let budget_assessment = coordinator_original_budget_assessment_count(&db, &session.lease.root_run_id, &seen.lock().unwrap(),
+        &["bootstrap", "mapper-output", "budget-allocation", "budget-consumption", "reviewer-decision", "investigator-proposal"]);
     assert_eq!(
-        seen.lock().unwrap().len(),
+        seen.lock().unwrap().len() - budget_assessment,
         9,
-        "actual ninth provider response must be paid"
+        "original proposal response must be paid separately from the budget advisory"
     );
     assert_eq!(
-        root_tick_count(&db, &session.lease.root_run_id, "publication"),
+        root_tick_count(&db, &session.lease.root_run_id, "publication") - budget_assessment as i64,
         4,
         "original closed worker changed before local publication"
     );
@@ -246,7 +251,7 @@ fn coordinator_proposal_paid_worker_mutation_rejects_publication_then_exact_rest
             "model_requests"
         )
         .unwrap()
-        .consumed,
+        .consumed - budget_assessment as i64,
         5
     );
     let (id, finished) = saved.lock().unwrap().take().unwrap();
@@ -259,12 +264,12 @@ fn coordinator_proposal_paid_worker_mutation_rejects_publication_then_exact_rest
     multi_agent_investigate_review_gap(&f.context, &session, &candidate, revision, &missing)
         .unwrap();
     assert_eq!(
-        seen.lock().unwrap().len(),
+        seen.lock().unwrap().len() - budget_assessment,
         9,
         "exact original restoration recovers local publication without SDK retry"
     );
     assert_eq!(
-        root_tick_count(&db, &session.lease.root_run_id, "publication"),
+        root_tick_count(&db, &session.lease.root_run_id, "publication") - budget_assessment as i64,
         5
     );
     assert_eq!(
@@ -275,7 +280,7 @@ fn coordinator_proposal_paid_worker_mutation_rejects_publication_then_exact_rest
             "model_requests"
         )
         .unwrap()
-        .consumed,
+        .consumed - budget_assessment as i64,
         5
     );
     drop(session);
@@ -294,11 +299,13 @@ fn coordinator_proposal_root_advisory_web_step_cannot_issue_another_target_grant
         "paid-proposal-forbidden-step", &format!("http://127.0.0.1:{port}/v1"),
         true,(60_000,20),None,web_mode_fixture("multi","https://authorized.example.test"),Some(1),
     );
-    let session = paid_proposal_review(&mut f);
+    let session = paid_proposal_review(&mut f, || seen.lock().unwrap().len());
     assert_eq!(seen.lock().unwrap().iter().filter(|wire| specialist_original_is_web_sdk(wire)).count(),1,
         "exactly one real original Web request, never a fabricated completion");
     let db = db::open(&f.context.db_path).unwrap();
-    assert_eq!(seen.lock().unwrap().len(), 9);
+    let budget_assessment = coordinator_original_budget_assessment_count(&db, &session.lease.root_run_id, &seen.lock().unwrap(),
+        &["bootstrap", "mapper-output", "budget-allocation", "budget-consumption", "reviewer-decision", "investigator-proposal"]);
+    assert_eq!(seen.lock().unwrap().len() - budget_assessment, 9);
     let before = web_mode_test_rows(&db);
     let (candidate, revision, missing) = paid_proposal_candidate(&db);
     assert_eq!(
@@ -307,7 +314,7 @@ fn coordinator_proposal_root_advisory_web_step_cannot_issue_another_target_grant
         "root_proposal_step_not_bounded"
     );
     web_mode_assert_rows(&db, &before);
-    assert_eq!(seen.lock().unwrap().len(), 9);
+    assert_eq!(seen.lock().unwrap().len() - budget_assessment, 9);
     assert_eq!(
         db.query_row(
             "SELECT count(*) FROM agent_assignments WHERE role='web_executor'",

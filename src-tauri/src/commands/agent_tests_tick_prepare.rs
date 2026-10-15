@@ -5,8 +5,12 @@ fn coordinator_tick_actual_multi_prepare_uses_root_sdk_then_mapper_and_original_
         if specialist_original_is_web_sdk(&request) {
             return (200,"application/json",proposal_model_response("actual bounded Web exit; no target tool"));
         }
-        if request.contains("You are the Root Coordinator") && request.contains("budget-allocation") {
-            return (200,"application/json",changed_fact_response(&request,true));
+        if request.contains("You are the Root Coordinator") {
+            let body: JsonValue = serde_json::from_str(request.split_once("\r\n\r\n").unwrap().1).unwrap();
+            let input: JsonValue = serde_json::from_str(body["messages"][1]["content"].as_str().unwrap()).unwrap();
+            if matches!(input["basis"]["phase"].as_str(), Some("budget-allocation" | "budget-consumption")) {
+                return (200,"application/json",changed_fact_response(&request,true));
+            }
         }
         let text = if request.contains("You are the Root Coordinator") {
             if request.contains("mapper-output") {
