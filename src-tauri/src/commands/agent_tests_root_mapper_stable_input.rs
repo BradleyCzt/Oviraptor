@@ -74,9 +74,21 @@ fn coordinator_saved_mapper_reentry_ignores_derived_advice_and_preserves_origina
         &outcome,
     )
     .unwrap();
-    coordinator_finished_web_replay_spends_zero(&h.context, &mut session, &outcome,
-        || h.model_seen.lock().unwrap().len());
+    // The legacy finish entry renews only its original Coordinator lease's
+    // three time fields. Original business rows and all paid calls stay fixed.
+    let paid = root_v2_slot_legacy_replay_snapshot(&db, &session.lease);
+    let sdk = h.model_seen.lock().unwrap().len();
+    for _ in 0..2 {
+        multi_agent_finish_execution(&h.context, &mut session, &outcome).unwrap();
+        assert_eq!(root_v2_slot_legacy_replay_snapshot(&db, &session.lease), paid);
+        assert_eq!(h.model_seen.lock().unwrap().len(), sdk);
+    }
     assert!(h.site_seen.lock().unwrap().is_empty());
+    let http_rows: (i64, i64) = db.query_row(
+        "SELECT (SELECT count(*) FROM agent_http_request_claims),(SELECT count(*) FROM agent_http_budget_receipts)",
+        [], |row| Ok((row.get(0)?, row.get(1)?)),
+    ).unwrap();
+    assert_eq!(http_rows, (0, 0), "legacy Mapper recovery must remain free of HTTP claims and receipts");
     drop(session);
     drop(db);
     fs::remove_dir_all(h.root).unwrap();
