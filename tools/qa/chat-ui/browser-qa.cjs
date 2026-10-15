@@ -24,7 +24,9 @@ async function chooseChat(page){const toggle=await toggleFor(page);if(await togg
 async function collapse(page){const toggle=await toggleFor(page);if(await toggle.getAttribute('aria-expanded')==='true')await toggle.click();}
 async function openAccess(page){const panel=page.locator('.conversation-access-panel');await panel.waitFor();if(!await panel.evaluate(el=>el.open))await panel.locator('summary').click();await panel.locator('.access-mode').waitFor();return panel;}
 async function selectHistory(page,title){const toggle=await toggleFor(page);if(await toggle.getAttribute('aria-expanded')==='false')await toggle.click();await page.locator('.conversation-row').getByText(title,{exact:true}).click();await page.locator('.conversation-composer textarea').waitFor();}
-async function reloadAccess(page){await selectHistory(page,'Synthetic second conversation');await selectHistory(page,'Workspace 1 conversation');return openAccess(page);}
+async function returnToChat(page){await page.locator('.workspace-chat-module').getByRole('button',{name:'Chat',exact:true}).click();await page.locator('.conversation-workspace').waitFor({state:'visible'});return openAccess(page);}
+async function openSkills(page){await page.locator('.workspace-plugin-modules').getByRole('button',{name:'Skills',exact:true}).click();await page.locator('.skills-workspace').waitFor();}
+async function editSavedSkill(page,change){await openSkills(page);await page.locator('.skills-text-editor > summary').click();await page.locator('.skill-card-v2').filter({has:page.getByRole('heading',{name:'Synthetic saved skill',exact:true})}).getByRole('button',{name:'Edit',exact:true}).click();const editor=page.locator('.skill-editor');if(change.instructions)await editor.getByLabel('Instructions',{exact:true}).fill(change.instructions);if(change.enabled===false)await editor.getByRole('checkbox',{name:'Enabled',exact:true}).uncheck();await editor.getByRole('button',{name:'Save skill',exact:true}).click();await editor.waitFor({state:'hidden'});return returnToChat(page);}
 async function settleCapture(page){
  // Vue updates, loaded fonts and finite CSS transitions must settle before
  // judging geometry. Do not wait for the intentional infinite reply pulse.
@@ -151,23 +153,27 @@ async function scenario(name,fn){if(scenarioFilter&&!scenarioFilter.test(name))r
   await p.setViewportSize({width:390,height:844});await shot(p,'22-narrow-permissions-revoked-during-reply');assert((await fit(p)).document<=(await fit(p)).viewport+1);return m;
  });
  await scenario('12-provider-and-skill-change-requires-ui-review',async()=>{
-  const m=await pageFixture(),p=m.page;await chooseChat(p);let panel=await openAccess(p);
+  const m=await pageFixture({providerProfile:true}),p=m.page;await chooseChat(p);let panel=await openAccess(p);
   await panel.locator('.access-disclosure input').check();await panel.getByRole('switch',{name:'Allow reading project assets',exact:true}).click();
   await panel.locator('.access-skill-row').filter({hasText:'Synthetic saved skill'}).locator('input').check();
-  await p.evaluate(()=>window.__QA__.changeProvider('synthetic-recipient-b','https://provider-b.example.invalid'));
-  panel=await reloadAccess(p);
-  assert.equal(await panel.locator('.access-disclosure input').isChecked(),false,'A different recipient clears consent in the actual mounted panel');
+  await p.locator('.conversation-composer textarea').fill('Synthetic draft retained while reviewing configuration');
+  await p.locator('.sidebar-fixed-links button').last().click();await p.locator('.profile-card').filter({hasText:'Synthetic local fixture'}).getByRole('button',{name:'Edit',exact:true}).click();const profile=p.locator('.modal-card');
+  await profile.getByLabel('Cloud API Base URL',{exact:true}).fill('https://provider-b.example.invalid/v1');await profile.getByRole('button',{name:'Test model',exact:true}).click();await profile.locator('.model-test-message.passed').waitFor();await profile.getByRole('button',{name:'Save profile',exact:true}).click();await profile.waitFor({state:'hidden'});
+  panel=await returnToChat(p);await panel.locator('.access-disclosure input').waitFor();
+  assert.equal(await panel.locator('.access-disclosure input').isChecked(),false,'Saving a different recipient clears consent when returning to the same conversation');
+  assert.equal(await p.locator('.conversation-composer textarea').inputValue(),'Synthetic draft retained while reviewing configuration','Configuration navigation preserves the original composer');
+  assert.equal(await p.locator('.conversation-row.selected').getAttribute('title'),'Workspace 1 conversation','Provider review does not switch or recreate the conversation');
   assert.match(await panel.locator('.access-disclosure').textContent(),/provider-b\.example\.invalid/);
   assert.equal(await panel.getByRole('switch',{name:'Allow reading project assets',exact:true}).getAttribute('aria-checked'),'true','Saved grants remain visible while consent is inactive');
   assert.equal(await panel.getByRole('switch',{name:'Allow reading saved scan results',exact:true}).isDisabled(),true);
   await panel.locator('.access-disclosure input').check();await panel.getByRole('button',{name:'Confirm recipient and current skill content',exact:true}).click();
   await p.waitForFunction(()=>window.__QA__.access['chat-1'].acceptedProvider==='synthetic-recipient-b');
-  await p.evaluate(()=>window.__QA__.changeSkill(1));panel=await reloadAccess(p);
+  panel=await editSavedSkill(p,{instructions:'# Updated synthetic instructions\n\nReview the current project and report verified evidence only.'});await panel.locator('.access-disclosure input').waitFor();
   assert.equal(await panel.locator('.access-disclosure input').isChecked(),false,'Changed skill content also clears consent');
   assert.match(await panel.locator('.access-disclosure').textContent(),/Selected skills changed or were disabled/);
   await panel.locator('.access-disclosure input').check();await panel.getByRole('button',{name:'Confirm recipient and current skill content',exact:true}).click();
   await p.waitForFunction(()=>window.__QA__.access['chat-1'].acceptedSkills[1]===window.__QA__.skillVersions[1]);
-  await p.evaluate(()=>window.__QA__.changeSkill(1,false));panel=await reloadAccess(p);
+  panel=await editSavedSkill(p,{enabled:false});await panel.locator('.access-disclosure input').waitFor();
   const selected=panel.locator('.access-skill-row').filter({hasText:'Synthetic saved skill'}).locator('input');assert.equal(await selected.isChecked(),true);assert.equal(await selected.isDisabled(),false,'Disabled selected skills remain removable');
   await selected.uncheck();await p.waitForFunction(()=>window.__QA__.access['chat-1'].selectedSkillIds.length===0);
   await shot(p,'23-recipient-and-skill-review');
@@ -193,9 +199,14 @@ async function scenario(name,fn){if(scenarioFilter&&!scenarioFilter.test(name))r
   await preview.getByRole('button',{name:'Import package',exact:true}).click();await p.locator('.skills-library-card').waitFor();assert.equal(await preview.count(),0);assert.match(await p.locator('.skills-package').textContent(),/Synthetic imported skill/);
   await p.getByRole('button',{name:'Instructions & resources',exact:true}).click();await p.locator('.skills-resource-panel pre').waitFor();assert.match(await p.locator('.skills-resource-panel pre').textContent(),/Read project evidence/);
   await p.locator('.skills-resource-files').getByRole('button',{name:/scripts\/example\.js/}).click();await p.locator('.skills-script-notice').waitFor();assert.match(await p.locator('.skills-resource-panel pre').textContent(),/Nothing is executed/);
-  await p.getByRole('checkbox',{name:'Enable Synthetic imported skill',exact:true}).uncheck();await p.waitForFunction(()=>window.__QA__.skillPackages[0].skills[0].enabled===false);await shot(p,'26-skills-imported-read-only-resource');
-  const mutations=await p.evaluate(()=>window.__QA__.mutations);assert.deepEqual(mutations.map(call=>call.cmd),['import_skill_package','import_skill_package','set_packaged_skill_enabled']);assert.equal(mutations[0].args.input.expectedDigest,'a'.repeat(64));
-  await selectHistory(p,'Workspace 1 conversation');assert.equal(await p.locator('.conversation-workspace').isVisible(),true,'Skills manager returns to the preserved conversation');return m;
+  let panel=await returnToChat(p);const granted=()=>panel.locator('.access-skill-row').filter({hasText:'Synthetic imported skill'}).locator('input');await granted().waitFor();
+  assert.equal(await p.locator('.conversation-row.selected').getAttribute('title'),'Workspace 1 conversation','Newly imported skills appear after returning to the same conversation');
+  await panel.locator('.access-disclosure input').check();await granted().check();await p.waitForFunction(()=>window.__QA__.access['chat-1'].selectedSkillIds.includes(101));
+  await openSkills(p);
+  await p.getByRole('checkbox',{name:'Enable Synthetic imported skill',exact:true}).uncheck();await p.waitForFunction(()=>window.__QA__.skillPackages[0].skills[0].enabled===false);await p.getByRole('button',{name:'Instructions & resources',exact:true}).click();await p.locator('.skills-resource-files').getByRole('button',{name:/scripts\/example\.js/}).click();await p.locator('.skills-script-notice').waitFor();await shot(p,'26-skills-imported-read-only-resource');
+  panel=await returnToChat(p);await panel.locator('.access-disclosure input').waitFor();assert.equal(await granted().isChecked(),true);assert.equal(await granted().isDisabled(),false);assert.match(await panel.locator('.access-skills').textContent(),/Disabled/);assert.match(await panel.locator('.access-disclosure').textContent(),/Selected skills changed or were disabled/);await granted().uncheck();await p.waitForFunction(()=>window.__QA__.access['chat-1'].selectedSkillIds.length===0);
+  const mutations=await p.evaluate(()=>window.__QA__.mutations);assert.deepEqual(mutations.map(call=>call.cmd),['import_skill_package','import_skill_package','set_conversation_access','set_packaged_skill_enabled','set_conversation_access']);assert.equal(mutations[0].args.input.expectedDigest,'a'.repeat(64));
+  assert.equal(await p.locator('.conversation-workspace').isVisible(),true,'Skills manager returns to the preserved conversation');await shot(p,'27-imported-skill-revoked-in-original-chat');return m;
  });
 })().catch(error=>{console.error(error);results.push({name:'setup',status:'failed',error:String(error)});}).finally(async()=>{const browserVersion=browser?.version()??null;for(const context of contexts)await context.close().catch(()=>{});await browser?.close();if(server)await new Promise(resolve=>server.close(resolve));const manifestPath=path.join(output,'source-before.sha256');if(fs.existsSync(manifestPath)){const original=fs.readFileSync(manifestPath,'utf8');const after=original.trim().split('\n').map(line=>{const file=line.slice(66);return crypto.createHash('sha256').update(fs.readFileSync(path.join(repo,file))).digest('hex')+'  '+file}).join('\n')+'\n';fs.writeFileSync(path.join(output,'source-after-browser.sha256'),after);if(original!==after)results.push({name:'stable-source-inputs',status:'failed',error:'Application source changed during browser QA'});}
 const counts={passed:results.filter(r=>r.status==='passed').length,failed:results.filter(r=>r.status==='failed').length,runtimeErrors:results.reduce((sum,r)=>sum+(r.errors?.length??0),0),blockedRequests:results.reduce((sum,r)=>sum+(r.blocked?.length??0),0),unknownIpc:results.reduce((sum,r)=>sum+(r.state?.unknown?.length??0),0),externalFetch:results.reduce((sum,r)=>sum+(r.state?.network?.length??0),0)};

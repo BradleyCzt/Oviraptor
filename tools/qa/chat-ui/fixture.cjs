@@ -16,8 +16,10 @@ module.exports = function enhanceFixture(options = {}) {
   qa.failNextAccessWrite = false;
   qa.failNextAccessRead = false;
   qa.accessSkills = [{id:1,name:'Synthetic saved skill',description:'Metadata only until explicitly selected and read',enabled:true},{id:2,name:'Disabled synthetic skill',description:'Not available for selection',enabled:false}];
+  qa.catalogSkills=qa.accessSkills.map(skill=>({...skill,instructions:'# Synthetic instructions\n\nReview evidence within the current project.',builtin:false,createdAt:now,updatedAt:now}));
   // These are inert identities, not URLs to call or credentials to reuse.
   qa.provider = {identity:'synthetic-recipient-a',label:'https://provider-a.example.invalid'};
+  if(options.providerProfile)Object.assign(qa.profiles[0].settings,{activeModelProfileId:'synthetic-model',modelProfiles:[{id:'synthetic-model',name:'Synthetic model',llm:'synthetic-qa-model',deployment:'cloud',apiBase:'https://provider-a.example.invalid/v1',apiKey:'',localApiKey:''}]});
   qa.skillVersions = {1:1,2:1};
   const skillRevision = ids => JSON.stringify(ids.map(id=>[id,qa.accessSkills.find(skill=>skill.id===id)?.enabled?qa.skillVersions[id]??1:null]));
   const newAccess = c => {
@@ -73,11 +75,25 @@ module.exports = function enhanceFixture(options = {}) {
   Object.defineProperty(navigator,'clipboard',{configurable:true,value:{writeText:async value=>{if(qa.clipboardFail)throw Error('Synthetic clipboard rejected');qa.clipboard.push(value)}}});
   window.__TAURI_INTERNALS__.invoke=async (cmd,args={})=>{
     if(cmd==='plugin:dialog|open'){qa.calls.push({cmd,args:clone(args)});if(qa.delays[cmd])await new Promise(r=>setTimeout(r,qa.delays[cmd]));return qa.nextDirectory;}
-    if(['list_skill_packages','preview_skill_package','import_skill_package','set_packaged_skill_enabled','list_skill_package_resources','read_skill_package_resource','list_agent_instructions'].includes(cmd)){
+    if(['list_security_rule_packs','save_security_rule_pack','test_model_profile','save_config_profile'].includes(cmd)){
+      qa.calls.push({cmd,args:clone(args)});
+      if(cmd==='list_security_rule_packs')return [];
+      if(cmd==='test_model_profile')return {message:'Synthetic model test accepted in memory; no network connection was attempted'};
+      qa.mutations.push({cmd,args:clone(args)});
+      if(cmd==='save_security_rule_pack')return 1;
+      const input=args.input,profile=qa.profiles.find(item=>item.id===input.id);if(!profile)throw Error('synthetic_profile_unavailable');
+      Object.assign(profile,clone(input));const active=profile.settings.modelProfiles.find(item=>item.id===profile.settings.activeModelProfileId),url=new URL(active.apiBase);
+      qa.changeProvider(active.apiBase.includes('provider-b.example.invalid')?'synthetic-recipient-b':'synthetic-recipient-a',url.origin);return profile.id;
+    }
+    if(['list_skill_packages','preview_skill_package','import_skill_package','set_packaged_skill_enabled','list_skill_package_resources','read_skill_package_resource','list_agent_instructions','save_agent_instruction'].includes(cmd)){
       qa.calls.push({cmd,args:clone(args)});
       if(qa.delays[cmd])await new Promise(r=>setTimeout(r,qa.delays[cmd]));
       if(cmd==='list_skill_packages')return clone(qa.skillPackages);
-      if(cmd==='list_agent_instructions')return [];
+      if(cmd==='list_agent_instructions')return clone(qa.catalogSkills);
+      if(cmd==='save_agent_instruction'){
+        const skill=qa.catalogSkills.find(item=>item.id===args.input.id);if(!skill)throw Error('synthetic_skill_unavailable');
+        qa.mutations.push({cmd,args:clone(args)});Object.assign(skill,clone(args.input));Object.assign(qa.accessSkills.find(item=>item.id===skill.id),{name:skill.name,description:skill.description});qa.changeSkill(skill.id,skill.enabled);return skill.id;
+      }
       if(cmd==='preview_skill_package')return clone(qa.skillPreview);
       if(cmd==='import_skill_package'){
         if(args.input.path!==qa.nextDirectory||args.input.expectedDigest!==packageDigest)throw Error('synthetic_package_preview_changed');
